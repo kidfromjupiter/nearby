@@ -63,7 +63,7 @@ int16_t TxPowerLevelDbm(api::ble_v2::TxPowerLevel level);
 class BluezObjectManager
     : public sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {
  public:
-  explicit BluezObjectManager(sdbus::IConnection &system_bus)
+  explicit BluezObjectManager(sdbus::IConnection& system_bus)
       : ProxyInterfaces(system_bus, "org.bluez", "/") {
     registerProxy();
   }

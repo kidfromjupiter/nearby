@@ -31,12 +31,12 @@
 #include "internal/platform/implementation/linux/atomic_uint32.h"
 // #include "internal/platform/implementation/linux/ble_medium.h"
 // #include "internal/platform/implementation/linux/ble_v2_medium.h"
-// #include "internal/platform/implementation/linux/bluetooth_adapter.h"
+#include "internal/platform/implementation/linux/bluetooth_adapter.h"
 // #include "internal/platform/implementation/linux/bluetooth_classic_medium.h"
-// #include "internal/platform/implementation/linux/bluez.h"
+#include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/condition_variable.h"
 #include "internal/platform/implementation/linux/dbus.h"
-// #include "internal/platform/implementation/linux/generated/dbus/bluez/adapter_client.h"
+#include "internal/platform/implementation/linux/generated/dbus/bluez/adapter_client.h"
 #include "internal/platform/implementation/linux/mutex.h"
 #include "internal/platform/implementation/linux/preferences_manager.h"
 #include "internal/platform/implementation/linux/submittable_executor.h"
@@ -50,10 +50,7 @@
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/implementation/submittable_executor.h"
 // #include "internal/platform/implementation/wifi_hotspot.h"
-#include "ble_medium.h"
-#include "ble_v2_medium.h"
-#include "bluetooth_adapter.h"
-#include "bluez.h"
+#include "internal/platform/implementation/linux/ble_v2.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/payload_id.h"
 #include "log_message.h"
@@ -171,15 +168,14 @@ ImplementationPlatform::CreateScheduledExecutor() {
 
 std::unique_ptr<api::BluetoothAdapter>
 ImplementationPlatform::CreateBluetoothAdapter() {
-  auto manager =
-      linux::bluez::BluezObjectManager(*linux::getSystemBusConnection());
+  auto system_bus = linux::getSystemBusConnection();
+  auto manager = linux::bluez::BluezObjectManager(*system_bus);
   try {
     auto interfaces = manager.GetManagedObjects();
     for (auto &[object, properties] : interfaces) {
       if (properties.count(org::bluez::Adapter1_proxy::INTERFACE_NAME) == 1) {
         NEARBY_LOGS(INFO) << __func__ << ": found bluetooth adapter " << object;
-        return std::make_unique<linux::BluetoothAdapter>(
-            linux::getSystemBusConnection(), object);
+        return std::make_unique<linux::BluetoothAdapter>(system_bus, object);
       }
     }
   } catch (const sdbus::Error &e) {
@@ -189,7 +185,7 @@ ImplementationPlatform::CreateBluetoothAdapter() {
 
   NEARBY_LOGS(ERROR) << __func__
                      << ": couldn't find a bluetooth adapter on this system";
-  return nullptr; //TODO: implement bluetooth adapter
+  return nullptr;
 }
 
 std::unique_ptr<api::BluetoothClassicMedium>
@@ -209,7 +205,7 @@ std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(
 //
 std::unique_ptr<api::ble_v2::BleMedium>
 ImplementationPlatform::CreateBleV2Medium(api::BluetoothAdapter &adapter) {
-  return std::make_unique<linux::BleV2Medium>(adapter);
+  return std::make_unique<nearby::linux::BleV2Medium>(adapter);
 }
 
 namespace {

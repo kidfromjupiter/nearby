@@ -39,7 +39,7 @@ constexpr auto kEnableAutoReconnect =
     flags::Flag<bool>(kConfigPackage, "45427690", false);
 // Disable/Enable BLE v2 in Nearby Connections SDK.
 constexpr auto kEnableBleV2 =
-    flags::Flag<bool>(kConfigPackage, "45401515", false);
+    flags::Flag<bool>(kConfigPackage, "45401515", true);
 // Disable/Enable GATT query in thread in BLE V2.
 // Manual edit: setting this to false for ChromeOS rollout as well.
 constexpr auto kEnableGattQueryInThread =
