@@ -20,7 +20,6 @@
 #include <sdbus-c++/StandardInterfaces.h>
 #include "internal/platform/logging.h"
 
-// dbus error logging
 #define DBUS_LOG_METHOD_CALL_ERROR(p, m, e)                            \
   do {                                                                 \
     NEARBY_LOGS(ERROR) << __func__ << ": Got error '" << (e).getName() \
@@ -47,8 +46,7 @@
 
 namespace nearby {
 namespace linux {
-extern sdbus::IConnection &getSystemBusConnection();
-extern sdbus::IConnection &getDefaultBusConnection();
+extern std::shared_ptr<sdbus::IConnection> getSystemBusConnection();
 class RootObjectManager final
     : public sdbus::AdaptorInterfaces<sdbus::ObjectManager_adaptor,
                                       sdbus::Properties_adaptor> {

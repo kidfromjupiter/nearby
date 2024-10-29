@@ -39,7 +39,7 @@ static void cleanup_log_control() {
 
 static void init_log_control(std::nullptr_t) {
   global_log_control_ =
-      std::make_unique<linux::LogControl>(linux::getDefaultBusConnection());
+      std::make_unique<linux::LogControl>(*linux::getSystemBusConnection());
   atexit(cleanup_log_control);
 }
 

@@ -51,7 +51,7 @@ std::wstring FilePath::GetDownloadPath(std::wstring parent_folder,
 
 std::wstring FilePath::GetDownloadPathInternal(std::wstring parent_folder,
                                                std::wstring file_name) {
-  DeviceInfo info = DeviceInfo(linux::getSystemBusConnection());
+  DeviceInfo info = DeviceInfo(*linux::getSystemBusConnection());
 
   std::optional<std::filesystem::path> download_path = info.GetDownloadPath();
 
