@@ -65,5 +65,51 @@ class BleV2ServerSocket: public api::ble_v2::BleServerSocket
   std::unique_ptr<api::ble_v2::BleSocket> Accept() override;
   Exception Close() override;
 };
+class BleV2Medium: public api::ble_v2::BleMedium
+{
+  std::unique_ptr<AdvertisingSession>
+  StartAdvertising(const api::ble_v2::BleAdvertisementData& advertising_data,
+    api::ble_v2::AdvertiseParameters advertise_set_parameters,
+    AdvertisingCallback callback) override;
+
+  bool StopAdvertising() override;
+
+  std::unique_ptr<ScanningSession>
+  StartScanning(const Uuid& service_uuid,
+    api::ble_v2::TxPowerLevel tx_power_level,
+    ScanningCallback callback)
+  override;
+
+  bool StopScanning() override;
+
+  std::unique_ptr<api::ble_v2::GattServer>
+  StartGattServer(api::ble_v2::ServerGattConnectionCallback callback)
+  override;
+
+  std::unique_ptr<api::ble_v2::GattClient>
+  ConnectToGattServer(api::ble_v2::BlePeripheral& peripheral,
+    api::ble_v2::TxPowerLevel tx_power_level,
+    api::ble_v2::ClientGattConnectionCallback callback)
+  override;
+
+  std::unique_ptr<api::ble_v2::BleServerSocket>
+  OpenServerSocket(const std::string& service_id)
+  override;
+
+  std::unique_ptr<api::ble_v2::BleSocket>
+  Connect(const std::string& service_id,
+    api::ble_v2::TxPowerLevel tx_power_level,
+    api::ble_v2::BlePeripheral& peripheral,
+    CancellationFlag* cancellation_flag)
+  override;
+
+
+  bool IsExtendedAdvertisementsAvailable() override;
+  bool GetRemotePeripheral(const std::string &mac_address,
+                           GetRemotePeripheralCallback callback) override;
+  bool GetRemotePeripheral(api::ble_v2::BlePeripheral::UniqueId id,
+                           GetRemotePeripheralCallback callback) override;
+
+};
 }
 }
