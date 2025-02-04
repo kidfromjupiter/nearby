@@ -1,0 +1,17 @@
+{
+    "name": "Bazel Dev Container",
+    "dockerFile": "Dockerfile",
+    "settings": {
+      "terminal.integrated.defaultProfile.linux": "bash",
+      "C_Cpp.default.compilerPath": "/usr/bin/clang++"
+    },
+    "extensions": [
+      "ms-vscode.cpptools",
+      "bazelbuild.vscode-bazel",
+      "ms-vscode.cpptools-extension-pack"
+    ],
+    "mounts": [
+      "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    ],
+  }
+  
