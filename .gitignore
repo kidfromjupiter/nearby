@@ -58,3 +58,5 @@ Cargo.lock
 bazel-*
 
 .clwb
+
+.bazel_cache
