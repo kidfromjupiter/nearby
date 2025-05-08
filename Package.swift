@@ -425,6 +425,7 @@ let package = Package(
         "internal/weave/sockets/BUILD",
         "internal/platform/flags/BUILD",
         "internal/platform/implementation/shared/BUILD",
+        "internal/platform/implementation/apple/Flags/BUILD",
         "internal/platform/implementation/apple/Mediums/BUILD",
         "internal/platform/implementation/apple/Mediums/Ble/Sockets/BUILD",
         "internal/platform/implementation/apple/Tests/BUILD",
