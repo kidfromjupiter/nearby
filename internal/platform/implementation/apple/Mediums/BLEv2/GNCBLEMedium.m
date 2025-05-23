@@ -17,11 +17,15 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <Foundation/Foundation.h>
 
+#import "internal/platform/implementation/apple/Flags/GNCFeatureFlags.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEError.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTClient.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTServer.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEL2CAPClient.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEL2CAPServer.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCCentralManager.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCPeripheral.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/NSData+GNCBase85.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/NSData+GNCWebSafeBase64.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -30,6 +34,16 @@ static char *const kBLEMediumQueueLabel = "com.nearby.GNCBLEMedium";
 
 static NSError *AlreadyScanningError() {
   return [NSError errorWithDomain:GNCBLEErrorDomain code:GNCBLEErrorAlreadyScanning userInfo:nil];
+}
+
+static GNCBLEL2CAPServer *_Nonnull CreateL2CapServer(
+    id<GNCPeripheralManager> _Nullable peripheralManager) {
+  if (!peripheralManager) {
+    return [[GNCBLEL2CAPServer alloc] init];
+  } else {
+    return [[GNCBLEL2CAPServer alloc] initWithPeripheralManager:peripheralManager
+                                                          queue:dispatch_get_main_queue()];
+  }
 }
 
 @interface GNCBLEMedium () <GNCCentralManagerDelegate, CBCentralManagerDelegate>
@@ -42,8 +56,17 @@ static NSError *AlreadyScanningError() {
   // The active GATT server, or @nil if one hasn't been started yet.
   GNCBLEGATTServer *_server;
 
-  // The service that is being actively scanned for, or @c nil if not currently scanning.
-  CBUUID *_serviceUUID;
+  // The active L2CAP server, or @nil if one hasn't been started yet.
+  GNCBLEL2CAPServer *_l2capServer;
+
+  // The active L2CAP client, or @nil if one hasn't been started yet.
+  GNCBLEL2CAPClient *_l2capClient;
+
+  // The PSM number of the remote peripheral's L2CAP server.
+  uint16_t _l2capPSM;
+
+  // The services that is being actively scanned for.
+  NSMutableArray<CBUUID *> *_scanningServiceUUIDs;
 
   // The handler called when an advertisement for the service represented by @c _serviceUUID has
   // been discovered. This will be called continuously, until the peripheral disappears.
@@ -52,11 +75,18 @@ static NSError *AlreadyScanningError() {
   // A peripheral to connection completion handler map. Used to track connection attempts. When a
   // connection attempt has succeeded or failed, the completion handler is called and removed from
   // the map.
-  NSMutableDictionary<NSUUID *, GNCGATTConnectionCompletionHandler> *_connectionCompletionHandlers;
+  NSMutableDictionary<NSUUID *, GNCGATTConnectionCompletionHandler>
+      *_gattConnectionCompletionHandlers;
 
   // A peripheral to disconnection handler map. Used to track when a peripheral becomes
-  // disconnected. Once disconnected, the completion handler is called and removed from the map.
-  NSMutableDictionary<NSUUID *, GNCGATTDisconnectionHandler> *_disconnectionHandlers;
+  // disconnected. Once disconnected, the disconnection handler is called and removed from the map.
+  NSMutableDictionary<NSUUID *, GNCGATTDisconnectionHandler> *_gattDisconnectionHandlers;
+
+  // A peripheral to L2CAP stream completion handler map. Used to track L2CAP stream attempts. When
+  // a L2CAP stream attempt has succeeded or failed, the completion handler is called and removed
+  // from the map.
+  NSMutableDictionary<NSUUID *, GNCOpenL2CAPStreamCompletionHandler>
+      *_l2capStreamCompletionHandlers;
 }
 
 - (instancetype)init {
@@ -77,8 +107,11 @@ static NSError *AlreadyScanningError() {
     _queue = queue ?: dispatch_get_main_queue();
     _centralManager = centralManager;
     _centralManager.centralDelegate = self;
-    _connectionCompletionHandlers = [NSMutableDictionary dictionary];
-    _disconnectionHandlers = [NSMutableDictionary dictionary];
+    _gattConnectionCompletionHandlers = [NSMutableDictionary dictionary];
+    _gattDisconnectionHandlers = [NSMutableDictionary dictionary];
+    _scanningServiceUUIDs = [NSMutableArray array];
+    _l2capStreamCompletionHandlers = [NSMutableDictionary dictionary];
+    _l2capPSM = 0;
   }
   return self;
 }
@@ -117,15 +150,24 @@ static NSError *AlreadyScanningError() {
 - (void)startScanningForService:(CBUUID *)serviceUUID
       advertisementFoundHandler:(GNCAdvertisementFoundHandler)advertisementFoundHandler
               completionHandler:(nullable GNCStartScanningCompletionHandler)completionHandler {
+  [self startScanningForMultipleServices:@[ serviceUUID ]
+               advertisementFoundHandler:advertisementFoundHandler
+                       completionHandler:completionHandler];
+}
+
+- (void)startScanningForMultipleServices:(NSArray<CBUUID *> *)serviceUUIDs
+               advertisementFoundHandler:(GNCAdvertisementFoundHandler)advertisementFoundHandler
+                       completionHandler:
+                           (nullable GNCStartScanningCompletionHandler)completionHandler {
   dispatch_async(_queue, ^{
-    if (_serviceUUID) {
+    if (_scanningServiceUUIDs.count > 0) {
       if (completionHandler) {
         completionHandler(AlreadyScanningError());
       }
       return;
     }
 
-    _serviceUUID = serviceUUID;
+    [_scanningServiceUUIDs addObjectsFromArray:serviceUUIDs];
     _advertisementFoundHandler = advertisementFoundHandler;
 
     [self internalStartScanningIfPoweredOn];
@@ -138,9 +180,18 @@ static NSError *AlreadyScanningError() {
 - (void)stopScanningWithCompletionHandler:
     (nullable GNCStopScanningCompletionHandler)completionHandler {
   dispatch_async(_queue, ^{
-    _serviceUUID = nil;
+    [_scanningServiceUUIDs removeAllObjects];
     _advertisementFoundHandler = nil;
     [_centralManager stopScan];
+    if (completionHandler) {
+      completionHandler(nil);
+    }
+  });
+}
+
+- (void)resumeMediumScanning:(nullable GNCStartScanningCompletionHandler)completionHandler {
+  dispatch_async(_queue, ^{
+    [self internalStartScanningIfPoweredOn];
     if (completionHandler) {
       completionHandler(nil);
     }
@@ -164,10 +215,54 @@ static NSError *AlreadyScanningError() {
                        completionHandler:
                            (nullable GNCGATTConnectionCompletionHandler)completionHandler {
   dispatch_async(_queue, ^{
-    _disconnectionHandlers[remotePeripheral.identifier] = disconnectionHandler;
-    _connectionCompletionHandlers[remotePeripheral.identifier] = completionHandler;
+    _gattDisconnectionHandlers[remotePeripheral.identifier] = disconnectionHandler;
+    _gattConnectionCompletionHandlers[remotePeripheral.identifier] = completionHandler;
+    _l2capPSM = 0;
     [_centralManager connectPeripheral:remotePeripheral options:@{}];
   });
+}
+
+- (void)openL2CAPServerWithPSMPublishedCompletionHandler:
+            (GNCOpenL2CAPServerPSMPublishedCompletionHandler)psmPublishedCompletionHandler
+                          channelOpenedCompletionHandler:
+                              (GNCOpenL2CAPServerChannelOpendCompletionHandler)
+                                  channelOpenedCompletionHandler
+                                       peripheralManager:
+                                           (nullable id<GNCPeripheralManager>)peripheralManager {
+  dispatch_async(_queue, ^{
+    if (!_l2capServer) {
+      _l2capServer = CreateL2CapServer(peripheralManager);
+    }
+    [_l2capServer
+        startListeningChannelWithPSMPublishedCompletionHandler:psmPublishedCompletionHandler
+                                channelOpenedCompletionHandler:channelOpenedCompletionHandler];
+  });
+}
+
+- (void)openL2CAPChannelWithPSM:(uint16_t)psm
+                     peripheral:(id<GNCPeripheral>)remotePeripheral
+              completionHandler:(nullable GNCOpenL2CAPStreamCompletionHandler)completionHandler {
+  dispatch_async(_queue, ^{
+    if (!_l2capClient) {
+      _l2capClient =
+          [[GNCBLEL2CAPClient alloc] initWithPeripheral:remotePeripheral
+                            requestDisconnectionHandler:^(id<GNCPeripheral> _Nonnull peripheral){
+                            }];
+    }
+    _l2capStreamCompletionHandlers[remotePeripheral.identifier] = completionHandler;
+    _l2capPSM = psm;
+    // There is a Core Bluetooth problem: Either -didConnectPeripheral or
+    // -didFailToConnectPeripheral should be called at this point, but sometimes neither is
+    // called.
+    // TODO: b/419127415 - Investigate the root cause of this problem.
+    [_centralManager connectPeripheral:remotePeripheral options:@{}];
+  });
+}
+
+// This is private and should only be used for tests. The provided L2CAP client must call
+// delegate methods on the main queue.
+- (void)setL2CAPClient:(GNCBLEL2CAPClient *)l2capClient {
+  _l2capClient = l2capClient;
 }
 
 #pragma mark - Internal
@@ -178,11 +273,11 @@ static NSError *AlreadyScanningError() {
   // then back on. This will be called anytime the central manager's state changes, so
   // @c scanForPeripheralsWithServices:options: will be called anytime state transitions back to
   // powered on.
-  if (_centralManager.state == CBManagerStatePoweredOn && _serviceUUID != nil) {
+  if (_centralManager.state == CBManagerStatePoweredOn && _scanningServiceUUIDs.count > 0) {
     // Stop scanning just in case something outside of this class is already scanning.
     [_centralManager stopScan];
     [_centralManager
-        scanForPeripheralsWithServices:@[ _serviceUUID ]
+        scanForPeripheralsWithServices:_scanningServiceUUIDs
                                // Nearby relies on the existence of an advertisement for endpoint
                                // discovery/lost events, so we must set this key to keep the stream
                                // of duplicate delegate events flowing. This has adverse effect on
@@ -209,7 +304,10 @@ static NSError *AlreadyScanningError() {
   if (!localName) {
     return @{};
   }
-  NSData *data = [[NSData alloc] initWithWebSafeBase64EncodedString:localName];
+
+  NSData *data = GNCFeatureFlags.dctEnabled
+                     ? [[NSData alloc] initWithBase85EncodedString:localName]
+                     : [[NSData alloc] initWithWebSafeBase64EncodedString:localName];
 
   // A Nearby Apple advertisement should only have a single service, so simply grab the first one if
   // it exists.
@@ -220,6 +318,35 @@ static NSError *AlreadyScanningError() {
   }
 
   return @{};
+}
+
+- (void)internalOpenL2CAPChannel:(id<GNCPeripheral>)remotePeripheral {
+  dispatch_assert_queue(_queue);
+
+  __weak __typeof__(self) weakSelf = self;
+  GNCOpenL2CAPStreamCompletionHandler handler =
+      _l2capStreamCompletionHandlers[remotePeripheral.identifier];
+  _l2capStreamCompletionHandlers[remotePeripheral.identifier] = nil;
+
+  if (!handler) {
+    return;
+  }
+
+  [_l2capClient
+      openL2CAPChannelWithPSM:_l2capPSM
+            completionHandler:^(GNCBLEL2CAPStream *_Nullable stream, NSError *_Nullable error) {
+              __typeof__(self) strongSelf = weakSelf;
+              if (!strongSelf) {
+                return;
+              }
+              dispatch_async(strongSelf->_queue, ^{
+                if (error) {
+                  handler(nil, error);
+                } else {
+                  handler(stream, nil);
+                }
+              });
+            }];
 }
 
 #pragma mark - GNCCentralManagerDelegate
@@ -242,8 +369,13 @@ static NSError *AlreadyScanningError() {
 - (void)gnc_centralManager:(id<GNCCentralManager>)central
       didConnectPeripheral:(id<GNCPeripheral>)peripheral {
   dispatch_assert_queue(_queue);
-  GNCGATTConnectionCompletionHandler handler = _connectionCompletionHandlers[peripheral.identifier];
-  _connectionCompletionHandlers[peripheral.identifier] = nil;
+  if (_l2capPSM > 0) {
+    [self internalOpenL2CAPChannel:peripheral];
+    return;
+  }
+  GNCGATTConnectionCompletionHandler handler =
+      _gattConnectionCompletionHandlers[peripheral.identifier];
+  _gattConnectionCompletionHandlers[peripheral.identifier] = nil;
   if (handler) {
     GNCBLEGATTClient *client =
         [[GNCBLEGATTClient alloc] initWithPeripheral:peripheral
@@ -260,8 +392,9 @@ static NSError *AlreadyScanningError() {
     didFailToConnectPeripheral:(id<GNCPeripheral>)peripheral
                          error:(nullable NSError *)error {
   dispatch_assert_queue(_queue);
-  GNCGATTConnectionCompletionHandler handler = _connectionCompletionHandlers[peripheral.identifier];
-  _connectionCompletionHandlers[peripheral.identifier] = nil;
+  GNCGATTConnectionCompletionHandler handler =
+      _gattConnectionCompletionHandlers[peripheral.identifier];
+  _gattConnectionCompletionHandlers[peripheral.identifier] = nil;
   if (handler) {
     handler(nil, error);
   }
@@ -271,8 +404,8 @@ static NSError *AlreadyScanningError() {
     didDisconnectPeripheral:(id<GNCPeripheral>)peripheral
                       error:(nullable NSError *)error {
   dispatch_assert_queue(_queue);
-  GNCGATTDisconnectionHandler handler = _disconnectionHandlers[peripheral.identifier];
-  _disconnectionHandlers[peripheral.identifier] = nil;
+  GNCGATTDisconnectionHandler handler = _gattDisconnectionHandlers[peripheral.identifier];
+  _gattDisconnectionHandlers[peripheral.identifier] = nil;
   if (handler) {
     handler();
   }

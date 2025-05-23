@@ -29,15 +29,18 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/functional/bind_front.h"
 #include "absl/memory/memory.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "internal/platform/implementation/account_manager.h"
+#include "proto/identity/v1/resources.pb.h"
+#include "proto/identity/v1/rpcs.pb.h"
 #include "sharing/certificates/common.h"
 #include "sharing/certificates/constants.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
@@ -63,12 +66,13 @@
 #include "sharing/proto/rpc_resources.pb.h"
 #include "sharing/scheduling/nearby_share_scheduler.h"
 #include "sharing/scheduling/nearby_share_scheduler_factory.h"
-#include "google/protobuf/repeated_ptr_field.h"
 
 namespace nearby {
 namespace sharing {
 namespace {
 
+using ::google::nearby::identity::v1::QuerySharedCredentialsRequest;
+using ::google::nearby::identity::v1::QuerySharedCredentialsResponse;
 using ::nearby::sharing::api::PreferenceManager;
 using ::nearby::sharing::api::PublicCertificateDatabase;
 using ::nearby::sharing::api::SharingPlatform;
@@ -80,9 +84,8 @@ using ::nearby::sharing::proto::PublicCertificate;
 
 constexpr char kDeviceIdPrefix[] = "users/me/devices/";
 
-constexpr std::array<DeviceVisibility, 3> kVisibilities = {
+constexpr std::array<DeviceVisibility, 2> kVisibilities = {
     DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
-    DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS,
     DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE,
 };
 
@@ -105,12 +108,12 @@ size_t NumExpectedPrivateCertificates() {
 std::optional<EncryptedMetadata> BuildMetadata(
     std::string device_name, std::optional<std::string> full_name,
     std::optional<std::string> icon_url,
-    std::optional<std::string> account_name, Context* context) {
+    std::optional<std::string> account_name, int32_t vendor_id,
+    Context* context) {
   EncryptedMetadata metadata;
   if (device_name.empty()) {
-    NL_LOG(WARNING) << __func__
-                    << ": Failed to create private certificate metadata; "
-                    << "missing device name.";
+    LOG(WARNING) << "Failed to create private certificate metadata; "
+                    "missing device name.";
     return std::nullopt;
   }
 
@@ -124,6 +127,7 @@ std::optional<EncryptedMetadata> BuildMetadata(
   if (account_name.has_value()) {
     metadata.set_account_name(*account_name);
   }
+  metadata.set_vendor_id(vendor_id);
 
   auto bluetooth_mac_address = context->GetBluetoothAdapter().GetAddress();
   if (!bluetooth_mac_address) return std::nullopt;
@@ -137,8 +141,7 @@ void TryDecryptPublicCertificates(
     NearbyShareCertificateManager::CertDecryptedCallback callback, bool success,
     std::unique_ptr<std::vector<PublicCertificate>> public_certificates) {
   if (!success || !public_certificates) {
-    NL_LOG(ERROR) << __func__
-                  << ": Failed to read public certificates from storage.";
+    LOG(ERROR) << "Failed to read public certificates from storage.";
     std::move(callback)(std::nullopt);
     return;
   }
@@ -148,15 +151,13 @@ void TryDecryptPublicCertificates(
         NearbyShareDecryptedPublicCertificate::DecryptPublicCertificate(
             cert, encrypted_metadata_key);
     if (decrypted) {
-      NL_VLOG(1) << __func__
-                 << ": Successfully decrypted public certificate with ID "
-                 << nearby::utils::HexEncode(decrypted->id());
+      VLOG(1) << "Successfully decrypted public certificate with ID "
+              << nearby::utils::HexEncode(decrypted->id());
       std::move(callback)(std::move(decrypted));
       return;
     }
   }
-  NL_VLOG(1) << __func__
-             << ": Metadata key could not decrypt any public certificates.";
+  VLOG(1) << "Metadata key could not decrypt any public certificates.";
   std::move(callback)(std::nullopt);
 }
 
@@ -187,7 +188,7 @@ NearbyShareCertificateManagerImpl::Factory::Create(
     NearbyShareLocalDeviceDataManager* local_device_data_manager,
     NearbyShareContactManager* contact_manager, absl::string_view profile_path,
     nearby::sharing::api::SharingRpcClientFactory* client_factory) {
-  NL_DCHECK(context);
+  DCHECK(context);
 
   if (test_factory_) {
     return test_factory_->CreateInstance(context, local_device_data_manager,
@@ -223,6 +224,7 @@ NearbyShareCertificateManagerImpl::NearbyShareCertificateManagerImpl(
       local_device_data_manager_(local_device_data_manager),
       contact_manager_(contact_manager),
       nearby_client_(client_factory->CreateInstance()),
+      nearby_identity_client_(client_factory->CreateIdentityInstance()),
       certificate_storage_(NearbyShareCertificateStorageImpl::Factory::Create(
           preference_manager, std::move(public_certificate_database))),
       private_certificate_expiration_scheduler_(
@@ -232,10 +234,14 @@ NearbyShareCertificateManagerImpl::NearbyShareCertificateManagerImpl(
               /*retry_failures=*/true,
               /*require_connectivity=*/false,
               prefs::kNearbySharingSchedulerPrivateCertificateExpirationName,
-              [&] {
-                NL_LOG(INFO)
-                    << ": Private certificate expiration scheduler is called.";
-                OnPrivateCertificateExpiration();
+              [this]() {
+                LOG(INFO)
+                    << "Private certificate expiration scheduler is called.";
+                executor_->PostTask([this]() {
+                  private_certificate_expiration_scheduler_->HandleResult(
+                      RefreshPrivateCertificatesInExecutor(
+                          /*force_upload=*/false));
+                });
               })),
       public_certificate_expiration_scheduler_(
           NearbyShareSchedulerFactory::CreateExpirationScheduler(
@@ -244,21 +250,29 @@ NearbyShareCertificateManagerImpl::NearbyShareCertificateManagerImpl(
               /*retry_failures=*/true,
               /*require_connectivity=*/false,
               prefs::kNearbySharingSchedulerPublicCertificateExpirationName,
-              [&] {
-                NL_LOG(INFO)
+              [this]() {
+                LOG(INFO)
                     << ": Public certificate expiration scheduler is called.";
-                OnPublicCertificateExpiration();
+                executor_->PostTask([this]() {
+                  public_certificate_expiration_scheduler_->HandleResult(
+                      RemoveExpiredPublicCertificatesInExecutor());
+                });
               })),
-      upload_local_device_certificates_scheduler_(
-          NearbyShareSchedulerFactory::CreateOnDemandScheduler(
+      force_contacts_update_scheduler_(
+          NearbyShareSchedulerFactory::CreatePeriodicScheduler(
               context, preference_manager,
+              kNearbyShareLocalCertificateUploadPeriod,
               /*retry_failures=*/true,
               /*require_connectivity=*/true,
               prefs::kNearbySharingSchedulerUploadLocalDeviceCertificatesName,
-              [&] {
-                NL_LOG(INFO) << ": Upload local device certificates scheduler "
-                                "is called.";
-                UploadLocalDeviceCertificates();
+              [this]() {
+                LOG(INFO)
+                    << "Upload local device certificates scheduler is called.";
+                executor_->PostTask([this]() {
+                  force_contacts_update_scheduler_->HandleResult(
+                      UploadDeviceCertificatesInExecutor(
+                          /*force_update_contacts=*/true));
+                });
               })),
       download_public_certificates_scheduler_(
           NearbyShareSchedulerFactory::CreatePeriodicScheduler(
@@ -267,14 +281,19 @@ NearbyShareCertificateManagerImpl::NearbyShareCertificateManagerImpl(
               /*retry_failures=*/true,
               /*require_connectivity=*/true,
               prefs::kNearbySharingSchedulerDownloadPublicCertificatesName,
-              [&] {
-                NL_LOG(INFO)
-                    << ": Download public certificates scheduler is called.";
-                DownloadPublicCertificates();
+              [this]() {
+                LOG(INFO)
+                    << "Download public certificates scheduler is called.";
+                executor_->PostTask([this]() {
+                  download_public_certificates_scheduler_->HandleResult(
+                      DownloadPublicCertificatesInExecutor());
+                });
               })),
       executor_(context->CreateSequencedTaskRunner()) {
   local_device_data_manager_->AddObserver(this);
-  contact_manager_->AddObserver(this);
+  if (!UsingIdentityRpc()) {
+    contact_manager_->AddObserver(this);
+  }
 }
 
 NearbyShareCertificateManagerImpl::~NearbyShareCertificateManagerImpl() {
@@ -284,31 +303,29 @@ NearbyShareCertificateManagerImpl::~NearbyShareCertificateManagerImpl() {
 
 void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
     FetchNextPage() {
-  NL_LOG(INFO) << __func__ << ": Downloading page=" << page_number_++;
+  LOG(INFO) << "Downloading certificate page=" << page_number_++;
   ListPublicCertificatesRequest request;
   request.set_parent(device_id_);
   if (next_page_token_.has_value()) {
     request.set_page_token(*next_page_token_);
   }
   nearby_share_client_->ListPublicCertificates(
-      request, [this](
-                   const absl::StatusOr<ListPublicCertificatesResponse>&
-                       response) mutable {
+      request, [this](const absl::StatusOr<ListPublicCertificatesResponse>&
+                          response) mutable {
         if (!response.ok()) {
-          NL_LOG(WARNING) << __func__ << ": Failed to download certificates: "
-                          << response.status();
+          LOG(WARNING) << "Failed to download certificates: "
+                       << response.status();
           std::move(download_failure_callback_)();
           return;
         }
 
         certificates_.insert(certificates_.end(),
-                            response->public_certificates().begin(),
-                            response->public_certificates().end());
+                             response->public_certificates().begin(),
+                             response->public_certificates().end());
 
         if (response->next_page_token().empty()) {
-          NL_LOG(INFO) << __func__ << ": Completed to download "
-                       << certificates_.size()
-                       << " certificates from backend";
+          LOG(INFO) << "Finished downloading " << certificates_.size()
+                    << " certificates from backend";
           std::move(download_success_callback_)(certificates_);
           return;
         }
@@ -317,23 +334,84 @@ void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
       });
 }
 
-void NearbyShareCertificateManagerImpl::OnPublicCertificatesDownloadSuccess(
+bool NearbyShareCertificateManagerImpl::UsingIdentityRpc() {
+  return local_device_data_manager_->UsingIdentityRpc();
+}
+
+void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
+    QuerySharedCredentialsFetchNextPage() {
+  page_number_++;
+  LOG(INFO) << __func__
+            << ": [Call Identity API] Downloading page=" << page_number_;
+  QuerySharedCredentialsRequest request;
+  request.set_name(
+      absl::StrCat("devices/", absl::StripPrefix(device_id_, kDeviceIdPrefix)));
+  if (next_page_token_.has_value()) {
+    request.set_page_token(*next_page_token_);
+  }
+  nearby_identity_client_->QuerySharedCredentials(
+      request, [this](const absl::StatusOr<QuerySharedCredentialsResponse>&
+                          response) mutable {
+        if (!response.ok()) {
+          LOG(WARNING)
+              << __func__
+              << ": [Call Identity API] Failed to download certificates: "
+              << response.status();
+          std::move(download_failure_callback_)();
+          return;
+        }
+        for (const auto& credential : response->shared_credentials()) {
+          if (credential.data_type() !=
+              google::nearby::identity::v1::SharedCredential::
+                  DATA_TYPE_PUBLIC_CERTIFICATE) {
+            LOG(WARNING) << __func__
+                         << ": [Call Identity API] skipping non "
+                            "DATA_TYPE_PUBLIC_CERTIFICATE, credential.id: "
+                         << credential.id();
+            continue;
+          }
+          PublicCertificate certificate;
+          if (!certificate.ParseFromString(credential.data())) {
+            LOG(ERROR) << __func__
+                       << ": [Call Identity API] Failed parsing to "
+                          "PublicCertificate, credential.id: "
+                       << credential.id() << " data: "
+                       << absl::BytesToHexString(credential.data());
+            continue;
+          }
+          VLOG(1) << __func__
+                  << ": [Call Identity API] Successfully parsed credential: "
+                  << credential.id();
+          certificates_.push_back(certificate);
+        }
+
+        if (response->next_page_token().empty()) {
+          LOG(INFO) << __func__
+                    << ": [Call Identity API] Completed to download "
+                    << certificates_.size() << " certificates";
+          std::move(download_success_callback_)(certificates_);
+          return;
+        }
+        next_page_token_ = response->next_page_token();
+        QuerySharedCredentialsFetchNextPage();
+      });
+}
+
+bool NearbyShareCertificateManagerImpl::UpdatePublicCertificates(
     const std::vector<PublicCertificate>& certificates) {
   // Save certificates to store.
   absl::Notification notification;
   bool is_added_to_store = false;
   certificate_storage_->AddPublicCertificates(
-      absl::MakeSpan(certificates.data(),
-                     certificates.size()),
+      absl::MakeSpan(certificates.data(), certificates.size()),
       [&](bool success) {
         is_added_to_store = success;
         notification.Notify();
       });
   notification.WaitForNotification();
   if (!is_added_to_store) {
-    NL_LOG(ERROR) << __func__ << ": Failed to add certificates to store.";
-    OnPublicCertificatesDownloadFailure();
-    return;
+    LOG(ERROR) << "Failed to add certificates to store.";
+    return false;
   }
 
   // Succeeded to download public certificates.
@@ -341,91 +419,140 @@ void NearbyShareCertificateManagerImpl::OnPublicCertificatesDownloadSuccess(
 
   // Recompute the expiration timer to account for new certificates.
   public_certificate_expiration_scheduler_->Reschedule();
-  download_public_certificates_scheduler_->HandleResult(true);
-}
-
-void NearbyShareCertificateManagerImpl::OnPublicCertificatesDownloadFailure() {
-  download_public_certificates_scheduler_->HandleResult(false);
+  return true;
 }
 
 void NearbyShareCertificateManagerImpl::DownloadPublicCertificates() {
-  executor_->PostTask([&]() {
-    NL_LOG(INFO) << __func__ << ": Start to download certificates.";
-    if (!is_running()) {
-      NL_LOG(WARNING) << __func__
-                      << ": Ignore to download certificates due to manager is "
-                         "not running.";
-      return;
-    }
+  download_public_certificates_scheduler_->MakeImmediateRequest();
+}
 
-    if (!account_manager_.GetCurrentAccount().has_value()) {
-      NL_LOG(WARNING)
-          << __func__
-          << ": Ignore to download certificates due to no login account.";
-      download_public_certificates_scheduler_->HandleResult(/*success=*/true);
-      return;
-    }
+bool NearbyShareCertificateManagerImpl::DownloadPublicCertificatesInExecutor() {
+  LOG(INFO) << "Start to download public certificates in executor.";
+  if (!is_running()) {
+    LOG(WARNING) << "Ignore certificates download, manager is not running.";
+    return false;
+  }
 
-    // Currently certificates download is synchronous.  It completes after
-    // FetchNextPage() returns.
-    auto context = std::make_unique<CertificateDownloadContext>(
-        nearby_client_.get(),
-        kDeviceIdPrefix + local_device_data_manager_->GetId(),
-        absl::bind_front(&NearbyShareCertificateManagerImpl::
-                             OnPublicCertificatesDownloadFailure,
-                         this),
-        absl::bind_front(&NearbyShareCertificateManagerImpl::
-                             OnPublicCertificatesDownloadSuccess,
-                         this));
+  std::string device_id = local_device_data_manager_->GetId();
+  if (!account_manager_.GetCurrentAccount().has_value() || device_id.empty()) {
+    LOG(WARNING) << "Ignore certificates download, no logged in account.";
+    return true;
+  }
+
+  bool download_succeeded = false;
+  // Currently certificates download is synchronous.  It completes after
+  // FetchNextPage() returns.
+  auto context = std::make_unique<CertificateDownloadContext>(
+      nearby_client_.get(), nearby_identity_client_.get(),
+      kDeviceIdPrefix + device_id,
+      [&download_succeeded]() { download_succeeded = false; },
+      [this, &download_succeeded](
+          const std::vector<PublicCertificate>& certificates) {
+        if (VLOG_IS_ON(1)) {
+          for (const auto& certificate : certificates) {
+            VLOG(1) << "Downloaded certificate id: "
+                    << absl::BytesToHexString(certificate.secret_id());
+          }
+        }
+        download_succeeded = UpdatePublicCertificates(certificates);
+      });
+  if (UsingIdentityRpc()) {
+    context->QuerySharedCredentialsFetchNextPage();
+  } else {
     context->FetchNextPage();
+  }
+  return download_succeeded;
+}
+
+void NearbyShareCertificateManagerImpl::RegeneratePrivateCertificates() {
+  executor_->PostTask([this]() {
+    LOG(INFO) << "Regenerating private certificates in executor.";
+    certificate_storage_->ClearPrivateCertificates();
+    private_certificate_expiration_scheduler_->HandleResult(
+        RefreshPrivateCertificatesInExecutor(/*force_upload=*/false));
   });
 }
 
-void NearbyShareCertificateManagerImpl::UploadLocalDeviceCertificates() {
-  executor_->PostTask([&]() {
-    NL_LOG(INFO) << __func__ << ": Start to upload local device certificates.";
+bool NearbyShareCertificateManagerImpl::UploadDeviceCertificatesInExecutor(
+    bool force_update_contacts) {
+  LOG(INFO) << "Start to upload local device certificates in executor.";
 
-    if (!is_running()) {
-      NL_LOG(WARNING)
-          << __func__
-          << ": Ignore to upload local device certificates due to manager is "
-             "not running.";
-      return;
+  if (!is_running()) {
+    LOG(WARNING)
+        << "Ignore local device certificates upload, manager is not running.";
+    return false;
+  }
+
+  if (!account_manager_.GetCurrentAccount().has_value()) {
+    LOG(WARNING)
+        << "Ignore local device certificates upload, no logged in account.";
+    return true;
+  }
+
+  std::optional<std::vector<NearbySharePrivateCertificate>> private_certs =
+      certificate_storage_->GetPrivateCertificates();
+  if (!private_certs.has_value() || private_certs->empty()) {
+    LOG(WARNING) << "Ignore local device certificates upload, no private "
+                    "certificates found.";
+    return false;
+  }
+  std::vector<PublicCertificate> public_certs;
+  public_certs.reserve(private_certs->size());
+  for (const NearbySharePrivateCertificate& private_cert : *private_certs) {
+    std::optional<PublicCertificate> public_cert =
+        private_cert.ToPublicCertificate();
+    if (!public_cert.has_value()) {
+      LOG(WARNING) << "Failed to convert private certificate to public "
+                      "certificate.";
+      continue;
     }
+    VLOG(1) << "Uploading public certificate id: "
+            << absl::BytesToHexString(public_cert->secret_id());
+    public_certs.push_back(*public_cert);
+  }
 
-    if (!account_manager_.GetCurrentAccount().has_value()) {
-      NL_LOG(WARNING)
-          << __func__
-          << ": Ignore to upload local device certificates due to no "
-             "login account.";
-      upload_local_device_certificates_scheduler_->HandleResult(
-          /*success=*/true);
-      return;
-    }
-
-    std::vector<PublicCertificate> public_certs;
-    std::vector<NearbySharePrivateCertificate> private_certs =
-        *certificate_storage_->GetPrivateCertificates();
-    public_certs.reserve(private_certs.size());
-    for (const NearbySharePrivateCertificate& private_cert : private_certs) {
-      public_certs.push_back(*private_cert.ToPublicCertificate());
-    }
-
-    NL_LOG(INFO) << __func__ << ": Uploading " << public_certs.size()
-                 << " local device certificates.";
-    bool upload_certificates_result = false;
-    absl::Notification notification;
-    local_device_data_manager_->UploadCertificates(
-        std::move(public_certs), [&](bool success) {
-          upload_certificates_result = success;
+  LOG(INFO) << "Uploading " << public_certs.size()
+            << " local device certificates.";
+  bool upload_certificates_succeeded = false;
+  bool regenerate_certificates = false;
+  absl::Notification notification;
+  if (local_device_data_manager_->UsingIdentityRpc()) {
+    LOG(INFO) << __func__ << ": [Call Identity API] PublishDevice: upload "
+              << public_certs.size()
+              << " local device certificates, force_update_contacts = "
+              << force_update_contacts;
+    local_device_data_manager_->PublishDevice(
+        std::move(public_certs), force_update_contacts,
+        [&upload_certificates_succeeded, &regenerate_certificates,
+         &notification](bool success, bool contact_removed) {
+          upload_certificates_succeeded = success;
+          regenerate_certificates = contact_removed;
           notification.Notify();
         });
-    notification.WaitForNotification();
-    NL_LOG(INFO) << __func__ << ": Upload of local device certificates "
-                 << (upload_certificates_result ? "succeeded" : "failed.");
-    upload_local_device_certificates_scheduler_->HandleResult(
-        upload_certificates_result);
-  });
+  } else {
+    LOG(INFO) << __func__
+              << ": [Call NearbyShare API] UploadCertificates: upload"
+              << public_certs.size() << " local device certificates.";
+    local_device_data_manager_->UploadCertificates(
+        std::move(public_certs), [&](bool success) {
+          upload_certificates_succeeded = success;
+          notification.Notify();
+        });
+  }
+  notification.WaitForNotification();
+  LOG(INFO) << "Upload local device certificates "
+            << (upload_certificates_succeeded ? "succeeded" : "failed")
+            << " contact_removed = " << regenerate_certificates;
+  if (!upload_certificates_succeeded) {
+    return false;
+  }
+  if (regenerate_certificates && UsingIdentityRpc()) {
+    LOG(INFO) << __func__
+              << ": [Call Identity API] Another call to PublishDevice after "
+                 "regenerating all Private certificates: ";
+    RegeneratePrivateCertificates();
+  }
+  return true;
 }
 
 std::vector<PublicCertificate>
@@ -456,14 +583,14 @@ void NearbyShareCertificateManagerImpl::ClearPublicCertificates(
 void NearbyShareCertificateManagerImpl::OnStart() {
   private_certificate_expiration_scheduler_->Start();
   public_certificate_expiration_scheduler_->Start();
-  upload_local_device_certificates_scheduler_->Start();
+  force_contacts_update_scheduler_->Start();
   download_public_certificates_scheduler_->Start();
 }
 
 void NearbyShareCertificateManagerImpl::OnStop() {
   private_certificate_expiration_scheduler_->Stop();
   public_certificate_expiration_scheduler_->Stop();
-  upload_local_device_certificates_scheduler_->Stop();
+  force_contacts_update_scheduler_->Stop();
   download_public_certificates_scheduler_->Stop();
 }
 
@@ -492,9 +619,8 @@ NearbyShareCertificateManagerImpl::GetValidPrivateCertificate(
     }
   }
 
-  NL_LOG(WARNING) << __func__
-                  << ": No valid private certificate found with visibility "
-                  << static_cast<int>(visibility);
+  LOG(WARNING) << "No valid private certificate found with visibility "
+               << static_cast<int>(visibility);
   return std::nullopt;
 }
 
@@ -506,42 +632,56 @@ void NearbyShareCertificateManagerImpl::UpdatePrivateCertificateInStorage(
 void NearbyShareCertificateManagerImpl::OnContactsDownloaded(
     const std::vector<nearby::sharing::proto::ContactRecord>& contacts,
     uint32_t num_unreachable_contacts_filtered_out) {
-  NL_LOG(INFO) << __func__ << ": Contacts downloaded.";
+  LOG(INFO) << "Contacts downloaded.";
 }
 
 void NearbyShareCertificateManagerImpl::OnContactsUploaded(
     bool did_contacts_change_since_last_upload) {
-  executor_->PostTask([&, did_contacts_change_since_last_upload]() {
-    NL_LOG(INFO) << __func__ << ": Handle to Contacts uploaded.";
-    if (!did_contacts_change_since_last_upload) return;
-
-    // If any of the uploaded contact data - the contact list or the allowlist -
-    // has changed since the previous successful upload, recreate certificates.
-    // We do not want to continue using the current certificates because they
-    // might have been shared with contacts no longer on the contact list or
-    // allowlist. NOTE: Ideally, we would only recreate all-contacts visibility
-    // certificates when contacts are removed from the contact list, and we
-    // would only recreate selected-contacts visibility certificates when
-    // contacts are removed from the allowlist, but our information is not that
-    // granular.
-    certificate_storage_->ClearPrivateCertificates();
-    private_certificate_expiration_scheduler_->MakeImmediateRequest();
-  });
+  LOG(INFO) << "Handle Contacts uploaded.";
+  if (!did_contacts_change_since_last_upload) {
+    LOG(INFO) << "Contacts not changed since last upload.";
+    return;
+  }
+  // If any of the uploaded contact data - the contact list or the allowlist -
+  // has changed since the previous successful upload, recreate certificates.
+  // We do not want to continue using the current certificates because they
+  // might have been shared with contacts no longer on the contact list or
+  // allowlist. NOTE: Ideally, we would only recreate all-contacts visibility
+  // certificates when contacts are removed from the contact list, and we
+  // would only recreate selected-contacts visibility certificates when
+  // contacts are removed from the allowlist, but our information is not that
+  // granular.
+  RegeneratePrivateCertificates();
 }
 
 void NearbyShareCertificateManagerImpl::OnLocalDeviceDataChanged(
     bool did_device_name_change, bool did_full_name_change,
     bool did_icon_change) {
-  executor_->PostTask([&, did_device_name_change, did_full_name_change,
-                       did_icon_change]() {
-    NL_LOG(INFO) << __func__ << ": Handle to local device data changed.";
-    if (!did_device_name_change && !did_full_name_change && !did_icon_change)
-      return;
+  LOG(INFO) << "Handle local device data changed.";
+  if (!did_device_name_change && !did_full_name_change && !did_icon_change)
+    return;
+  // Recreate all private certificates to ensure up-to-date metadata.
+  RegeneratePrivateCertificates();
+}
 
-    // Recreate all private certificates to ensure up-to-date metadata.
-    certificate_storage_->ClearPrivateCertificates();
-    private_certificate_expiration_scheduler_->MakeImmediateRequest();
-  });
+void NearbyShareCertificateManagerImpl::SetVendorId(int32_t vendor_id) {
+  LOG(INFO) << "Setting certificate vendor ID to " << vendor_id;
+  vendor_id_ = vendor_id;
+
+  auto certificate = GetValidPrivateCertificate(
+      proto::DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
+  auto self_certificate = GetValidPrivateCertificate(
+      proto::DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE);
+  if (certificate.has_value() && self_certificate.has_value()) {
+    if (certificate->unencrypted_metadata().vendor_id() == vendor_id_ &&
+        self_certificate->unencrypted_metadata().vendor_id() == vendor_id_) {
+      LOG(INFO) << "Requested vendor ID is already set in latest valid private "
+                   "certificates. Skipping certificate refresh.";
+      return;
+    }
+  }
+  // Recreate all private certificates to ensure up-to-date metadata.
+  RegeneratePrivateCertificates();
 }
 
 std::string NearbyShareCertificateManagerImpl::Dump() const {
@@ -573,12 +713,19 @@ std::string NearbyShareCertificateManagerImpl::Dump() const {
 
 std::optional<absl::Time>
 NearbyShareCertificateManagerImpl::NextPrivateCertificateExpirationTime() {
+  std::optional<AccountManager::Account> account =
+      account_manager_.GetCurrentAccount();
+  // If the user is not logged in, there are no certs and we don't need to check
+  // for expiration.
+  if (!account.has_value()) {
+    return std::nullopt;
+  }
   // We enforce that a fixed number--kNearbyShareNumPrivateCertificates for each
-  // visibility--of private certificates be present at all times. This might not
-  // be true the first time the user enables Nearby Share or after certificates
-  // are revoked. For simplicity, consider the case of missing certificates an
-  // "expired" state. Return the minimum time to immediately trigger the private
-  // certificate creation flow.
+  // visibility--of private certificates be present when user is logged in.
+  // This might not be true the first time the user enables Nearby Share or
+  // after certificates are revoked. For simplicity, consider the case of
+  // missing certificates an "expired" state. Return the minimum time to
+  // immediately trigger the private certificate creation flow.
   if (certificate_storage_->GetPrivateCertificates()->size() <
       NumExpectedPrivateCertificates()) {
     return absl::InfinitePast();
@@ -586,95 +733,118 @@ NearbyShareCertificateManagerImpl::NextPrivateCertificateExpirationTime() {
 
   std::optional<absl::Time> expiration_time =
       certificate_storage_->NextPrivateCertificateExpirationTime();
-  NL_DCHECK(expiration_time);
+  DCHECK(expiration_time);
 
   return *expiration_time;
 }
 
-void NearbyShareCertificateManagerImpl::OnPrivateCertificateExpiration() {
-  NL_VLOG(1)
-      << __func__
-      << ": Private certificate expiration detected; refreshing certificates.";
+bool NearbyShareCertificateManagerImpl::RefreshPrivateCertificatesInExecutor(
+    bool force_upload) {
+  LOG(INFO) << "Refreshing private certificates in executor.";
+  absl::Time now = context_->GetClock()->Now();
+  certificate_storage_->RemoveExpiredPrivateCertificates(now);
 
-  FinishPrivateCertificateRefresh();
+  std::optional<AccountManager::Account> account =
+      account_manager_.GetCurrentAccount();
+  if (!account.has_value()) {
+    LOG(INFO) << "Not logged in on refreshing private certificates, ignoring";
+    return true;
+    ;
+  }
+
+  std::vector<NearbySharePrivateCertificate> certs =
+      *certificate_storage_->GetPrivateCertificates();
+  if (certs.size() == NumExpectedPrivateCertificates()) {
+    LOG(INFO) << "All private certificates are still valid. ";
+    if (force_upload) {
+      LOG(INFO) << "Force upload private certificates and update contacts.";
+      force_contacts_update_scheduler_->MakeImmediateRequest();
+    }
+    return true;
+  }
+
+  // Determine how many private certificates of each visibility need to be
+  // created, and determine the validity period for the new certificates.
+  absl::flat_hash_map<DeviceVisibility, size_t> num_valid_certs;
+  absl::flat_hash_map<DeviceVisibility, absl::Time> latest_not_after;
+  for (DeviceVisibility visibility : kVisibilities) {
+    num_valid_certs[visibility] = 0;
+    latest_not_after[visibility] = now;
+  }
+  for (const NearbySharePrivateCertificate& cert : certs) {
+    ++num_valid_certs[cert.visibility()];
+    latest_not_after[cert.visibility()] =
+        std::max(latest_not_after[cert.visibility()], cert.not_after());
+  }
+
+  std::optional<std::string> email =
+      account.has_value()
+          ? account->email
+          : static_cast<std::optional<std::string>>(std::nullopt);
+
+  std::optional<std::string> icon_url =
+      account.has_value()
+          ? (account->picture_url.empty()
+                 ? static_cast<std::optional<std::string>>(std::nullopt)
+                 : account->picture_url)
+          : static_cast<std::optional<std::string>>(std::nullopt);
+
+  std::optional<std::string> full_name =
+      account.has_value()
+          ? (account->display_name.empty()
+                 ? static_cast<std::optional<std::string>>(std::nullopt)
+                 : account->display_name)
+          : static_cast<std::optional<std::string>>(std::nullopt);
+
+  std::optional<EncryptedMetadata> metadata =
+      BuildMetadata(local_device_data_manager_->GetDeviceName(), full_name,
+                    icon_url, email, vendor_id_, context_);
+
+  if (!metadata.has_value()) {
+    LOG(WARNING)
+        << "Failed to create private certificates; cannot create metadata";
+    return false;
+  }
+
+  // Add new certificates if necessary. Each visibility should have
+  // kNearbyShareNumPrivateCertificates.
+  LOG(INFO)
+      << "Creating "
+      << kNearbyShareNumPrivateCertificates -
+             num_valid_certs[DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS]
+      << " all-contacts visibility, "
+      << kNearbyShareNumPrivateCertificates -
+             num_valid_certs[DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE]
+      << " self-share visibility, ";
+
+  for (DeviceVisibility visibility : kVisibilities) {
+    while (num_valid_certs[visibility] < kNearbyShareNumPrivateCertificates) {
+      certs.emplace_back(visibility,
+                         /*not_before=*/latest_not_after[visibility],
+                         *metadata);
+      ++num_valid_certs[visibility];
+      latest_not_after[visibility] = certs.back().not_after();
+    }
+  }
+
+  certificate_storage_->ReplacePrivateCertificates(
+      absl::MakeSpan(certs.data(), certs.size()));
+  NotifyPrivateCertificatesChanged();
+  // force_contacts_update_scheduler_ should only be updated if
+  // force_update_contacts is true, otherwise we could miss the 24hr contact
+  // update window.
+  if (force_upload) {
+    force_contacts_update_scheduler_->MakeImmediateRequest();
+  } else {
+    UploadDeviceCertificatesInExecutor(/*force_update_contacts=*/false);
+  }
+  return true;
 }
 
-void NearbyShareCertificateManagerImpl::FinishPrivateCertificateRefresh() {
-  executor_->PostTask([&]() {
-    NL_LOG(INFO) << __func__ << ": Refresh private certificates.";
-    absl::Time now = context_->GetClock()->Now();
-    certificate_storage_->RemoveExpiredPrivateCertificates(now);
-
-    std::vector<NearbySharePrivateCertificate> certs =
-        *certificate_storage_->GetPrivateCertificates();
-    if (certs.size() == NumExpectedPrivateCertificates()) {
-      NL_VLOG(1) << __func__ << ": All private certificates are still valid.";
-      private_certificate_expiration_scheduler_->HandleResult(/*success=*/true);
-      return;
-    }
-
-    // Determine how many private certificates of each visibility need to be
-    // created, and determine the validity period for the new certificates.
-    absl::flat_hash_map<DeviceVisibility, size_t> num_valid_certs;
-    absl::flat_hash_map<DeviceVisibility, absl::Time> latest_not_after;
-    for (DeviceVisibility visibility : kVisibilities) {
-      num_valid_certs[visibility] = 0;
-      latest_not_after[visibility] = now;
-    }
-    for (const NearbySharePrivateCertificate& cert : certs) {
-      ++num_valid_certs[cert.visibility()];
-      latest_not_after[cert.visibility()] =
-          std::max(latest_not_after[cert.visibility()], cert.not_after());
-    }
-
-    std::optional<AccountManager::Account> account =
-        account_manager_.GetCurrentAccount();
-    std::optional<std::string> email =
-        account.has_value()
-            ? account->email
-            : static_cast<std::optional<std::string>>(std::nullopt);
-
-    std::optional<EncryptedMetadata> metadata = BuildMetadata(
-        local_device_data_manager_->GetDeviceName(),
-        local_device_data_manager_->GetFullName(),
-        local_device_data_manager_->GetIconUrl(), email, context_);
-    if (!metadata.has_value()) {
-      NL_LOG(WARNING)
-          << __func__
-          << "Failed to create private certificates; cannot create metadata";
-      private_certificate_expiration_scheduler_->HandleResult(
-          /*success=*/false);
-      return;
-    }
-
-    // Add new certificates if necessary. Each visibility should have
-    // kNearbyShareNumPrivateCertificates.
-    NL_LOG(INFO)
-        << __func__ << ": Creating "
-        << kNearbyShareNumPrivateCertificates -
-               num_valid_certs[DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS]
-        << " all-contacts visibility and "
-        << kNearbyShareNumPrivateCertificates -
-               num_valid_certs
-                   [DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS]
-        << " selected-contacts visibility private certificates.";
-
-    for (DeviceVisibility visibility : kVisibilities) {
-      while (num_valid_certs[visibility] < kNearbyShareNumPrivateCertificates) {
-        certs.emplace_back(visibility,
-                           /*not_before=*/latest_not_after[visibility],
-                           *metadata);
-        ++num_valid_certs[visibility];
-        latest_not_after[visibility] = certs.back().not_after();
-      }
-    }
-
-    certificate_storage_->ReplacePrivateCertificates(
-        absl::MakeSpan(certs.data(), certs.size()));
-    NotifyPrivateCertificatesChanged();
-    private_certificate_expiration_scheduler_->HandleResult(/*success=*/true);
-
-    upload_local_device_certificates_scheduler_->MakeImmediateRequest();
+void NearbyShareCertificateManagerImpl::ForceUploadPrivateCertificates() {
+  executor_->PostTask([this]() {
+    private_certificate_expiration_scheduler_->HandleResult(
+        RefreshPrivateCertificatesInExecutor(/*force_upload=*/true));
   });
 }
 
@@ -693,23 +863,21 @@ NearbyShareCertificateManagerImpl::NextPublicCertificateExpirationTime() {
          kNearbySharePublicCertificateValidityBoundOffsetTolerance;
 }
 
-void NearbyShareCertificateManagerImpl::OnPublicCertificateExpiration() {
-  executor_->PostTask([&]() {
-    NL_LOG(INFO) << __func__ << ": Removing expired public certificates.";
-    absl::Notification notification;
-    bool result = false;
-    certificate_storage_->RemoveExpiredPublicCertificates(
-        context_->GetClock()->Now(), [&](bool success) {
-          result = success;
-          notification.Notify();
-        });
-    notification.WaitForNotification();
-    if (!result) {
-      NL_LOG(ERROR) << __func__
-                    << ": Failed to remove expired public certificates.";
-    }
-    public_certificate_expiration_scheduler_->HandleResult(result);
-  });
+bool NearbyShareCertificateManagerImpl::
+    RemoveExpiredPublicCertificatesInExecutor() {
+  LOG(INFO) << "Removing expired public certificates in executor.";
+  absl::Notification notification;
+  bool result = false;
+  certificate_storage_->RemoveExpiredPublicCertificates(
+      context_->GetClock()->Now(), [&](bool success) {
+        result = success;
+        notification.Notify();
+      });
+  notification.WaitForNotification();
+  if (!result) {
+    LOG(ERROR) << "Failed to remove expired public certificates.";
+  }
+  return result;
 }
 
 }  // namespace sharing

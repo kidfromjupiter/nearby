@@ -27,7 +27,6 @@
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
-#include "sharing/common/nearby_share_enums.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
 namespace nearby {
@@ -119,12 +118,22 @@ class NearbyShareCertificateManager {
   // OnPublicCertificatesDownloaded().
   virtual void DownloadPublicCertificates() = 0;
 
+  // Checks the expiration of the private certificates and Refreshes if needed,
+  // then upload to the server and refresh the contacts list.
+  virtual void ForceUploadPrivateCertificates() = 0;
+
   // Clears all public certificates. when account logout,the public certificates
   // should be cleared.
   virtual void ClearPublicCertificates(std::function<void(bool)> callback) = 0;
 
+  // Sets the vendor ID to generate certificates for.
+  virtual void SetVendorId(int32_t vendor_id) = 0;
+
   // Dump certificates ID information for troubleshooting.
   virtual std::string Dump() const = 0;
+
+  // Returns true if configured to use Identity RPC.
+  virtual bool UsingIdentityRpc() = 0;
 
  protected:
   virtual void OnStart() = 0;

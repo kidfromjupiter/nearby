@@ -15,7 +15,6 @@
 #include "sharing/nearby_sharing_settings.h"
 
 #include <cstdint>
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <memory>
 #include <ostream>
@@ -30,7 +29,6 @@
 #include "internal/platform/device_info.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/analytics/analytics_recorder.h"
-#include "sharing/common/compatible_u8_string.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/common/nearby_share_prefs.h"
 #include "sharing/internal/api/preference_manager.h"
@@ -89,7 +87,7 @@ NearbyShareSettings::NearbyShareSettings(
                  std::weak_ptr<bool>(is_desctructing_)](absl::string_view key) {
         std::shared_ptr<bool> is_desctructing = desctructing.lock();
         if (is_desctructing == nullptr || *is_desctructing) {
-          NL_LOG(WARNING) << ": Ignore the preferences change callback.";
+          LOG(WARNING) << ": Ignore the preferences change callback.";
           return;
         }
 
@@ -140,12 +138,12 @@ DataUsage NearbyShareSettings::GetDataUsage() const {
 
 void NearbyShareSettings::StartVisibilityTimer(
     absl::Duration expiration) {
-  NL_LOG(INFO) << __func__
-               << ": start visibility timer. expiration=" << expiration;
+  LOG(INFO) << __func__
+            << ": start visibility timer. expiration=" << expiration;
   visibility_expiration_timer_ = std::make_unique<ThreadTimer>(
       *context_->GetTaskRunner(), "nearby_share_settings_visibility_timer",
       expiration, [this]() {
-        NL_LOG(INFO) << __func__ << ": visibility timer expired.";
+        LOG(INFO) << __func__ << ": visibility timer expired.";
         proto::DeviceVisibility visibility;
         {
           absl::MutexLock lock(&mutex_);
@@ -167,25 +165,25 @@ void NearbyShareSettings::RestoreFallbackVisibility() {
   int64_t now_seconds = absl::ToUnixSeconds(clock_->Now());
   int64_t remaining_seconds = expiration_seconds - now_seconds;
   int64_t diff = kMaxVisibilityExpirationSeconds - remaining_seconds;
-  NL_LOG(INFO) << __func__ << ": diff=" << diff << ", now=" << now_seconds
-               << ", expiration=" << expiration_seconds
-               << ", max=" << kMaxVisibilityExpirationSeconds;
+  LOG(INFO) << __func__ << ": diff=" << diff << ", now=" << now_seconds
+            << ", expiration=" << expiration_seconds
+            << ", max=" << kMaxVisibilityExpirationSeconds;
   if (remaining_seconds > 0 &&
       remaining_seconds <= kMaxVisibilityExpirationSeconds) {  // Not expired
     StartVisibilityTimer(absl::Seconds(remaining_seconds));
   } else if (expiration_seconds != 0) {  // Expired.
-    NL_LOG(INFO) << __func__
-                 << ": timer is already expired. Restore fallback visibility.";
+    LOG(INFO) << __func__
+              << ": timer is already expired. Restore fallback visibility.";
     SetVisibility(static_cast<DeviceVisibility>(fallback_visibility));
   } else {
-    NL_LOG(INFO) << __func__ << ": No running fallback Visibility.";
+    LOG(INFO) << __func__ << ": No running fallback Visibility.";
   }
 }
 
 std::string NearbyShareSettings::GetCustomSavePath() const {
   return preference_manager_.GetString(
       prefs::kNearbySharingCustomSavePath,
-      GetCompatibleU8String(device_info_.GetDownloadPath().u8string()));
+      device_info_.GetDownloadPath().ToString());
 }
 
 bool NearbyShareSettings::IsDisabledByPolicy() const { return false; }
@@ -270,15 +268,15 @@ void NearbyShareSettings::SetVisibility(DeviceVisibility visibility,
         last_visibility, visibility, absl::ToInt64Milliseconds(expiration));
   }
 
-  NL_VLOG(1) << __func__
-             << ": set visibility. visibility=" << static_cast<int>(visibility)
-             << ", expiration=" << expiration;
+  VLOG(1) << __func__
+          << ": set visibility. visibility=" << static_cast<int>(visibility)
+          << ", expiration=" << expiration;
   visibility_expiration_timer_.reset();
 
   SetFallbackVisibility(last_visibility);
   absl::Time now = clock_->Now();
   if (expiration != absl::ZeroDuration()) {
-    NL_VLOG(1) << __func__ << ": temporary visibility timer starts.";
+    VLOG(1) << __func__ << ": temporary visibility timer starts.";
     absl::Time fallback_visibility_timestamp = now + expiration;
     preference_manager_.SetInteger(
         prefs::kNearbySharingBackgroundVisibilityExpirationSeconds,
@@ -326,17 +324,17 @@ NearbyShareSettings::GetFallbackVisibility() const {
       visibility_expiration_timer_->IsRunning()) {
     result = GetRawFallbackVisibility();
   }
-  NL_VLOG(1) << __func__ << ": get fallback visibility "
-             << static_cast<int>(result.visibility)
-             << " expiration: " << result.fallback_time;
+  VLOG(1) << __func__ << ": get fallback visibility "
+          << static_cast<int>(result.visibility)
+          << " expiration: " << result.fallback_time;
   return result;
 }
 
 void NearbyShareSettings::SetFallbackVisibility(DeviceVisibility visibility) {
-  NL_VLOG(1) << __func__ << ": set fallback visibility. visibility="
-             << static_cast<int>(visibility);
+  VLOG(1) << __func__ << ": set fallback visibility. visibility="
+          << static_cast<int>(visibility);
   if (visibility == DeviceVisibility::DEVICE_VISIBILITY_EVERYONE) {
-    NL_VLOG(1) << __func__ << ": visibility is everyone. Skip.";
+    VLOG(1) << __func__ << ": visibility is everyone. Skip.";
     return;
   }
 

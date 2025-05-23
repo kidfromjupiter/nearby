@@ -125,11 +125,17 @@ enum EventType : int {
   DECRYPT_CERTIFICATE_FAILURE = 64,
   SHOW_ALLOW_PERMISSION_AUTO_ACCESS = 65,
   SEND_DESKTOP_TRANSFER_EVENT = 66,
-  WAITING_FOR_ACCEPT = 67
+  WAITING_FOR_ACCEPT = 67,
+  HIGH_QUALITY_MEDIUM_SETUP = 68,
+  RPC_CALL_STATUS = 69,
+  START_QR_CODE_SESSION = 70,
+  QR_CODE_OPENED_IN_WEB_CLIENT = 71,
+  HATS_JOINT_EVENT = 72,
+  RECEIVE_PREVIEWS = 73
 };
 bool EventType_IsValid(int value);
 constexpr EventType EventType_MIN = UNKNOWN_EVENT_TYPE;
-constexpr EventType EventType_MAX = WAITING_FOR_ACCEPT;
+constexpr EventType EventType_MAX = RECEIVE_PREVIEWS;
 constexpr int EventType_ARRAYSIZE = EventType_MAX + 1;
 
 const std::string& EventType_Name(EventType value);
@@ -146,11 +152,12 @@ enum EventCategory : int {
   UNKNOWN_EVENT_CATEGORY = 0,
   SENDING_EVENT = 1,
   RECEIVING_EVENT = 2,
-  SETTINGS_EVENT = 3
+  SETTINGS_EVENT = 3,
+  RPC_EVENT = 4
 };
 bool EventCategory_IsValid(int value);
 constexpr EventCategory EventCategory_MIN = UNKNOWN_EVENT_CATEGORY;
-constexpr EventCategory EventCategory_MAX = SETTINGS_EVENT;
+constexpr EventCategory EventCategory_MAX = RPC_EVENT;
 constexpr int EventCategory_ARRAYSIZE = EventCategory_MAX + 1;
 
 const std::string& EventCategory_Name(EventCategory value);
@@ -187,7 +194,7 @@ enum Visibility : int {
   UNKNOWN_VISIBILITY = 0,
   CONTACTS_ONLY = 1,
   EVERYONE = 2,
-  SELECTED_CONTACTS_ONLY = 3,
+  SELECTED_CONTACTS_ONLY PROTOBUF_DEPRECATED_ENUM = 3,
   HIDDEN = 4,
   SELF_SHARE = 5
 };
@@ -285,11 +292,12 @@ enum AttachmentTransmissionStatus : int {
   FAILED_UNKNOWN_REMOTE_RESPONSE_TRANSMISSION_STATUS = 26,
   NO_RESPONSE_FRAME_CONNECTION_CLOSED_LOST_CONNECTIVITY_TRANSMISSION_STATUS PROTOBUF_DEPRECATED_ENUM = 27,
   NO_RESPONSE_FRAME_CONNECTION_CLOSED_TRANSMISSION_STATUS = 28,
-  LOST_CONNECTIVITY_TRANSMISSION_STATUS = 29
+  LOST_CONNECTIVITY_TRANSMISSION_STATUS = 29,
+  FAILED_DISALLOWED_MEDIUM = 30
 };
 bool AttachmentTransmissionStatus_IsValid(int value);
 constexpr AttachmentTransmissionStatus AttachmentTransmissionStatus_MIN = UNKNOWN_ATTACHMENT_TRANSMISSION_STATUS;
-constexpr AttachmentTransmissionStatus AttachmentTransmissionStatus_MAX = LOST_CONNECTIVITY_TRANSMISSION_STATUS;
+constexpr AttachmentTransmissionStatus AttachmentTransmissionStatus_MAX = FAILED_DISALLOWED_MEDIUM;
 constexpr int AttachmentTransmissionStatus_ARRAYSIZE = AttachmentTransmissionStatus_MAX + 1;
 
 const std::string& AttachmentTransmissionStatus_Name(AttachmentTransmissionStatus value);
@@ -407,11 +415,13 @@ enum DeviceType : int {
   PHONE = 1,
   TABLET = 2,
   LAPTOP = 3,
-  CAR = 4
+  CAR = 4,
+  FOLDABLE = 5,
+  XR = 6
 };
 bool DeviceType_IsValid(int value);
 constexpr DeviceType DeviceType_MIN = UNKNOWN_DEVICE_TYPE;
-constexpr DeviceType DeviceType_MAX = CAR;
+constexpr DeviceType DeviceType_MAX = XR;
 constexpr int DeviceType_ARRAYSIZE = DeviceType_MAX + 1;
 
 const std::string& DeviceType_Name(DeviceType value);
@@ -898,11 +908,12 @@ enum SharingUseCase : int {
   USE_CASE_APP_SHARE = 4,
   USE_CASE_QUICK_SETTING_FILE_SHARE = 5,
   USE_CASE_SETUP_WIZARD = 6,
-  USE_CASE_NEARBY_SHARE_WITH_QR_CODE = 7
+  USE_CASE_NEARBY_SHARE_WITH_QR_CODE PROTOBUF_DEPRECATED_ENUM = 7,
+  USE_CASE_REDIRECTED_FROM_BLUETOOTH_SHARE = 8
 };
 bool SharingUseCase_IsValid(int value);
 constexpr SharingUseCase SharingUseCase_MIN = USE_CASE_UNKNOWN;
-constexpr SharingUseCase SharingUseCase_MAX = USE_CASE_NEARBY_SHARE_WITH_QR_CODE;
+constexpr SharingUseCase SharingUseCase_MAX = USE_CASE_REDIRECTED_FROM_BLUETOOTH_SHARE;
 constexpr int SharingUseCase_ARRAYSIZE = SharingUseCase_MAX + 1;
 
 const std::string& SharingUseCase_Name(SharingUseCase value);
@@ -939,11 +950,12 @@ enum AttachmentSourceType : int {
   ATTACHMENT_SOURCE_DRAG_AND_DROP = 2,
   ATTACHMENT_SOURCE_SELECT_FILES_BUTTON = 3,
   ATTACHMENT_SOURCE_PASTE = 4,
-  ATTACHMENT_SOURCE_SELECT_FOLDERS_BUTTON = 5
+  ATTACHMENT_SOURCE_SELECT_FOLDERS_BUTTON = 5,
+  ATTACHMENT_SOURCE_SHARE_ACTIVATION = 6
 };
 bool AttachmentSourceType_IsValid(int value);
 constexpr AttachmentSourceType AttachmentSourceType_MIN = ATTACHMENT_SOURCE_UNKNOWN;
-constexpr AttachmentSourceType AttachmentSourceType_MAX = ATTACHMENT_SOURCE_SELECT_FOLDERS_BUTTON;
+constexpr AttachmentSourceType AttachmentSourceType_MAX = ATTACHMENT_SOURCE_SHARE_ACTIVATION;
 constexpr int AttachmentSourceType_ARRAYSIZE = AttachmentSourceType_MAX + 1;
 
 const std::string& AttachmentSourceType_Name(AttachmentSourceType value);

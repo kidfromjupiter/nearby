@@ -17,6 +17,7 @@
 #import <Foundation/Foundation.h>
 
 @protocol GNCCentralManager;
+@protocol GNCPeripheralManager;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -36,6 +37,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSDictionary<CBUUID *, NSData *> *)decodeAdvertisementData:
     (NSDictionary<NSString *, id> *)advertisementData;
+
+
+- (void)setL2CAPClient:(GNCBLEL2CAPClient *)l2capClient;
 
 @end
 

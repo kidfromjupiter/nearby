@@ -82,8 +82,19 @@ std::string ShareTarget::ToString() const {
   fmt.push_back(absl::StrFormat("is_incoming: %d", is_incoming));
   fmt.push_back(absl::StrFormat("for_self_share: %d", for_self_share));
   fmt.push_back(absl::StrFormat("vendor_id: %d", vendor_id));
+  fmt.push_back(absl::StrFormat("receive_disabled: %d", receive_disabled));
 
   return absl::StrCat("ShareTarget<", absl::StrJoin(fmt, ", "), ">");
+}
+
+bool ShareTarget::operator==(const ShareTarget& other) const {
+  return id == other.id && device_name == other.device_name &&
+         image_url == other.image_url && type == other.type &&
+         is_incoming == other.is_incoming && full_name == other.full_name &&
+         is_known == other.is_known && device_id == other.device_id &&
+         for_self_share == other.for_self_share &&
+         vendor_id == other.vendor_id &&
+         receive_disabled == other.receive_disabled;
 }
 
 }  // namespace sharing

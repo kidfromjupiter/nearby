@@ -26,6 +26,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "internal/analytics/event_logger.h"
+#include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/nearby_connections_service.h"
 #include "sharing/nearby_connections_types.h"
 
@@ -35,20 +36,21 @@ namespace sharing {
 class NearbyConnectionsServiceImpl : public NearbyConnectionsService {
  public:
   explicit NearbyConnectionsServiceImpl(
+      nearby::ConnectivityManager* connectivity_manager,
       nearby::analytics::EventLogger* event_logger = nullptr);
   NearbyConnectionsServiceImpl() = delete;
   ~NearbyConnectionsServiceImpl() override;
 
   void StartAdvertising(absl::string_view service_id,
                         const std::vector<uint8_t>& endpoint_info,
-                        AdvertisingOptions advertising_options,
+                        const AdvertisingOptions& advertising_options,
                         ConnectionListener advertising_listener,
                         std::function<void(Status status)> callback) override;
   void StopAdvertising(absl::string_view service_id,
                        std::function<void(Status status)> callback) override;
 
   void StartDiscovery(absl::string_view service_id,
-                      DiscoveryOptions discovery_options,
+                      const DiscoveryOptions& discovery_options,
                       DiscoveryListener discovery_listener,
                       std::function<void(Status status)> callback) override;
   void StopDiscovery(absl::string_view service_id,
@@ -57,7 +59,7 @@ class NearbyConnectionsServiceImpl : public NearbyConnectionsService {
   void RequestConnection(absl::string_view service_id,
                          const std::vector<uint8_t>& endpoint_info,
                          absl::string_view endpoint_id,
-                         ConnectionOptions connection_options,
+                         const ConnectionOptions& connection_options,
                          ConnectionListener connection_listener,
                          std::function<void(Status status)> callback) override;
 
@@ -90,7 +92,7 @@ class NearbyConnectionsServiceImpl : public NearbyConnectionsService {
 
  private:
   HANDLE service_handle_ = nullptr;
-
+  nearby::ConnectivityManager& connectivity_manager_;
   ConnectionListener advertising_listener_;
   DiscoveryListener discovery_listener_;
   ConnectionListener connection_listener_;

@@ -16,13 +16,19 @@
 #define CORE_INTERNAL_MEDIUMS_WIFI_LAN_H_
 
 #include <cstdint>
-#include <functional>
 #include <string>
+#include <utility>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "internal/platform/byte_array.h"
+#include "absl/functional/any_invocable.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
+#include "connections/implementation/mediums/multiplex/multiplex_socket.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancellation_flag.h"
+#include "internal/platform/exception.h"
+#include "internal/platform/expected.h"
 #include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/nsd_service_info.h"
@@ -48,8 +54,8 @@ class WifiLan {
   // Sets custom service info name, endpoint info name in NsdServiceInfo and
   // then enables WifiLan advertising.
   // Returns true, if NsdServiceInfo is successfully set, and false otherwise.
-  bool StartAdvertising(const std::string& service_id,
-                        NsdServiceInfo& nsd_service_info)
+  ErrorOr<bool> StartAdvertising(const std::string& service_id,
+                                 NsdServiceInfo& nsd_service_info)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Disables WifiLan advertising.
@@ -63,8 +69,8 @@ class WifiLan {
   // Enables WifiLan discovery. Will report any discoverable services
   // through a callback.
   // Returns true, if discovery was enabled, false otherwise.
-  bool StartDiscovery(const std::string& service_id,
-                      DiscoveredServiceCallback callback)
+  ErrorOr<bool> StartDiscovery(const std::string& service_id,
+                               DiscoveredServiceCallback callback)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Disables WifiLan discovery.
@@ -74,8 +80,8 @@ class WifiLan {
 
   // Starts a worker thread, creates a WifiLan socket, associates it with a
   // service id.
-  bool StartAcceptingConnections(const std::string& service_id,
-                                 AcceptedConnectionCallback callback)
+  ErrorOr<bool> StartAcceptingConnections(const std::string& service_id,
+                                          AcceptedConnectionCallback callback)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Closes socket corresponding to a service id.
@@ -89,17 +95,17 @@ class WifiLan {
   // another service with StartAcceptingConnections() using the same service_id.
   // Blocks until connection is established, or server-side is terminated.
   // Returns socket instance. On success, WifiLanSocket.IsValid() return true.
-  WifiLanSocket Connect(const std::string& service_id,
-                        const NsdServiceInfo& service_info,
-                        CancellationFlag* cancellation_flag)
+  ErrorOr<WifiLanSocket> Connect(const std::string& service_id,
+                                 const NsdServiceInfo& service_info,
+                                 CancellationFlag* cancellation_flag)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Establishes connection to WifiLan service by ip address and port for
   // bandwidth upgradation.
   // Returns socket instance. On success, WifiLanSocket.IsValid() return true.
-  WifiLanSocket Connect(const std::string& service_id,
-                        const std::string& ip_address, int port,
-                        CancellationFlag* cancellation_flag)
+  ErrorOr<WifiLanSocket> Connect(const std::string& service_id,
+                                 const std::string& ip_address, int port,
+                                 CancellationFlag* cancellation_flag)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Gets ip address + port for remote services on the network to identify and
@@ -150,6 +156,18 @@ class WifiLan {
 
   static constexpr int kMaxConcurrentAcceptLoops = 5;
 
+  // Establishes connection to WifiLan service by ip address through
+  // MultiplexSocket.
+  ExceptionOr<WifiLanSocket> ConnectWithMultiplexSocketLocked(
+      const std::string& service_id, const std::string& ip_address)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  // Creates a MultiplexSocket for outgoing connection based on connected
+  // WifiLanSocket physical socket for specific service_id and ip address.
+  ExceptionOr<WifiLanSocket> CreateOutgoingMultiplexSocketLocked(
+      WifiLanSocket& socket, const std::string& service_id,
+      const std::string& ip_address) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
   // Same as IsAvailable(), but must be called with mutex_ held.
   bool IsAvailableLocked() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
@@ -187,6 +205,17 @@ class WifiLan {
   // and thus require pointer stability.
   absl::flat_hash_map<std::string, WifiLanServerSocket> server_sockets_
       ABSL_GUARDED_BY(mutex_);
+
+  // Whether the multiplex feature is enabled.
+  bool is_multiplex_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
+      config_package_nearby::nearby_connections_feature::kEnableMultiplex) &&
+      NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableMultiplexWifiLan);
+
+  // A map of IpAddress -> MultiplexSocket.
+  absl::flat_hash_map<std::string, mediums::multiplex::MultiplexSocket*>
+      multiplex_sockets_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace connections

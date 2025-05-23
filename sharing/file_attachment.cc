@@ -15,15 +15,15 @@
 #include "sharing/file_attachment.h"
 
 #include <cstdint>
-#include <filesystem>  // NOLINT(build/c++17)
 #include <optional>
 #include <string>
 #include <utility>
 
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
+#include "proto/sharing_enums.pb.h"
 #include "sharing/attachment.h"
-#include "sharing/common/compatible_u8_string.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/internal/base/mime.h"
 #include "sharing/proto/wire_format.pb.h"
@@ -31,6 +31,8 @@
 namespace nearby {
 namespace sharing {
 namespace {
+
+using ::location::nearby::proto::sharing::AttachmentSourceType;
 
 FileAttachment::Type FileAttachmentTypeFromMimeType(
     absl::string_view mime_type) {
@@ -46,8 +48,8 @@ FileAttachment::Type FileAttachmentTypeFromMimeType(
   return service::proto::FileMetadata::UNKNOWN;
 }
 
-std::string MimeTypeFromPath(const std::filesystem::path& path) {
-  std::string extension = path.extension().string();
+std::string MimeTypeFromPath(const FilePath& path) {
+  std::string extension = path.GetExtension().ToString();
   return extension.empty() ? "application/octet-stream"
                            : nearby::utils::GetWellKnownMimeTypeFromExtension(
                                  extension.substr(1));
@@ -55,23 +57,21 @@ std::string MimeTypeFromPath(const std::filesystem::path& path) {
 
 }  // namespace
 
-FileAttachment::FileAttachment(std::filesystem::path file_path,
-                               absl::string_view mime_type,
+FileAttachment::FileAttachment(FilePath file_path, absl::string_view mime_type,
                                std::string parent_folder, int32_t batch_id,
-                               SourceType source_type)
+                               AttachmentSourceType source_type)
     : Attachment(Attachment::Family::kFile, /*size=*/0, batch_id, source_type),
       mime_type_(mime_type.empty() ? MimeTypeFromPath(file_path) : mime_type),
       type_(FileAttachmentTypeFromMimeType(mime_type_)),
-      file_path_(std::move(file_path)),
       parent_folder_(std::move(parent_folder)) {
-  file_name_ =
-      GetCompatibleU8String(file_path_.value_or(L"").filename().u8string());
+  file_name_ = file_path.GetFileName().ToString();
+  file_path_ = std::move(file_path);
 }
 
 FileAttachment::FileAttachment(int64_t id, int64_t size, std::string file_name,
                                std::string mime_type, Type type,
                                std::string parent_folder, int32_t batch_id,
-                               SourceType source_type)
+                               AttachmentSourceType source_type)
     : Attachment(id, Attachment::Family::kFile, size, batch_id, source_type),
       file_name_(std::move(file_name)),
       mime_type_(std::move(mime_type)),

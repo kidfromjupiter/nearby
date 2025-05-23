@@ -22,7 +22,6 @@ cc_library(
     ],
     hdrs = [
         "nearby_share_prefs.h",
-        "nearby_share_profile_info_provider.h",
         "nearby_share_switches.h",
     ],
     visibility = ["//visibility:public"],
@@ -36,20 +35,6 @@ cc_library(
 )
 
 cc_library(
-    name = "test_support",
-    testonly = True,
-    srcs = [
-        "fake_nearby_share_profile_info_provider.cc",
-    ],
-    hdrs = [
-        "fake_nearby_share_profile_info_provider.h",
-        "nearby_share_profile_info_provider.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [],
-)
-
-cc_library(
     name = "enum",
     hdrs = ["nearby_share_enums.h"],
     visibility = ["//visibility:public"],
@@ -59,9 +44,5 @@ cc_library(
 cc_library(
     name = "compatible_u8_string",
     hdrs = ["compatible_u8_string.h"],
-    visibility = [
-        "//location/nearby/apps/better_together:__subpackages__",
-        "//location/nearby/sharing/sdk:__subpackages__",
-        "//sharing:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
 )

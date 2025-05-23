@@ -22,8 +22,6 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "internal/flags/nearby_flags.h"
-#include "internal/platform/flags/nearby_platform_feature_flags.h"
 #include "internal/platform/implementation/windows/test_data.h"
 
 namespace nearby {
@@ -32,21 +30,7 @@ namespace {
 
 constexpr absl::Duration kWaitTimeout = absl::Milliseconds(2000);
 
-class ScheduledExecutorTest : public ::testing::TestWithParam<bool> {
- public:
-  void SetUp() override {
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        platform::config_package_nearby::nearby_platform_feature::
-            kEnableTaskScheduler,
-        GetParam());
-  }
-
-  void TearDown() override {
-    NearbyFlags::GetInstance().ResetOverridedValues();
-  }
-};
-
-TEST_P(ScheduledExecutorTest, ExecuteSucceeds) {
+TEST(ScheduledExecutorTest, ExecuteSucceeds) {
   absl::Notification notification;
   // Arrange
   std::string expected(RUNNABLE_0_TEXT.c_str());
@@ -79,7 +63,7 @@ TEST_P(ScheduledExecutorTest, ExecuteSucceeds) {
   ASSERT_EQ(output, expected);
 }
 
-TEST_P(ScheduledExecutorTest, ScheduleSucceeds) {
+TEST(ScheduledExecutorTest, ScheduleSucceeds) {
   absl::Notification notification;
   // Arrange
   std::string expected(RUNNABLE_0_TEXT.c_str());
@@ -92,8 +76,6 @@ TEST_P(ScheduledExecutorTest, ScheduleSucceeds) {
 
   threadIds->push_back(GetCurrentThreadId());
 
-  std::chrono::system_clock::time_point timeNow =
-      std::chrono::system_clock::now();
   std::chrono::system_clock::time_point timeExecuted;
 
   // Act
@@ -116,7 +98,7 @@ TEST_P(ScheduledExecutorTest, ScheduleSucceeds) {
   ASSERT_EQ(output, expected);
 }
 
-TEST_P(ScheduledExecutorTest, CancelSucceeds) {
+TEST(ScheduledExecutorTest, CancelSucceeds) {
   absl::Notification notification;
   // Arrange
   std::string expected("");
@@ -152,7 +134,7 @@ TEST_P(ScheduledExecutorTest, CancelSucceeds) {
   ASSERT_EQ(output, expected);
 }
 
-TEST_P(ScheduledExecutorTest, CancelAfterStartedFails) {
+TEST(ScheduledExecutorTest, CancelAfterStartedFails) {
   absl::Notification notification;
   // Arrange
   std::string expected(RUNNABLE_0_TEXT.c_str());
@@ -188,9 +170,6 @@ TEST_P(ScheduledExecutorTest, CancelAfterStartedFails) {
   //  We should've run all runnables on the worker thread
   ASSERT_EQ(output, expected);
 }
-
-INSTANTIATE_TEST_SUITE_P(ScheduledExecutorTaskSchedulerFlagTest,
-                         ScheduledExecutorTest, testing::Bool());
 
 }  // namespace
 }  // namespace windows

@@ -47,7 +47,6 @@
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
 #include "sharing/common/nearby_share_enums.h"
-#include "sharing/common/nearby_share_profile_info_provider.h"
 #include "sharing/fast_initiation/nearby_fast_initiation.h"
 #include "sharing/incoming_share_session.h"
 #include "sharing/internal/api/app_info.h"
@@ -121,10 +120,6 @@ class NearbySharingServiceImpl
   void RegisterSendSurface(
       TransferUpdateCallback* transfer_callback,
       ShareTargetDiscoveredCallback* discovery_callback, SendSurfaceState state,
-      std::function<void(StatusCodes)> status_codes_callback) override;
-  void RegisterSendSurface(
-      TransferUpdateCallback* transfer_callback,
-      ShareTargetDiscoveredCallback* discovery_callback, SendSurfaceState state,
       Advertisement::BlockedVendorId blocked_vendor_id,
       bool disable_wifi_hotspot,
       std::function<void(StatusCodes)> status_codes_callback) override;
@@ -162,7 +157,6 @@ class NearbySharingServiceImpl
   void Cancel(int64_t share_target_id,
               std::function<void(StatusCodes status_codes)>
                   status_codes_callback) override;
-  bool DidLocalUserCancelTransfer(int64_t share_target_id) override;
   void SetVisibility(
       proto::DeviceVisibility visibility, absl::Duration expiration,
       absl::AnyInvocable<void(StatusCodes status_code) &&> callback) override;
@@ -173,6 +167,10 @@ class NearbySharingServiceImpl
   NearbyShareCertificateManager* GetCertificateManager() override;
   AccountManager* GetAccountManager() override;
   Clock& GetClock() override { return *context_->GetClock(); }
+  void SetAlternateServiceUuidForDiscovery(
+      uint16_t alternate_service_uuid) override {
+    alternate_service_uuid_ = alternate_service_uuid;
+  }
 
   // NearbyConnectionsManager::IncomingConnectionListener:
   void OnIncomingConnection(absl::string_view endpoint_id,
@@ -274,7 +272,8 @@ class NearbySharingServiceImpl
   // important because of the asynchronous steps required to process an
   // endpoint-discovered event.
   void AddEndpointDiscoveryEvent(std::function<void()> event);
-  void HandleEndpointDiscovered(absl::string_view endpoint_id,
+  void HandleEndpointDiscovered(absl::Time start_time,
+                                absl::string_view endpoint_id,
                                 absl::Span<const uint8_t> endpoint_info);
   void HandleEndpointLost(absl::string_view endpoint_id);
   void FinishEndpointDiscoveryEvent();
@@ -314,6 +313,7 @@ class NearbySharingServiceImpl
   void OnTransferStarted(bool is_incoming);
 
   void OnOutgoingConnection(int64_t share_target_id,
+                            absl::string_view endpoint_id,
                             NearbyConnection* connection, Status status);
 
   void CreatePayloads(
@@ -330,7 +330,7 @@ class NearbySharingServiceImpl
                                 const TransferMetadata& metadata);
   void OnOutgoingTransferUpdate(OutgoingShareSession& session,
                                 const TransferMetadata& metadata);
-  void CloseConnection(int64_t share_target_id);
+  void CloseConnection(absl::string_view endpoint_id);
   void OnIncomingDecryptedCertificate(
       absl::string_view endpoint_id, const Advertisement& advertisement,
       int64_t placeholder_share_target_id,
@@ -364,10 +364,8 @@ class NearbySharingServiceImpl
       const std::optional<NearbyShareDecryptedPublicCertificate>& certificate,
       bool is_incoming);
 
-  void IncomingPayloadTransferUpdate(int64_t share_target_id,
-                                     TransferMetadata metadata);
-  void OutgoingPayloadTransferUpdate(int64_t share_target_id,
-                                     TransferMetadata metadata);
+  void OnIncomingPayloadTransferUpdates(int64_t share_target_id);
+  void OnOutgoingPayloadTransferUpdates(int64_t share_target_id);
 
   void RemoveIncomingPayloads(const IncomingShareSession& session);
 
@@ -378,18 +376,17 @@ class NearbySharingServiceImpl
       const ShareTarget& share_target, absl::string_view endpoint_id,
       std::optional<NearbyShareDecryptedPublicCertificate> certificate);
 
-  void MoveToDiscoveryCache(absl::string_view endpoint_id);
-  // Immediately expire all timers in the discovery cache. (i.e. report
-  // ShareTargetLost)
-  void TriggerDiscoveryCacheExpiryTimers();
+  // Move the endpoint to the discovery cache with the given expiry time.
+  void MoveToDiscoveryCache(std::string endpoint_id, uint64_t expiry_ms);
+
   // Update the entry in outgoing_share_session_map_ with the new share target
   // and OnShareTargetUpdated is called.
   void DeduplicateInOutgoingShareTarget(
       const ShareTarget& share_target, absl::string_view endpoint_id,
       std::optional<NearbyShareDecryptedPublicCertificate> certificate);
 
-  // Add an entry to the outgoing_share_session_map_
-  // and OnShareTargetUpdated is called.
+  // Add an entry to the outgoing_share_session_map_ and
+  // outgoing_share_target_map_ and OnShareTargetUpdated is called.
   void DeDuplicateInDiscoveryCache(
       const ShareTarget& share_target, absl::string_view endpoint_id,
       std::optional<NearbyShareDecryptedPublicCertificate> certificate);
@@ -401,8 +398,8 @@ class NearbySharingServiceImpl
                                            ShareTarget& share_target);
 
   // Looks for a duplicate of the share target in the discovery cache.
-  // If found, move the share target to the outgoing share target map.
-  // The share target's id is updated to match the cached entry.
+  // If found, the share target is removed from the discovery cache and its
+  // id is copied into `share_target`.
   // Returns true if the duplicate is found.
   bool FindDuplicateInDiscoveryCache(absl::string_view endpoint_id,
                                      ShareTarget& share_target);
@@ -414,7 +411,9 @@ class NearbySharingServiceImpl
   std::optional<std::vector<uint8_t>> GetBluetoothMacAddressForShareTarget(
       OutgoingShareSession& session);
 
-  void ClearOutgoingShareSessionMap();
+  // Move all outgoing share targets to the discovery cache so that they will be
+  // reported as receive_disabled.
+  void DisableAllOutgoingShareTargets();
   void UnregisterShareTarget(int64_t share_target_id);
 
   void OnStartAdvertisingResult(bool used_device_name, Status status);
@@ -450,13 +449,6 @@ class NearbySharingServiceImpl
                                               absl::Duration delay,
                                               absl::AnyInvocable<void()> task);
 
-  // Runs API/task on a random thread.
-  void RunOnAnyThread(absl::string_view task_name,
-                      absl::AnyInvocable<void()> task);
-
-  // Returns use case of sender. It is used by group share feature.
-  ::location::nearby::proto::sharing::SharingUseCase GetSenderUseCase();
-
   // Update file path for the file attachment.
   void UpdateFilePath(AttachmentContainer& container);
   // Returns true if Shutdown() has been called.
@@ -468,6 +460,11 @@ class NearbySharingServiceImpl
   bool OutgoingSessionAccept(OutgoingShareSession& session);
   void OnIncomingFilesMetadataUpdated(int64_t share_target_id,
                                       TransferMetadata metadata, bool success);
+
+  // Notify all registered send surfaces of share target state changes.
+  void OnShareTargetDiscovered(const ShareTarget& share_target);
+  void OnShareTargetUpdated(const ShareTarget& share_target);
+  void OnShareTargetLost(const ShareTarget& share_target);
 
   // Used to run nearby sharing service APIs.
   std::unique_ptr<TaskRunner> service_thread_;
@@ -481,7 +478,6 @@ class NearbySharingServiceImpl
   std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager_;
   std::unique_ptr<nearby::sharing::api::SharingRpcClientFactory>
       nearby_share_client_factory_;
-  std::unique_ptr<NearbyShareProfileInfoProvider> profile_info_provider_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> local_device_data_manager_;
   std::unique_ptr<NearbyShareContactManager> contact_manager_;
   std::unique_ptr<NearbyShareCertificateManager> certificate_manager_;
@@ -536,12 +532,8 @@ class NearbySharingServiceImpl
   absl::flat_hash_map<int64_t, OutgoingShareSession>
       outgoing_share_session_map_;
   // A map of Endpoint id to DiscoveryCacheEntry.
+  // All ShareTargets in discovery cache have received_disabled set to true.
   absl::flat_hash_map<std::string, DiscoveryCacheEntry> discovery_cache_;
-  // For metrics. The IDs of ShareTargets that are cancelled while trying to
-  // establish an outgoing connection.
-  absl::flat_hash_set<int64_t> all_cancelled_share_target_ids_;
-  // The IDs of ShareTargets that we cancelled the transfer to.
-  absl::flat_hash_set<int64_t> locally_cancelled_share_target_ids_;
   // A map from endpoint ID to endpoint info from discovered, contact-based
   // advertisements that could not decrypt any available public certificates.
   // During discovery, if certificates are downloaded, we revisit this map and
@@ -553,11 +545,6 @@ class NearbySharingServiceImpl
   // cause new download of public certificates. The purpose is to reduce the
   // unnecessary backend API call.
   absl::flat_hash_set<std::string> discovered_advertisements_retried_set_;
-
-  // A map of ShareTarget id to disconnection timeout callback. Used to only
-  // disconnect after a timeout to keep sending any pending payloads.
-  absl::flat_hash_map<std::string, std::unique_ptr<ThreadTimer>>
-      disconnection_timeout_alarms_;
 
   // The current advertising power level. PowerLevel::kUnknown while not
   // advertising.
@@ -610,6 +597,7 @@ class NearbySharingServiceImpl
   // Used to track the time when share sheet activity starts
   absl::Time share_foreground_send_surface_start_timestamp_;
   std::unique_ptr<nearby::api::AppInfo> app_info_;
+  std::optional<uint16_t> alternate_service_uuid_;
 };
 
 }  // namespace nearby::sharing

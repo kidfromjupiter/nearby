@@ -14,21 +14,21 @@
 
 #include "internal/platform/implementation/platform.h"
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>  // NOLINT
 #include <memory>
 #include <string>
 
 #include "absl/base/attributes.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/time/time.h"
+#include "internal/base/files.h"
 #include "internal/platform/implementation/atomic_boolean.h"
 #include "internal/platform/implementation/atomic_reference.h"
+#include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
@@ -37,6 +37,7 @@
 #include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/credential_storage.h"
 #include "internal/platform/implementation/device_info.h"
+#include "internal/platform/implementation/g3/awdl.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/log_message.h"
@@ -51,6 +52,7 @@
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
+#include "internal/platform/logging.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/payload_id.h"
 #include "thread/thread.h"
@@ -86,7 +88,7 @@ namespace api {
 
 std::string ImplementationPlatform::GetCustomSavePath(
     const std::string& parent_folder, const std::string& file_name) {
-  return absl::StrCat(parent_folder, file_name);
+  return absl::StrCat(parent_folder, "/", file_name);
 }
 
 std::string ImplementationPlatform::GetDownloadPath(
@@ -162,6 +164,15 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
     const std::string& file_path) {
+  std::filesystem::path path = std::filesystem::u8path(file_path);
+  std::filesystem::path folder_path = path.parent_path();
+  // Verifies that a path is a valid directory.
+  if (!sharing::DirectoryExists(folder_path)) {
+    if (!sharing::CreateDirectories(folder_path)) {
+      LOG(ERROR) << "Failed to create directory: " << folder_path.string();
+      return nullptr;
+    }
+  }
   return shared::IOFile::CreateOutputFile(file_path);
 }
 
@@ -202,6 +213,10 @@ std::unique_ptr<WifiMedium> ImplementationPlatform::CreateWifiMedium() {
 
 std::unique_ptr<WifiLanMedium> ImplementationPlatform::CreateWifiLanMedium() {
   return std::make_unique<g3::WifiLanMedium>();
+}
+
+std::unique_ptr<AwdlMedium> ImplementationPlatform::CreateAwdlMedium() {
+  return std::make_unique<g3::AwdlMedium>();
 }
 
 std::unique_ptr<WifiHotspotMedium>

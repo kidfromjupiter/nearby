@@ -18,26 +18,20 @@
 #include <winsock2.h>
 
 // Standard C/C++ headers
-#include <codecvt>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <locale>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-// Third party headers
-#include "absl/strings/ascii.h"
-#include "absl/strings/str_format.h"
-
 // Nearby connections headers
 #include "absl/strings/string_view.h"
-#include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/implementation/crypto.h"
 #include "internal/platform/implementation/windows/string_utils.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/uuid.h"
 #include "winrt/Windows.Foundation.Collections.h"
 #include "winrt/Windows.Networking.Connectivity.h"
@@ -55,24 +49,19 @@ using ::winrt::Windows::Networking::Connectivity::NetworkTypes;
 }  // namespace
 
 std::string uint64_to_mac_address_string(uint64_t bluetoothAddress) {
-  std::string buffer = absl::StrFormat(
-      "%02llx:%02llx:%02llx:%02llx:%02llx:%02llx", bluetoothAddress >> 40,
-      (bluetoothAddress >> 32) & 0xff, (bluetoothAddress >> 24) & 0xff,
-      (bluetoothAddress >> 16) & 0xff, (bluetoothAddress >> 8) & 0xff,
-      bluetoothAddress & 0xff);
-
-  return absl::AsciiStrToUpper(buffer);
+  MacAddress mac_address;
+  if (!MacAddress::FromUint64(bluetoothAddress, mac_address)) {
+    return "";
+  }
+  return mac_address.ToString();
 }
 
 uint64_t mac_address_string_to_uint64(absl::string_view mac_address) {
-  ByteArray mac_address_array = BluetoothUtils::FromString(mac_address);
-  uint64_t mac_address_uint64 = 0;
-  for (int i = 0; i < mac_address_array.size(); i++) {
-    mac_address_uint64 <<= 8;
-    mac_address_uint64 |= static_cast<uint8_t>(
-        static_cast<unsigned char>(*(mac_address_array.data() + i)));
+  MacAddress address;
+  if (!MacAddress::FromString(mac_address, address)) {
+    return 0;
   }
-  return mac_address_uint64;
+  return address.address();
 }
 
 std::string ipaddr_4bytes_to_dotdecimal_string(
@@ -167,6 +156,39 @@ std::vector<std::string> Get4BytesIpv4Addresses() {
     ipv4_4bytes_address[2] = address.S_un.S_un_b.s_b3;
     ipv4_4bytes_address[3] = address.S_un.S_un_b.s_b4;
     result.push_back(ipv4_4bytes_address);
+  }
+
+  return result;
+}
+
+std::vector<std::string> GetWifiIpv4Addresses() {
+  std::vector<std::string> result;
+
+  try {
+    auto host_names = NetworkInformation::GetHostNames();
+    for (const auto& host_name : host_names) {
+      if (host_name.IPInformation() != nullptr &&
+          host_name.IPInformation().NetworkAdapter() != nullptr &&
+          host_name.Type() == HostNameType::Ipv4) {
+        NetworkAdapter adapter = host_name.IPInformation().NetworkAdapter();
+        if (adapter.NetworkItem().GetNetworkTypes() == NetworkTypes::None) {
+          // If we're not connected to a network, we don't want to add this
+          // address.
+          continue;
+        }
+        if (adapter.IanaInterfaceType() == Constants::kInterfaceTypeWifi) {
+          result.push_back(winrt::to_string(host_name.ToString()));
+        }
+      }
+    }
+  } catch (std::exception exception) {
+    LOG(ERROR) << __func__ << ": Cannot get IPv4 addresses. Exception : "
+               << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << ": Cannot get IPv4 addresses. WinRT exception: "
+               << error.code() << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
   }
 
   return result;

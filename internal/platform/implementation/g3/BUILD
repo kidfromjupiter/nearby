@@ -36,6 +36,8 @@ cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":preferences_repository",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/platform:base",
         "//internal/platform:test_util",
         "//internal/platform:types",
@@ -62,6 +64,7 @@ cc_library(
     name = "comm",
     testonly = True,
     srcs = [
+        "awdl.cc",
         "ble.cc",
         "ble_v2.cc",
         "bluetooth_adapter.cc",
@@ -72,6 +75,7 @@ cc_library(
         "wifi_lan.cc",
     ],
     hdrs = [
+        "awdl.h",
         "ble.h",
         "ble_v2.h",
         "bluetooth_adapter.h",
@@ -88,6 +92,7 @@ cc_library(
         ":types",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
+        "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:types",
         "//internal/platform:uuid",
@@ -135,12 +140,11 @@ cc_library(
     defines = ["NO_WEBRTC"],
     visibility = [
         "//connections:__subpackages__",
-        "//fastpair:__subpackages__",
+        "//connections:partners",
         "//internal/account:__subpackages__",
         "//internal/auth:__subpackages__",
         "//internal/crypto:__subpackages__",
         "//internal/data:__subpackages__",
-        "//internal/flags:__subpackages__",
         "//internal/network:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/preferences:__subpackages__",
@@ -156,7 +160,9 @@ cc_library(
         ":comm",
         ":crypto",  # build_cleaner: keep
         ":types",
+        "//internal/base:files",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:test_util",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
@@ -164,11 +170,9 @@ cc_library(
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/shared:file",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
         "@com_google_nisaba//nisaba/port:thread_pool",
     ],
 )

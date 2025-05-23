@@ -13,6 +13,14 @@
 # limitations under the License.
 licenses(["notice"])
 
+package_group(
+    name = "partners",
+    # keep sorted
+    packages = [
+        # Add partner to use Nearby Connections
+    ],
+)
+
 cc_library(
     name = "core",
     srcs = [
@@ -23,6 +31,7 @@ cc_library(
     ],
     copts = ["-DCORE_ADAPTER_DLL"],
     visibility = [
+        ":partners",
         "//chrome/chromeos/assistant/data_migration/lib:__pkg__",
         "//connections:__subpackages__",
         "//location/nearby/testing:__subpackages__",
@@ -69,12 +78,14 @@ cc_library(
     ],
     copts = ["-DCORE_ADAPTER_DLL"],
     visibility = [
+        ":partners",
         "//chrome/chromeos/assistant/data_migration/lib:__pkg__",
         "//connections:__subpackages__",
         "//location/nearby/testing:__subpackages__",
         "//sharing:__subpackages__",
     ],
     deps = [
+        "//connections/implementation/proto:offline_wire_formats_cc_proto",
         "//internal/interop:authentication_status",
         "//internal/platform:base",
         "//internal/platform:types",

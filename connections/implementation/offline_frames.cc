@@ -15,11 +15,11 @@
 #include "connections/implementation/offline_frames.h"
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "connections/connection_options.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/internal_payload.h"
 #include "connections/implementation/offline_frames_validator.h"
@@ -28,6 +28,7 @@
 #include "connections/status.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/exception.h"
 
 namespace nearby {
 namespace connections {
@@ -36,16 +37,17 @@ namespace {
 
 using ExceptionOrOfflineFrame =
     ExceptionOr<::location::nearby::connections::OfflineFrame>;
-using MessageLite = ::google::protobuf::MessageLite;
+using ::location::nearby::connections::AutoReconnectFrame;
 using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
 using ::location::nearby::connections::ConnectionRequestFrame;
 using ::location::nearby::connections::ConnectionResponseFrame;
+using ::location::nearby::connections::KeepAliveFrame;
 using ::location::nearby::connections::LocationHint;
+using ::location::nearby::connections::MediumRole;
 using ::location::nearby::connections::OfflineFrame;
 using ::location::nearby::connections::OsInfo;
 using ::location::nearby::connections::PayloadTransferFrame;
 using ::location::nearby::connections::V1Frame;
-using ::location::nearby::connections::AutoReconnectFrame;
 
 ByteArray ToBytes(OfflineFrame&& frame) {
   ByteArray bytes(frame.ByteSizeLong());
@@ -109,6 +111,13 @@ ByteArray ForConnectionRequestConnections(
   medium_metadata->set_ap_frequency(conection_info.ap_frequency);
   if (!conection_info.ip_address.empty())
     medium_metadata->set_ip_address(conection_info.ip_address);
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableDynamicRoleSwitch) &&
+      conection_info.medium_role.has_value()) {
+    medium_metadata->mutable_medium_role()->MergeFrom(
+        conection_info.medium_role.value());
+  }
   if (!conection_info.supported_mediums.empty()) {
     for (const auto& medium : conection_info.supported_mediums) {
       connection_request->add_mediums(MediumToConnectionRequestMedium(medium));
@@ -180,7 +189,7 @@ ByteArray ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
   v1_frame->set_type(V1Frame::CONNECTION_RESPONSE);
   auto* sub_frame = v1_frame->mutable_connection_response();
 
-  // For backward compatiblility, here still sets both status and response
+  // For backward compatibility, here still sets both status and response
   // parameters until the response feature is roll out in all supported
   // devices.
   sub_frame->set_status(status);
@@ -292,6 +301,28 @@ ByteArray ForBwuWifiLanPathAvailable(const std::string& ip_address,
   auto* wifi_lan_socket = upgrade_path_info->mutable_wifi_lan_socket();
   wifi_lan_socket->set_ip_address(ip_address);
   wifi_lan_socket->set_wifi_port(port);
+
+  return ToBytes(std::move(frame));
+}
+
+ByteArray ForBwuAwdlPathAvailable(const std::string& service_name,
+                                  const std::string& service_type,
+                                  const std::string& password) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
+  auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
+  sub_frame->set_event_type(
+      BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_AVAILABLE);
+  auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
+  upgrade_path_info->set_medium(UpgradePathInfo::AWDL);
+  upgrade_path_info->set_supports_client_introduction_ack(true);
+  auto* awdl_socket = upgrade_path_info->mutable_awdl_credentials();
+  awdl_socket->set_service_name(service_name);
+  awdl_socket->set_service_type(service_type);
+  awdl_socket->set_password(password);
 
   return ToBytes(std::move(frame));
 }
@@ -462,6 +493,30 @@ ByteArray ForBwuFailure(const UpgradePathInfo& info) {
   auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
   *upgrade_path_info = info;
 
+  *sub_frame->mutable_upgrade_path_info() = info;
+
+  return ToBytes(std::move(frame));
+}
+
+ByteArray ForBwuPathRequest(const std::vector<Medium>& mediums,
+                            const MediumRole& medium_role) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
+  auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
+  sub_frame->set_event_type(
+      BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_REQUEST);
+  auto* upgrade_path_request =
+      sub_frame->mutable_upgrade_path_info()->mutable_upgrade_path_request();
+  for (const auto& medium : mediums) {
+    upgrade_path_request->add_mediums(MediumToUpgradePathInfoMedium(medium));
+  }
+  auto* role =
+      upgrade_path_request->mutable_medium_meta_data()->mutable_medium_role();
+  role->MergeFrom(medium_role);
+
   return ToBytes(std::move(frame));
 }
 
@@ -473,6 +528,18 @@ ByteArray ForKeepAlive() {
   v1_frame->set_type(V1Frame::KEEP_ALIVE);
   v1_frame->mutable_keep_alive();
 
+  return ToBytes(std::move(frame));
+}
+
+ByteArray ForKeepAlive(bool ack, uint32_t seq_num) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::KEEP_ALIVE);
+  KeepAliveFrame* keep_alive = v1_frame->mutable_keep_alive();
+  keep_alive->set_ack(ack);
+  keep_alive->set_seq_num(seq_num);
   return ToBytes(std::move(frame));
 }
 
@@ -503,14 +570,13 @@ ByteArray ForAutoReconnectIntroduction(const std::string& endpoint_id) {
   return ToBytes(std::move(frame));
 }
 
-ByteArray ForAutoReconnectIntroductionAck(const std::string& endpoint_id) {
+ByteArray ForAutoReconnectIntroductionAck() {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
   v1_frame->set_type(V1Frame::AUTO_RECONNECT);
   auto* auto_reconnect = v1_frame->mutable_auto_reconnect();
-  auto_reconnect->set_endpoint_id(endpoint_id);
   auto_reconnect->set_event_type(AutoReconnectFrame::CLIENT_INTRODUCTION_ACK);
 
   return ToBytes(std::move(frame));
@@ -538,6 +604,10 @@ UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium) {
       return UpgradePathInfo::WEB_RTC;
     case Medium::WEB_RTC_NON_CELLULAR:
       return UpgradePathInfo::WEB_RTC_NON_CELLULAR;
+    case Medium::USB:
+      return UpgradePathInfo::USB;
+    case Medium::AWDL:
+      return UpgradePathInfo::AWDL;
     default:
       return UpgradePathInfo::UNKNOWN_MEDIUM;
   }
@@ -565,6 +635,10 @@ Medium UpgradePathInfoMediumToMedium(UpgradePathInfo::Medium medium) {
       return Medium::WEB_RTC;
     case UpgradePathInfo::WEB_RTC_NON_CELLULAR:
       return Medium::WEB_RTC_NON_CELLULAR;
+    case UpgradePathInfo::USB:
+      return Medium::USB;
+    case UpgradePathInfo::AWDL:
+      return Medium::AWDL;
     default:
       return Medium::UNKNOWN_MEDIUM;
   }
@@ -580,6 +654,8 @@ ConnectionRequestFrame::Medium MediumToConnectionRequestMedium(Medium medium) {
       return ConnectionRequestFrame::WIFI_HOTSPOT;
     case Medium::BLE:
       return ConnectionRequestFrame::BLE;
+    case Medium::BLE_L2CAP:
+      return ConnectionRequestFrame::BLE_L2CAP;
     case Medium::WIFI_LAN:
       return ConnectionRequestFrame::WIFI_LAN;
     case Medium::WIFI_AWARE:
@@ -592,6 +668,10 @@ ConnectionRequestFrame::Medium MediumToConnectionRequestMedium(Medium medium) {
       return ConnectionRequestFrame::WEB_RTC;
     case Medium::WEB_RTC_NON_CELLULAR:
       return ConnectionRequestFrame::WEB_RTC_NON_CELLULAR;
+    case Medium::USB:
+      return ConnectionRequestFrame::USB;
+    case Medium::AWDL:
+      return ConnectionRequestFrame::AWDL;
     default:
       return ConnectionRequestFrame::UNKNOWN_MEDIUM;
   }
@@ -607,6 +687,8 @@ Medium ConnectionRequestMediumToMedium(ConnectionRequestFrame::Medium medium) {
       return Medium::WIFI_HOTSPOT;
     case ConnectionRequestFrame::BLE:
       return Medium::BLE;
+    case ConnectionRequestFrame::BLE_L2CAP:
+      return Medium::BLE_L2CAP;
     case ConnectionRequestFrame::WIFI_LAN:
       return Medium::WIFI_LAN;
     case ConnectionRequestFrame::WIFI_AWARE:
@@ -619,6 +701,10 @@ Medium ConnectionRequestMediumToMedium(ConnectionRequestFrame::Medium medium) {
       return Medium::WEB_RTC;
     case ConnectionRequestFrame::WEB_RTC_NON_CELLULAR:
       return Medium::WEB_RTC_NON_CELLULAR;
+    case ConnectionRequestFrame::USB:
+      return Medium::USB;
+    case ConnectionRequestFrame::AWDL:
+      return Medium::AWDL;
     default:
       return Medium::UNKNOWN_MEDIUM;
   }

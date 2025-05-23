@@ -91,7 +91,8 @@ std::string GetEndpointIdString(int endpoint_id) {
 
 void ListenerInitiatedCB(
     NC_INSTANCE instance, int endpoint_id,
-    const NC_CONNECTION_RESPONSE_INFO *connection_response_info) {
+    const NC_CONNECTION_RESPONSE_INFO *connection_response_info,
+    void *context) {
   NEARBY_LOGS(INFO) << "Advertising initiated: id="
                     << GetEndpointIdString(endpoint_id);
 
@@ -125,7 +126,7 @@ void ListenerInitiatedCB(
   }
 }
 
-void ListenerAcceptedCB(NC_INSTANCE instance, int endpoint_id) {
+void ListenerAcceptedCB(NC_INSTANCE instance, int endpoint_id, void *context) {
   NEARBY_LOGS(INFO) << "Advertising accepted: id="
                     << GetEndpointIdString(endpoint_id);
   Dart_CObject dart_object_accepted;
@@ -139,8 +140,8 @@ void ListenerAcceptedCB(NC_INSTANCE instance, int endpoint_id) {
   }
 }
 
-void ListenerRejectedCB(NC_INSTANCE instance, int endpoint_id,
-                        NC_STATUS status) {
+void ListenerRejectedCB(NC_INSTANCE instance, int endpoint_id, NC_STATUS status,
+                        void *context) {
   NEARBY_LOGS(INFO) << "Advertising rejected: id="
                     << GetEndpointIdString(endpoint_id);
   Dart_CObject dart_object_rejected;
@@ -154,7 +155,8 @@ void ListenerRejectedCB(NC_INSTANCE instance, int endpoint_id,
   }
 }
 
-void ListenerDisconnectedCB(NC_INSTANCE instance, int endpoint_id) {
+void ListenerDisconnectedCB(NC_INSTANCE instance, int endpoint_id,
+                            void *context) {
   NEARBY_LOGS(INFO) << "Advertising disconnected: id="
                     << GetEndpointIdString(endpoint_id);
   Dart_CObject dart_object_disconnected;
@@ -169,7 +171,7 @@ void ListenerDisconnectedCB(NC_INSTANCE instance, int endpoint_id) {
 }
 
 void ListenerBandwidthChangedCB(NC_INSTANCE instance, int endpoint_id,
-                                NC_MEDIUM medium) {
+                                NC_MEDIUM medium, void *context) {
   NEARBY_LOGS(INFO) << "Advertising bandwidth changed: id="
                     << GetEndpointIdString(endpoint_id);
   Dart_CObject dart_object_bandwidth_changed;
@@ -186,7 +188,7 @@ void ListenerBandwidthChangedCB(NC_INSTANCE instance, int endpoint_id,
 
 void ListenerEndpointFoundCB(NC_INSTANCE instance, int endpoint_id,
                              const NC_DATA *endpoint_info,
-                             const NC_DATA *service_id) {
+                             const NC_DATA *service_id, void *context) {
   NEARBY_LOGS(INFO) << "Device discovered: id="
                     << GetEndpointIdString(endpoint_id);
   NEARBY_LOGS(INFO) << "Device discovered: service_id="
@@ -223,7 +225,8 @@ void ListenerEndpointFoundCB(NC_INSTANCE instance, int endpoint_id,
   }
 }
 
-void ListenerEndpointLostCB(NC_INSTANCE instance, int endpoint_id) {
+void ListenerEndpointLostCB(NC_INSTANCE instance, int endpoint_id,
+                            void *context) {
   NEARBY_LOGS(INFO) << "Device lost: id=" << GetEndpointIdString(endpoint_id);
   Dart_CObject dart_object_lost;
   dart_object_lost.type = Dart_CObject_kInt32;
@@ -237,7 +240,8 @@ void ListenerEndpointLostCB(NC_INSTANCE instance, int endpoint_id) {
 }
 
 void ListenerEndpointDistanceChangedCB(NC_INSTANCE instance, int endpoint_id,
-                                       NC_DISTANCE_INFO distance_info) {
+                                       NC_DISTANCE_INFO distance_info,
+                                       void *context) {
   (void)distance_info;  // Avoid unused parameter warning
   NEARBY_LOGS(INFO) << "Device distance changed: id="
                     << GetEndpointIdString(endpoint_id);
@@ -253,7 +257,7 @@ void ListenerEndpointDistanceChangedCB(NC_INSTANCE instance, int endpoint_id,
 }
 
 void ListenerPayloadCB(NC_INSTANCE instance, int endpoint_id,
-                       const NC_PAYLOAD *payload) {
+                       const NC_PAYLOAD *payload, void *context) {
   NEARBY_LOGS(INFO) << "Payload callback called. id: "
                     << GetEndpointIdString(endpoint_id)
                     << ", payload_id: " << payload->id
@@ -355,7 +359,7 @@ void ListenerPayloadCB(NC_INSTANCE instance, int endpoint_id,
 
 void ListenerPayloadProgressCB(
     NC_INSTANCE instance, int endpoint_id,
-    const NC_PAYLOAD_PROGRESS_INFO *payload_progress_info) {
+    const NC_PAYLOAD_PROGRESS_INFO *payload_progress_info, void *context) {
   NEARBY_LOGS(INFO) << "Payload progress callback called. id: "
                     << GetEndpointIdString(endpoint_id)
                     << ", payload_id: " << payload_progress_info->id
@@ -437,11 +441,14 @@ void EnableBleV2Dart(NC_INSTANCE instance, int64_t enable,
                      Dart_Port result_cb) {
   kClientState->PushNearbyConnectionsApiPort(NearbyConnectionsApi::kEnableBleV2,
                                              result_cb);
-  NcEnableBleV2(instance, enable, [](NC_STATUS status) {
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kEnableBleV2),
-             status);
-  });
+  NcEnableBleV2(
+      instance, enable,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kEnableBleV2),
+                 status);
+      },
+      nullptr);
   NEARBY_LOGS(INFO) << "EnableBleV2Dart callback is called with enable="
                     << enable;
 }
@@ -484,6 +491,8 @@ void StartAdvertisingDart(NC_INSTANCE instance, DataDart service_id,
       options_dart.mediums.wifi_hotspot;
   advertising_options.common_options.allowed_mediums[NC_MEDIUM_WEB_RTC] =
       options_dart.mediums.web_rtc;
+  advertising_options.common_options.allowed_mediums[NC_MEDIUM_AWDL] =
+      options_dart.mediums.awdl != 0;
 
   NC_CONNECTION_REQUEST_INFO request_info{};
 
@@ -495,14 +504,16 @@ void StartAdvertisingDart(NC_INSTANCE instance, DataDart service_id,
   request_info.disconnected_callback = ListenerDisconnectedCB;
   request_info.bandwidth_changed_callback = ListenerBandwidthChangedCB;
 
-  NC_DATA service_id_data =
-      NC_DATA{.size = service_id.size, .data = service_id.data};
-  NcStartAdvertising(instance, &service_id_data, &advertising_options,
-                     &request_info, [](NC_STATUS status) {
-                       ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                                    NearbyConnectionsApi::kStartAdvertising),
-                                status);
-                     });
+  NC_DATA service_id_data = NC_DATA{
+      .size = static_cast<uint64_t>(service_id.size), .data = service_id.data};
+  NcStartAdvertising(
+      instance, &service_id_data, &advertising_options, &request_info,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kStartAdvertising),
+                 status);
+      },
+      nullptr);
 }
 
 void StopAdvertisingDart(NC_INSTANCE instance, Dart_Port result_cb) {
@@ -514,12 +525,15 @@ void StopAdvertisingDart(NC_INSTANCE instance, Dart_Port result_cb) {
   kClientState->PushNearbyConnectionsApiPort(
       NearbyConnectionsApi::kStopAdvertising, result_cb);
 
-  NcStopAdvertising(instance, [](NC_STATUS status) {
-    kClientState->SetConnectionListenerDart(nullptr);
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kStopAdvertising),
-             status);
-  });
+  NcStopAdvertising(
+      instance,
+      [](NC_STATUS status, void *context) {
+        kClientState->SetConnectionListenerDart(nullptr);
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kStopAdvertising),
+                 status);
+      },
+      nullptr);
 }
 
 void StartDiscoveryDart(NC_INSTANCE instance, DataDart service_id,
@@ -555,6 +569,8 @@ void StartDiscoveryDart(NC_INSTANCE instance, DataDart service_id,
       options_dart.mediums.ble != 0;
   discovery_options.common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN] =
       options_dart.mediums.wifi_lan != 0;
+  discovery_options.common_options.allowed_mediums[NC_MEDIUM_AWDL] =
+      options_dart.mediums.awdl != 0;
   discovery_options.common_options.allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT] =
       options_dart.mediums.wifi_hotspot;
   discovery_options.common_options.allowed_mediums[NC_MEDIUM_WEB_RTC] =
@@ -567,14 +583,16 @@ void StartDiscoveryDart(NC_INSTANCE instance, DataDart service_id,
   listener.endpoint_found_callback = &ListenerEndpointFoundCB;
   listener.endpoint_lost_callback = &ListenerEndpointLostCB;
 
-  NC_DATA service_id_data =
-      NC_DATA{.size = service_id.size, .data = service_id.data};
-  NcStartDiscovery(instance, &service_id_data, &discovery_options, &listener,
-                   [](NC_STATUS status) {
-                     ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                                  NearbyConnectionsApi::kStartDiscovery),
-                              status);
-                   });
+  NC_DATA service_id_data = NC_DATA{
+      .size = static_cast<uint64_t>(service_id.size), .data = service_id.data};
+  NcStartDiscovery(
+      instance, &service_id_data, &discovery_options, &listener,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kStartDiscovery),
+                 status);
+      },
+      nullptr);
 }
 
 void StopDiscoveryDart(NC_INSTANCE instance, Dart_Port result_cb) {
@@ -586,12 +604,15 @@ void StopDiscoveryDart(NC_INSTANCE instance, Dart_Port result_cb) {
   kClientState->PushNearbyConnectionsApiPort(
       NearbyConnectionsApi::kStopDiscovery, result_cb);
 
-  NcStopDiscovery(instance, [](NC_STATUS status) {
-    kClientState->SetDiscoveryListenerDart(nullptr);
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kStopDiscovery),
-             status);
-  });
+  NcStopDiscovery(
+      instance,
+      [](NC_STATUS status, void *context) {
+        kClientState->SetDiscoveryListenerDart(nullptr);
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kStopDiscovery),
+                 status);
+      },
+      nullptr);
 }
 
 void RequestConnectionDart(NC_INSTANCE instance, int endpoint_id,
@@ -630,6 +651,8 @@ void RequestConnectionDart(NC_INSTANCE instance, int endpoint_id,
       options_dart.mediums.ble != 0;
   connection_options.common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN] =
       options_dart.mediums.wifi_lan != 0;
+  connection_options.common_options.allowed_mediums[NC_MEDIUM_AWDL] =
+      options_dart.mediums.awdl != 0;
   connection_options.common_options.allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT] =
       options_dart.mediums.wifi_hotspot;
   connection_options.common_options.allowed_mediums[NC_MEDIUM_WEB_RTC] =
@@ -645,12 +668,14 @@ void RequestConnectionDart(NC_INSTANCE instance, int endpoint_id,
   request_info.disconnected_callback = ListenerDisconnectedCB;
   request_info.bandwidth_changed_callback = ListenerBandwidthChangedCB;
 
-  NcRequestConnection(instance, endpoint_id, &request_info, &connection_options,
-                      [](NC_STATUS status) {
-                        ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                                     NearbyConnectionsApi::kRequestConnection),
-                                 status);
-                      });
+  NcRequestConnection(
+      instance, endpoint_id, &request_info, &connection_options,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kRequestConnection),
+                 status);
+      },
+      nullptr);
 }
 
 void AcceptConnectionDart(NC_INSTANCE instance, int endpoint_id,
@@ -670,11 +695,14 @@ void AcceptConnectionDart(NC_INSTANCE instance, int endpoint_id,
   listener.received_callback = &ListenerPayloadCB;
   listener.progress_updated_callback = &ListenerPayloadProgressCB;
 
-  NcAcceptConnection(instance, endpoint_id, listener, [](NC_STATUS status) {
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kAcceptConnection),
-             status);
-  });
+  NcAcceptConnection(
+      instance, endpoint_id, listener,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kAcceptConnection),
+                 status);
+      },
+      nullptr);
 }
 
 void RejectConnectionDart(NC_INSTANCE instance, int endpoint_id,
@@ -687,11 +715,14 @@ void RejectConnectionDart(NC_INSTANCE instance, int endpoint_id,
   kClientState->PushNearbyConnectionsApiPort(
       NearbyConnectionsApi::kRejectConnection, result_cb);
 
-  NcRejectConnection(instance, endpoint_id, [](NC_STATUS status) {
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kRejectConnection),
-             status);
-  });
+  NcRejectConnection(
+      instance, endpoint_id,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kRejectConnection),
+                 status);
+      },
+      nullptr);
 }
 
 void DisconnectFromEndpointDart(NC_INSTANCE instance, int endpoint_id,
@@ -704,11 +735,14 @@ void DisconnectFromEndpointDart(NC_INSTANCE instance, int endpoint_id,
   kClientState->PushNearbyConnectionsApiPort(
       NearbyConnectionsApi::kDisconnectFromEndpoint, result_cb);
 
-  NcDisconnectFromEndpoint(instance, endpoint_id, [](NC_STATUS status) {
-    ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                 NearbyConnectionsApi::kDisconnectFromEndpoint),
-             status);
-  });
+  NcDisconnectFromEndpoint(
+      instance, endpoint_id,
+      [](NC_STATUS status, void *context) {
+        ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                     NearbyConnectionsApi::kDisconnectFromEndpoint),
+                 status);
+      },
+      nullptr);
 }
 
 void SendPayloadDart(NC_INSTANCE instance, int endpoint_id,
@@ -738,12 +772,14 @@ void SendPayloadDart(NC_INSTANCE instance, int endpoint_id,
       payload.content.bytes.content.size = payload_dart.data.size;
 
       const int *endpoint_ids_ptr = endpoint_ids.data();
-      NcSendPayload(instance, endpoint_ids.size(), endpoint_ids_ptr, &payload,
-                    [](NC_STATUS status) {
-                      ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                                   NearbyConnectionsApi::kSendPayload),
-                               status);
-                    });
+      NcSendPayload(
+          instance, endpoint_ids.size(), endpoint_ids_ptr, &payload,
+          [](NC_STATUS status, void *context) {
+            ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                         NearbyConnectionsApi::kSendPayload),
+                     status);
+          },
+          nullptr);
       break;
     }
     case PAYLOAD_TYPE_FILE:
@@ -762,12 +798,14 @@ void SendPayloadDart(NC_INSTANCE instance, int endpoint_id,
       payload.content.file.parent_folder = nullptr;
       const int *endpoint_ids_ptr = endpoint_ids.data();
       NC_PAYLOAD moved_payload = std::move(payload);
-      NcSendPayload(instance, endpoint_ids.size(), endpoint_ids_ptr,
-                    &moved_payload, [](NC_STATUS status) {
-                      ResultCB(kClientState->PopNearbyConnectionsApiPort(
-                                   NearbyConnectionsApi::kSendPayload),
-                               status);
-                    });
+      NcSendPayload(
+          instance, endpoint_ids.size(), endpoint_ids_ptr, &moved_payload,
+          [](NC_STATUS status, void *context) {
+            ResultCB(kClientState->PopNearbyConnectionsApiPort(
+                         NearbyConnectionsApi::kSendPayload),
+                     status);
+          },
+          nullptr);
 
       break;
   }

@@ -91,7 +91,6 @@ ExceptionOr<ByteArray> BleInputStream::Read(std::int64_t size) {
   [condition_ unlock];
 
   if (dataToReturn) {
-    NSLog(@"[NEARBY] Input stream: Received data of size: %lu", (unsigned long)dataToReturn.length);
     return ExceptionOr<ByteArray>(ByteArrayFromNSData(dataToReturn));
   } else {
     return ExceptionOr<ByteArray>{Exception::kIo};
@@ -115,8 +114,6 @@ BleOutputStream::~BleOutputStream() {
 
 Exception BleOutputStream::Write(const ByteArray &data) {
   [condition_ lock];
-  NSLog(@"[NEARBY] Sending data of size: %lu", NSDataFromByteArray(data).length);
-
   if (!connection_) {
     [condition_ unlock];
     return {Exception::kIo};
@@ -180,12 +177,13 @@ Exception BleOutputStream::Close() {
 BleSocket::BleSocket(id<GNCMConnection> connection)
     : input_stream_(new BleInputStream()),
       output_stream_(new BleOutputStream(connection)),
-      peripheral_(new EmptyBlePeripheral()) {}
+      peripheral_id_(BlePeripheral::DefaultBlePeripheral().GetUniqueId()) {}
 
-BleSocket::BleSocket(id<GNCMConnection> connection, api::ble_v2::BlePeripheral *peripheral)
+BleSocket::BleSocket(id<GNCMConnection> connection,
+                     api::ble_v2::BlePeripheral::UniqueId peripheral_id)
     : input_stream_(new BleInputStream()),
       output_stream_(new BleOutputStream(connection)),
-      peripheral_(peripheral) {}
+      peripheral_id_(peripheral_id) {}
 
 BleSocket::~BleSocket() {
   absl::MutexLock lock(&mutex_);

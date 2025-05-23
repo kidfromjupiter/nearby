@@ -17,13 +17,13 @@
 
 #include <stdint.h>
 
-#include <functional>
 #include <memory>
 
 #include "internal/platform/clock.h"
 #include "internal/platform/task_runner.h"
 #include "internal/platform/timer.h"
 #include "internal/test/fake_clock.h"
+#include "internal/test/fake_task_runner.h"
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/fast_initiation_manager.h"
 #include "sharing/internal/api/wifi_adapter.h"
@@ -65,6 +65,13 @@ class FakeContext : public Context {
   FakeFastInitiationManager* fake_fast_initiation_manager() const {
     return fake_fast_initiation_manager_.get();
   }
+  FakeTaskRunner* fake_task_runner() const {
+    return executor_.get();
+  }
+
+  FakeTaskRunner* last_sequenced_task_runner() const {
+    return last_sequenced_task_runner_;
+  }
 
  private:
   std::unique_ptr<FakeClock> fake_clock_;
@@ -72,7 +79,8 @@ class FakeContext : public Context {
   std::unique_ptr<FakeBluetoothAdapter> fake_bluetooth_adapter_;
   std::unique_ptr<FakeWifiAdapter> fake_wifi_adapter_;
   std::unique_ptr<FakeFastInitiationManager> fake_fast_initiation_manager_;
-  std::unique_ptr<TaskRunner> executor_;
+  std::unique_ptr<FakeTaskRunner> executor_;
+  mutable FakeTaskRunner* last_sequenced_task_runner_ = nullptr;
 };
 
 }  // namespace nearby

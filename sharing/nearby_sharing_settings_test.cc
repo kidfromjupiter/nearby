@@ -15,7 +15,6 @@
 #include "sharing/nearby_sharing_settings.h"
 
 #include <algorithm>
-#include <filesystem>  // NOLINT(build/c++17)
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,9 +26,9 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "internal/base/files.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
-#include "sharing/common/compatible_u8_string.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/common/nearby_share_prefs.h"
 #include "sharing/internal/test/fake_context.h"
@@ -118,7 +117,6 @@ class NearbyShareSettingsTest : public ::testing::Test {
  public:
   NearbyShareSettingsTest()
       : local_device_data_manager_(kDefaultDeviceName) {
-    FakeTaskRunner::ResetPendingTasksCount();
     prefs::RegisterNearbySharingPrefs(preference_manager_);
     nearby_share_settings_ = std::make_unique<NearbyShareSettings>(
         &context_, context_.GetClock(), fake_device_info_, preference_manager_,
@@ -146,7 +144,7 @@ class NearbyShareSettingsTest : public ::testing::Test {
   // Waits for running tasks to complete.
   void Flush() {
     absl::SleepFor(absl::Seconds(1));
-    FakeTaskRunner::WaitForRunningTasksWithTimeout(absl::Milliseconds(200));
+    context_.fake_task_runner()->SyncWithTimeout(absl::Milliseconds(200));
   }
 
   void FastForward(absl::Duration duration) {
@@ -171,8 +169,7 @@ class NearbyShareSettingsTest : public ::testing::Test {
 
 TEST_F(NearbyShareSettingsTest, GetAndSetCustomSavePath) {
   absl::Notification notification;
-  std::string save_path =
-      GetCompatibleU8String(std::filesystem::temp_directory_path().u8string());
+  std::string save_path = GetTemporaryDirectory()->ToString();
   settings()->SetCustomSavePathAsync(save_path,
                                      [&]() { notification.Notify(); });
   Flush();

@@ -16,12 +16,25 @@
 #define THIRD_PARTY_NEARBY_SHARING_FILE_ATTACHMENT_H_
 
 #include <cstdint>
-#include <filesystem>  // NOLINT(build/c++17)
 #include <optional>
 #include <string>
 #include <utility>
 
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
+#if defined(_WIN32)
+#if defined(PLATFORM_UNKNOWN)
+#define UNDEF_PLATFORM_UNKNOWN
+#pragma push_macro("PLATFORM_UNKNOWN")
+#undef PLATFORM_UNKNOWN
+#endif  // defined(PLATFORM_UNKNOWN)
+#endif   // defined(_WIN32)
+#include "proto/sharing_enums.pb.h"
+#if defined(_WIN32)
+#if defined(UNDEF_PLATFORM_UNKNOWN)
+#pragma pop_macro("PLATFORM_UNKNOWN")
+#endif  // defined(UNDEF_PLATFORM_UNKNOWN)
+#endif  // defined(_WIN32)
 #include "sharing/attachment.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/proto/wire_format.pb.h"
@@ -35,14 +48,16 @@ class FileAttachment : public Attachment {
  public:
   using Type = nearby::sharing::service::proto::FileMetadata::Type;
 
-  explicit FileAttachment(std::filesystem::path file_path,
-                          absl::string_view mime_type = "",
-                          std::string parent_folder = "", int32_t batch_id = 0,
-                          SourceType source_type = SourceType::kUnknown);
-  FileAttachment(int64_t id, int64_t size, std::string file_name,
-                 std::string mime_type, Type type,
-                 std::string parent_folder = "", int32_t batch_id = 0,
-                 SourceType source_type = SourceType::kUnknown);
+  explicit FileAttachment(
+      FilePath file_path, absl::string_view mime_type = "",
+      std::string parent_folder = "", int32_t batch_id = 0,
+      location::nearby::proto::sharing::AttachmentSourceType source_type =
+          location::nearby::proto::sharing::ATTACHMENT_SOURCE_UNKNOWN);
+  FileAttachment(
+      int64_t id, int64_t size, std::string file_name, std::string mime_type,
+      Type type, std::string parent_folder = "", int32_t batch_id = 0,
+      location::nearby::proto::sharing::AttachmentSourceType source_type =
+          location::nearby::proto::sharing::ATTACHMENT_SOURCE_UNKNOWN);
   FileAttachment(const FileAttachment&) = default;
   FileAttachment(FileAttachment&&) = default;
   FileAttachment& operator=(const FileAttachment&) = default;
@@ -53,7 +68,7 @@ class FileAttachment : public Attachment {
   absl::string_view mime_type() const { return mime_type_; }
   absl::string_view parent_folder() const { return parent_folder_; }
   Type type() const { return type_; }
-  const std::optional<std::filesystem::path>& file_path() const {
+  const std::optional<FilePath>& file_path() const {
     return file_path_;
   }
 
@@ -61,7 +76,7 @@ class FileAttachment : public Attachment {
   absl::string_view GetDescription() const override;
   ShareType GetShareType() const override;
 
-  void set_file_path(std::optional<std::filesystem::path> path) {
+  void set_file_path(std::optional<FilePath> path) {
     file_path_ = std::move(path);
   }
 
@@ -70,7 +85,7 @@ class FileAttachment : public Attachment {
   std::string file_name_;
   std::string mime_type_;
   Type type_;
-  std::optional<std::filesystem::path> file_path_;
+  std::optional<FilePath> file_path_;
   std::string parent_folder_;
 };
 

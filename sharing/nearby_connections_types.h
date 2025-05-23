@@ -17,7 +17,6 @@
 
 #include <stdint.h>
 
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <limits>
 #include <optional>
@@ -28,9 +27,9 @@
 #include "absl/random/random.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "internal/base/file_path.h"
 #include "internal/base/files.h"
 #include "internal/interop/authentication_status.h"
-#include "sharing/common/compatible_u8_string.h"
 
 namespace nearby {
 namespace sharing {
@@ -200,24 +199,6 @@ struct MediumSelection {
 
 // Options for a call to NearbyConnections::StartAdvertising().
 struct AdvertisingOptions {
-  AdvertisingOptions() = default;
-  AdvertisingOptions(Strategy strategy, MediumSelection allowed_mediums,
-                     bool auto_upgrade_bandwidth,
-                     bool enforce_topology_constraints,
-                     bool enable_bluetooth_listening,
-                     bool enable_webrtc_listening,
-                     bool use_stable_endpoint_id,
-                     Uuid fast_advertisement_service_uuid) {
-    this->strategy = strategy;
-    this->allowed_mediums = allowed_mediums;
-    this->auto_upgrade_bandwidth = auto_upgrade_bandwidth;
-    this->enforce_topology_constraints = enforce_topology_constraints;
-    this->enable_bluetooth_listening = enable_bluetooth_listening;
-    this->enable_webrtc_listening = enable_webrtc_listening;
-    this->use_stable_endpoint_id = use_stable_endpoint_id;
-    this->fast_advertisement_service_uuid = fast_advertisement_service_uuid;
-  }
-
   // The strategy to use for advertising. Must match the strategy used in
   // DiscoveryOptions for remote devices to see this advertisement.
   Strategy strategy;
@@ -252,15 +233,6 @@ struct AdvertisingOptions {
 
 // Options for a call to NearbyConnections::StartDiscovery().
 struct DiscoveryOptions {
-  DiscoveryOptions() = default;
-  DiscoveryOptions(Strategy strategy, MediumSelection allowed_mediums,
-                   std::optional<Uuid> fast_advertisement_service_uuid,
-                   bool is_out_of_band_connection) {
-    this->strategy = strategy;
-    this->allowed_mediums = allowed_mediums;
-    this->fast_advertisement_service_uuid = fast_advertisement_service_uuid,
-    this->is_out_of_band_connection = is_out_of_band_connection;
-  }
   // The strategy to use for discovering. Must match the strategy used in
   // AdvertisingOptions in order to see advertisements.
   Strategy strategy;
@@ -274,24 +246,13 @@ struct DiscoveryOptions {
   // inject discovery information synced outside the Nearby Connections library.
   // Intended to be used in conjunction with InjectEndpoint().
   bool is_out_of_band_connection = false;
+  // An optional UUID16 to use for BLE discovery if the normal service data
+  // UUID causes the advertisement packet to exceed the maximum size.
+  std::optional<uint16_t> alternate_service_uuid;
 };
 
 // Options for a call to NearbyConnections::RequestConnection().
 struct ConnectionOptions {
-  ConnectionOptions() = default;
-  ConnectionOptions(
-      MediumSelection allowed_mediums,
-      std::optional<std::vector<uint8_t>> remote_bluetooth_mac_address,
-      std::optional<absl::Duration> keep_alive_interval,
-      std::optional<absl::Duration> keep_alive_timeout,
-      bool non_disruptive_hotspot_mode) {
-    this->allowed_mediums = allowed_mediums;
-    this->remote_bluetooth_mac_address = remote_bluetooth_mac_address;
-    this->keep_alive_interval = keep_alive_interval;
-    this->keep_alive_timeout = keep_alive_timeout;
-    this->non_disruptive_hotspot_mode = non_disruptive_hotspot_mode;
-  }
-
   // Describes which mediums are allowed to be used for connection. Note that
   // allowing an otherwise unsupported medium is ok. Only the intersection of
   // allowed and supported mediums will be used to connect.
@@ -396,11 +357,10 @@ enum class DistanceInfo {
 
 struct InputFile {
   InputFile() = default;
-  explicit InputFile(std::string path) {
-    this->path = std::filesystem::u8path(path);
-  }
+  explicit InputFile(absl::string_view file_path)
+      : path(file_path) {}
 
-  std::filesystem::path path;
+  FilePath path;
 };
 
 // A simple payload containing raw bytes.
@@ -450,10 +410,10 @@ struct Payload {
 
   explicit Payload(InputFile file,
                    absl::string_view parent_folder = absl::string_view()) {
-    id = std::hash<std::string>()(GetCompatibleU8String(file.path.u8string()));
+    id = std::hash<std::string>()(file.path.ToString());
 
     content.type = PayloadContent::Type::kFile;
-    std::optional<uintmax_t> size = GetFileSize(file.path);
+    std::optional<uintmax_t> size = GetFileSize(file.path.GetPath());
     if (size.has_value()) {
       content.file_payload.size = *size;
     }
@@ -471,7 +431,7 @@ struct Payload {
           absl::string_view parent_folder = absl::string_view())
       : id(id) {
     content.type = PayloadContent::Type::kFile;
-    std::optional<uintmax_t> size = GetFileSize(file.path);
+    std::optional<uintmax_t> size = GetFileSize(file.path.GetPath());
     if (size.has_value()) {
       content.file_payload.size = *size;
     }

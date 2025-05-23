@@ -71,7 +71,6 @@ class FakeNearbyShareClient : public nearby::sharing::api::SharingRpcClient {
     list_public_certificates_responses_ = responses;
   }
 
- private:
   void UpdateDevice(
       const proto::UpdateDeviceRequest& request,
       absl::AnyInvocable<
@@ -103,6 +102,83 @@ class FakeNearbyShareClient : public nearby::sharing::api::SharingRpcClient {
       list_public_certificates_responses_;
 };
 
+// A fake implementation of the Nearby Identity RPC client that stores all
+// request data. Only use in unit tests.
+class FakeNearbyIdentityClient
+    : public nearby::sharing::api::IdentityRpcClient {
+ public:
+  FakeNearbyIdentityClient() = default;
+  ~FakeNearbyIdentityClient() override = default;
+
+  std::vector<google::nearby::identity::v1::PublishDeviceRequest>&
+  publish_device_requests() {
+    return publish_device_requests_;
+  }
+
+  std::vector<google::nearby::identity::v1::QuerySharedCredentialsRequest>&
+  query_shared_credentials_requests() {
+    return query_shared_credentials_requests_;
+  }
+
+  void PublishDevice(
+      const google::nearby::identity::v1::PublishDeviceRequest& request,
+      absl::AnyInvocable<
+          void(const absl::StatusOr<google::nearby::identity::v1::
+                                        PublishDeviceResponse>& response) &&>
+          callback) override;
+
+  void SetPublishDeviceResponse(
+      absl::StatusOr<google::nearby::identity::v1::PublishDeviceResponse>
+          response) {
+    publish_device_response_ = response;
+  }
+
+  void QuerySharedCredentials(
+      const google::nearby::identity::v1::QuerySharedCredentialsRequest&
+          request,
+      absl::AnyInvocable<
+          void(const absl::StatusOr<
+               google::nearby::identity::v1::QuerySharedCredentialsResponse>&
+                   response) &&>
+          callback) override;
+
+  void SetQuerySharedCredentialsResponses(
+      std::vector<absl::StatusOr<
+          google::nearby::identity::v1::QuerySharedCredentialsResponse>>
+          responses) {
+    query_shared_credentials_responses_ = responses;
+  }
+
+  void GetAccountInfo(
+    const google::nearby::identity::v1::GetAccountInfoRequest& request,
+    absl::AnyInvocable<
+        void(const absl::StatusOr<google::nearby::identity::v1::
+                                      GetAccountInfoResponse>& response) &&>
+        callback) override;
+
+  void SetGetAccountInfoResponse(
+      absl::StatusOr<google::nearby::identity::v1::GetAccountInfoResponse>
+          response) {
+    get_account_info_response_ = response;
+  }
+
+  std::vector<google::nearby::identity::v1::PublishDeviceRequest>
+      publish_device_requests_;
+  absl::StatusOr<google::nearby::identity::v1::PublishDeviceResponse>
+      publish_device_response_;
+
+  std::vector<google::nearby::identity::v1::QuerySharedCredentialsRequest>
+      query_shared_credentials_requests_;
+  std::vector<absl::StatusOr<
+      google::nearby::identity::v1::QuerySharedCredentialsResponse>>
+      query_shared_credentials_responses_;
+
+  std::vector<google::nearby::identity::v1::GetAccountInfoRequest>
+      get_account_info_requests_;
+  absl::StatusOr<google::nearby::identity::v1::GetAccountInfoResponse>
+      get_account_info_response_;
+};
+
 class FakeNearbyShareClientFactory
     : public nearby::sharing::api::SharingRpcClientFactory {
  public:
@@ -112,6 +188,9 @@ class FakeNearbyShareClientFactory
  public:
   // Returns all FakeNearbyShareClient instances created by CreateInstance().
   std::vector<FakeNearbyShareClient*>& instances() { return instances_; }
+  std::vector<FakeNearbyIdentityClient*>& identity_instances() {
+    return identity_instances_;
+  }
   nearby::sharing::api::SharingRpcNotifier* GetRpcNotifier() const override {
     return nullptr;
   }
@@ -121,7 +200,11 @@ class FakeNearbyShareClientFactory
   std::unique_ptr<nearby::sharing::api::SharingRpcClient> CreateInstance()
       override;
 
+  std::unique_ptr<nearby::sharing::api::IdentityRpcClient>
+  CreateIdentityInstance() override;
+
   std::vector<FakeNearbyShareClient*> instances_;
+  std::vector<FakeNearbyIdentityClient*> identity_instances_;
 };
 
 }  // namespace sharing

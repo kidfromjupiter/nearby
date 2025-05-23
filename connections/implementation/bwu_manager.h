@@ -15,7 +15,6 @@
 #ifndef CORE_INTERNAL_BWU_MANAGER_H_
 #define CORE_INTERNAL_BWU_MANAGER_H_
 
-#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -26,9 +25,18 @@
 #include "absl/time/time.h"
 #include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
+#include "connections/implementation/endpoint_channel.h"
+#include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
+#include "connections/implementation/mediums/ble_v2.h"
 #include "connections/implementation/mediums/mediums.h"
+#include "connections/medium_selector.h"
+#include "internal/platform/cancelable_alarm.h"
+#include "internal/platform/count_down_latch.h"
+#include "internal/platform/expected.h"
+#include "internal/platform/runnable.h"
 #include "internal/platform/scheduled_executor.h"
+#include "internal/platform/single_thread_executor.h"
 
 namespace nearby {
 namespace connections {
@@ -117,6 +125,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
 
   // Check if BWU is on going for a specific Endpoint
   bool IsUpgradeOngoing(const std::string& endpoint_id);
+  Config GetConfig() const { return config_; }
 
  private:
   static constexpr absl::Duration kReadClientIntroductionFrameTimeout =
@@ -167,7 +176,8 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void ProcessBwuPathAvailableEvent(ClientProxy* client,
                                     const std::string& endpoint_id,
                                     const UpgradePathInfo& upgrade_path_info);
-  std::unique_ptr<EndpointChannel> ProcessBwuPathAvailableEventInternal(
+  ErrorOr<std::unique_ptr<EndpointChannel>>
+  ProcessBwuPathAvailableEventInternal(
       ClientProxy* client, const std::string& endpoint_id,
       const UpgradePathInfo& upgrade_path_info);
   void ProcessLastWriteToPriorChannelEvent(ClientProxy* client,
@@ -181,9 +191,13 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void ProcessEndpointDisconnection(ClientProxy* client,
                                     const std::string& endpoint_id,
                                     CountDownLatch* barrier);
-  void ProcessUpgradeFailureEvent(ClientProxy* client,
-                                  const std::string& endpoint_id,
-                                  const UpgradePathInfo& upgrade_info);
+  void ProcessUpgradeFailureEvent(
+      ClientProxy* client, const std::string& endpoint_id,
+      const UpgradePathInfo& upgrade_info,
+      location::nearby::proto::connections::BandwidthUpgradeResult result,
+      bool record_analytic,
+      location::nearby::proto::connections::OperationResultCode
+          operation_result_code);
   void CancelRetryUpgradeAlarm(const std::string& endpoint_id);
   void CancelAllRetryUpgradeAlarms();
   void TryNextBestUpgradeMediums(ClientProxy* client,
@@ -195,7 +209,16 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void AttemptToRecordBandwidthUpgradeErrorForUnknownEndpoint(
       location::nearby::proto::connections::BandwidthUpgradeResult result,
       location::nearby::proto::connections::BandwidthUpgradeErrorStage
-          error_stage);
+          error_stage,
+      location::nearby::proto::connections::OperationResultCode
+          operation_result_code);
+
+  bool NeedToSwitchRole(
+      ClientProxy* client, const std::string& endpoint_id, Medium medium,
+      const location::nearby::connections::MediumRole& medium_role);
+
+  virtual const location::nearby::connections::OsInfo& GetLocalOsInfo(
+      ClientProxy* client) const;
 
   bool is_single_threaded_for_testing_ = false;
 
@@ -211,6 +234,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
 
   Mediums* mediums_;
   absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers_;
+  BleV2& ble_v2_medium_{mediums_->GetBleV2()};
 
   EndpointManager* endpoint_manager_;
   EndpointChannelManager* channel_manager_;
@@ -236,6 +260,11 @@ class BwuManager : public EndpointManager::FrameProcessor {
   // retry happen, then we can not find the last delay used in the alarm. Thus
   // using a different map to keep track of the delays per endpoint.
   absl::flat_hash_map<std::string, absl::Duration> retry_delays_;
+
+  // Whether the dynamic role switch feature is enabled.
+  bool is_dynamic_role_switch_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
+      config_package_nearby::nearby_connections_feature::
+          kEnableDynamicRoleSwitch);
 };
 
 }  // namespace connections

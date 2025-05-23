@@ -32,7 +32,7 @@ option objc_class_prefix = "GNSHP";
 // in NearbyClearcutLogger (for android, or clearcut_event_logger as the
 // equivalence for Windows) for all events (may exclude settings), and
 // session_id for a pair of events (start and end of a session).
-// Next id: 71
+// Next id: 74
 enum EventType {
   UNKNOWN_EVENT_TYPE = 0;
 
@@ -306,6 +306,16 @@ enum EventType {
   // A QR code sharing session has started
   START_QR_CODE_SESSION = 70;
 
+  // A QR code URL has been opened in a web client/browser instead of in a
+  // native Quick Share app.
+  QR_CODE_OPENED_IN_WEB_CLIENT = 71;
+
+  // A HaTS survey session id has been joined with Quick Share flow id.
+  HATS_JOINT_EVENT = 72;
+
+  // Previews received.
+  RECEIVE_PREVIEWS = 73;
+
   // LINT.ThenChange(//depot/google3/location/nearby/proto/nearby_event_codes.proto:SharingEventCode)
 }
 
@@ -425,6 +435,8 @@ enum AttachmentTransmissionStatus {
   // or user turn on airplane mode.
   LOST_CONNECTIVITY_TRANSMISSION_STATUS = 29
       /*[ status_bucket = STATUS_INTERRUPTION ]*/;
+  // Connection failed due to the medium is not allowed.
+  FAILED_DISALLOWED_MEDIUM = 30;
 }
 
 // Generic result status of NearbyConnections API calls.
@@ -526,6 +538,8 @@ enum DeviceType {
   TABLET = 2;
   LAPTOP = 3;
   CAR = 4;
+  FOLDABLE = 5;
+  XR = 6;
 }
 
 // TODO(fdi): may eventually include windows, iOS, etc.
@@ -802,7 +816,11 @@ enum SharingUseCase {
   USE_CASE_APP_SHARE = 4;
   USE_CASE_QUICK_SETTING_FILE_SHARE = 5;
   USE_CASE_SETUP_WIZARD = 6;
-  USE_CASE_NEARBY_SHARE_WITH_QR_CODE = 7;
+  // Deprecated. QR code is an addition to existing use cases rather than being
+  // a separate use case.
+  USE_CASE_NEARBY_SHARE_WITH_QR_CODE = 7 [deprecated = true];
+  // The user was redirected from Bluetooth sharing UI to Nearby Share
+  USE_CASE_REDIRECTED_FROM_BLUETOOTH_SHARE = 8;
 }
 
 // Used only for Windows App now.
@@ -820,6 +838,7 @@ enum AttachmentSourceType {
   ATTACHMENT_SOURCE_SELECT_FILES_BUTTON = 3;
   ATTACHMENT_SOURCE_PASTE = 4;
   ATTACHMENT_SOURCE_SELECT_FOLDERS_BUTTON = 5;
+  ATTACHMENT_SOURCE_SHARE_ACTIVATION = 6;
 }
 
 // The action to interact with preferences.

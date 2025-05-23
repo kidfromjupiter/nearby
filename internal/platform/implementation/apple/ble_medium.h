@@ -23,13 +23,13 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/uuid.h"
 
-#import "internal/platform/implementation/apple/ble_peripheral.h"
 #import "internal/platform/implementation/apple/ble_server_socket.h"
 #import "internal/platform/implementation/apple/bluetooth_adapter_v2.h"
 
@@ -86,10 +86,25 @@ class BleMedium : public api::ble_v2::BleMedium {
   bool StartScanning(const Uuid &service_uuid, api::ble_v2::TxPowerLevel tx_power_level,
                      api::ble_v2::BleMedium::ScanCallback callback) override;
 
+  // Starts scanning on multiple services and returns whether or not it was successful.
+  bool StartMultipleServicesScanning(const std::vector<Uuid> &service_uuids,
+                                     api::ble_v2::TxPowerLevel tx_power_level,
+                                     api::ble_v2::BleMedium::ScanCallback callback) override;
+
   // Stops scanning.
   //
   // Returns whether or not scanning was successfully stopped.
   bool StopScanning() override;
+
+  // Pauses BLE scanning at platform Medium level.
+  //
+  // Returns whether or not scanning was successfully paused.
+  bool PauseMediumScanning() override;
+
+  // Resumes BLE scanning at platform Medium level.
+  //
+  // Returns whether or not scanning was successfully resumed.
+  bool ResumeMediumScanning() override;
 
   // TODO(b/290385712): ServerGattConnectionCallback methods are not yet implemented.
   //
@@ -103,13 +118,19 @@ class BleMedium : public api::ble_v2::BleMedium {
   // The peripheral must outlive the GATT client or undefined behavior will occur. The peripheral
   // should not be modified by this method.
   std::unique_ptr<api::ble_v2::GattClient> ConnectToGattServer(
-      api::ble_v2::BlePeripheral &peripheral, api::ble_v2::TxPowerLevel tx_power_level,
+      api::ble_v2::BlePeripheral::UniqueId peripheral_id, api::ble_v2::TxPowerLevel tx_power_level,
       api::ble_v2::ClientGattConnectionCallback callback) override;
 
   // Opens a BLE server socket based on service ID.
   //
   // On success, returns a new BleServerSocket. On error, returns nullptr.
   std::unique_ptr<api::ble_v2::BleServerSocket> OpenServerSocket(
+      const std::string &service_id) override;
+
+  // Opens a L2CAP server socket based on service ID.
+  //
+  // On success, returns a new BleL2capServerSocket. On error, returns nullptr.
+  std::unique_ptr<api::ble_v2::BleL2capServerSocket> OpenL2capServerSocket(
       const std::string &service_id) override;
 
   // TODO(b/290385712): cancellation_flag support is not yet implemented.
@@ -120,39 +141,74 @@ class BleMedium : public api::ble_v2::BleMedium {
   // should not be modified by this method.
   //
   // On success, returns a new BleSocket. On error, returns nullptr.
-  std::unique_ptr<api::ble_v2::BleSocket> Connect(const std::string &service_id,
-                                                  api::ble_v2::TxPowerLevel tx_power_level,
-                                                  api::ble_v2::BlePeripheral &peripheral,
-                                                  CancellationFlag *cancellation_flag) override;
+  std::unique_ptr<api::ble_v2::BleSocket> Connect(
+      const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
+      api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+      CancellationFlag *cancellation_flag) override;
+
+  // TODO(b/290385712): cancellation_flag support is not yet implemented.
+  //
+  // Connects to a BLE peripheral over L2CAP.
+  //
+  // The peripheral must outlive the socket or undefined behavior will occur. The peripheral
+  // should not be modified by this method.
+  //
+  // On success, returns a new BleL2capSocket. On error, returns nullptr.
+  std::unique_ptr<api::ble_v2::BleL2capSocket> ConnectOverL2cap(
+      int psm, const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
+      api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+      CancellationFlag *cancellation_flag) override;
 
   // Returns whether the hardware supports BOTH advertising extensions and extended scans.
   //
   // This is currently always false for all Apple hardware.
   bool IsExtendedAdvertisementsAvailable() override;
 
-  // A peripheral cannot be retreived via MAC address on Apple platforms.
-  //
-  // This always returns false and does not call the callback.
-  bool GetRemotePeripheral(const std::string &mac_address,
-                           api::ble_v2::BleMedium::GetRemotePeripheralCallback callback) override;
-
-  // Returns true if `id` refers to a known BLE peripheral and calls `callback` with a reference to
-  // said peripheral that is only guaranteed to be available for the duration of the callback.
-  // Otherwise, does not call the callback and returns false.
-  bool GetRemotePeripheral(api::ble_v2::BlePeripheral::UniqueId id,
-                           api::ble_v2::BleMedium::GetRemotePeripheralCallback callback) override;
-
  private:
+  // A map for maintaining the set of currently known peripherals.
+  class PeripheralsMap {
+   public:
+    PeripheralsMap() = default;
+    ~PeripheralsMap() = default;
+
+    api::ble_v2::BlePeripheral::UniqueId Add(id<GNCPeripheral> peripheral)
+        ABSL_LOCKS_EXCLUDED(mutex_);
+    id<GNCPeripheral> Get(api::ble_v2::BlePeripheral::UniqueId peripheral_id)
+        ABSL_LOCKS_EXCLUDED(mutex_);
+    void Clear() ABSL_LOCKS_EXCLUDED(mutex_);
+
+   private:
+    absl::Mutex mutex_;
+    absl::flat_hash_map<api::ble_v2::BlePeripheral::UniqueId, id<GNCPeripheral>> peripherals_
+        ABSL_GUARDED_BY(mutex_);
+  };
+
   void HandleAdvertisementFound(id<GNCPeripheral> peripheral,
                                 NSDictionary<CBUUID *, NSData *> *serviceData);
+  void ClearAdvertisementPacketsMap();
+  void CleanUpExpiredAdvertisementPackets(NSDate *now);
+  bool ShouldReportAdvertisement(NSDate *now, api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+                                 NSDictionary<CBUUID *, NSData *> *service_data);
+  void AddAdvertisementPacketInfo(api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+                                  NSDictionary<CBUUID *, NSData *> *service_data);
+  NSDate *GetLastTimestampToCleanExpiredAdvertisementPackets();
 
   GNCBLEMedium *medium_;
 
-  absl::Mutex peripherals_mutex_;
-  absl::flat_hash_map<api::ble_v2::BlePeripheral::UniqueId, std::unique_ptr<BlePeripheral>>
-      peripherals_ ABSL_GUARDED_BY(peripherals_mutex_);
+  PeripheralsMap peripherals_;
+  struct AdvertisementPacketInfo {
+    NSDate *last_timestamp;
+    NSDictionary<CBUUID *, NSData *> *last_service_data;
+  };
 
-  std::unique_ptr<EmptyBlePeripheral> local_peripheral_;
+  absl::Mutex advertisement_packets_mutex_;
+  // A map for maintaining the set of advertisement packets that should be tracked.
+  absl::flat_hash_map<api::ble_v2::BlePeripheral::UniqueId, AdvertisementPacketInfo>
+      advertisement_packets_map_ ABSL_GUARDED_BY(advertisement_packets_mutex_);
+  // The timestamp of the last time to clean up expired advertisement packets. This is used to
+  // prevent the map from growing indefinitely.
+  NSDate *last_timestamp_to_clean_expired_advertisement_packets_
+      ABSL_GUARDED_BY(advertisement_packets_mutex_) = {nil};
 
   GNSPeripheralServiceManager *socketPeripheralServiceManager_;
   GNSPeripheralManager *socketPeripheralManager_;

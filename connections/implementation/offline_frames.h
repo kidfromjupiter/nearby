@@ -19,8 +19,9 @@
 #include <string>
 #include <vector>
 
-#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/connection_options.h"
+#include "connections/implementation/proto/offline_wire_formats.pb.h"
+#include "connections/medium_selector.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 
@@ -81,6 +82,9 @@ ByteArray ForBwuWifiHotspotPathAvailable(const std::string& ssid,
                                          bool supports_disabling_encryption);
 ByteArray ForBwuWifiLanPathAvailable(const std::string& ip_address,
                                      std::int32_t port);
+ByteArray ForBwuAwdlPathAvailable(const std::string& service_name,
+                                  const std::string& service_type,
+                                  const std::string& password);
 ByteArray ForBwuWifiAwarePathAvailable(const std::string& service_id,
                                        const std::string& service_info,
                                        const std::string& password,
@@ -97,14 +101,18 @@ ByteArray ForBwuWebrtcPathAvailable(
     const std::string& peer_id,
     const location::nearby::connections::LocationHint& location_hint_a);
 ByteArray ForBwuFailure(const UpgradePathInfo& info);
+ByteArray ForBwuPathRequest(
+    const std::vector<Medium>& mediums,
+    const location::nearby::connections::MediumRole& medium_role);
 ByteArray ForBwuLastWrite();
 ByteArray ForBwuSafeToClose();
 
 ByteArray ForKeepAlive();
+ByteArray ForKeepAlive(bool ack, uint32_t seq_num);
 ByteArray ForDisconnection(bool request_safe_to_disconnect,
                            bool ack_safe_to_disconnect);
 ByteArray ForAutoReconnectIntroduction(const std::string& endpoint_id);
-ByteArray ForAutoReconnectIntroductionAck(const std::string& endpoint_id);
+ByteArray ForAutoReconnectIntroductionAck();
 UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium);
 Medium UpgradePathInfoMediumToMedium(UpgradePathInfo::Medium medium);
 

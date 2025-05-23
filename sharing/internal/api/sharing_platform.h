@@ -15,13 +15,13 @@
 #ifndef THIRD_PARTY_NEARBY_SHARING_INTERNAL_API_SHARING_PLATFORM_H_
 #define THIRD_PARTY_NEARBY_SHARING_INTERNAL_API_SHARING_PLATFORM_H_
 
-#include <filesystem>  // NOLINT
 #include <functional>
 #include <memory>
 #include <vector>
 
-#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
+#include "internal/platform/clock.h"
 #include "internal/platform/device_info.h"
 #include "internal/platform/implementation/account_manager.h"
 #include "internal/platform/task_runner.h"
@@ -57,7 +57,8 @@ class SharingPlatform {
   virtual void UpdateLoggingLevel() = 0;
 
   virtual std::unique_ptr<nearby::api::NetworkMonitor> CreateNetworkMonitor(
-      std::function<void(nearby::api::NetworkMonitor::ConnectionType, bool)>
+      std::function<void(nearby::api::NetworkMonitor::ConnectionType, bool,
+                         bool)>
           callback) = 0;
 
   virtual BluetoothAdapter& GetBluetoothAdapter() = 0;
@@ -85,13 +86,13 @@ class SharingPlatform {
 
   virtual std::unique_ptr<SharingRpcClientFactory>
   CreateSharingRpcClientFactory(
+      Clock* clock,
       nearby::sharing::analytics::AnalyticsRecorder* analytics_recorder) = 0;
 
   // On platforms where it is supported, tag the transferred files as
   // originating from an untrusted source.
   // Returns true on success.
-  virtual bool UpdateFileOriginMetadata(
-      std::vector<std::filesystem::path>& file_paths) = 0;
+  virtual bool UpdateFileOriginMetadata(std::vector<FilePath>& file_paths) = 0;
 };
 }  // namespace nearby::sharing::api
 

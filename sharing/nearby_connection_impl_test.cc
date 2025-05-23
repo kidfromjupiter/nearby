@@ -23,24 +23,19 @@
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
-#include "sharing/fake_nearby_connections_manager.h"
 #include "sharing/incoming_frames_reader.h"
 #include "sharing/proto/wire_format.pb.h"
 
-namespace nearby {
-namespace sharing {
+namespace nearby::sharing {
 namespace {
 
 TEST(NearbyConnectionImpl, DestructorBeforeReaderDestructor) {
-  FakeTaskRunner::ResetPendingTasksCount();
-  FakeNearbyConnectionsManager connection_manager;
   FakeClock fake_clock;
   FakeTaskRunner fake_task_runner(&fake_clock, 1);
   FakeDeviceInfo device_info;
   bool called = false;
 
-  auto connection = std::make_unique<NearbyConnectionImpl>(
-      device_info, &connection_manager, "test");
+  auto connection = std::make_unique<NearbyConnectionImpl>(device_info);
   auto frames_reader = std::make_shared<IncomingFramesReader>(fake_task_runner,
                                                               connection.get());
 
@@ -50,22 +45,19 @@ TEST(NearbyConnectionImpl, DestructorBeforeReaderDestructor) {
         called = true;
         notification.Notify();
       });
-  EXPECT_TRUE(FakeTaskRunner::WaitForRunningTasksWithTimeout(absl::Seconds(1)));
+  EXPECT_TRUE(fake_task_runner.SyncWithTimeout(absl::Seconds(1)));
   connection.reset();
   EXPECT_TRUE(notification.WaitForNotificationWithTimeout(absl::Seconds(1)));
   EXPECT_TRUE(called);
 }
 
 TEST(NearbyConnectionImpl, DestructorAfterReaderDestructor) {
-  FakeTaskRunner::ResetPendingTasksCount();
-  FakeNearbyConnectionsManager connection_manager;
   FakeClock fake_clock;
   FakeTaskRunner fake_task_runner(&fake_clock, 1);
   FakeDeviceInfo device_info;
   std::optional<nearby::sharing::service::proto::V1Frame> frame_result;
 
-  auto connection = std::make_unique<NearbyConnectionImpl>(
-      device_info, &connection_manager, "test");
+  auto connection = std::make_unique<NearbyConnectionImpl>(device_info);
   auto frames_reader = std::make_shared<IncomingFramesReader>(fake_task_runner,
                                                               connection.get());
 
@@ -76,7 +68,7 @@ TEST(NearbyConnectionImpl, DestructorAfterReaderDestructor) {
         notification.Notify();
       });
 
-  EXPECT_TRUE(FakeTaskRunner::WaitForRunningTasksWithTimeout(absl::Seconds(1)));
+  EXPECT_TRUE(fake_task_runner.SyncWithTimeout(absl::Seconds(1)));
   frames_reader.reset();
   connection.reset();
   EXPECT_TRUE(notification.WaitForNotificationWithTimeout(absl::Seconds(1)));
@@ -84,5 +76,4 @@ TEST(NearbyConnectionImpl, DestructorAfterReaderDestructor) {
 }
 
 }  // namespace
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing

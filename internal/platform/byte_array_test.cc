@@ -14,11 +14,18 @@
 
 #include "internal/platform/byte_array.h"
 
+#include <stddef.h>
+
+#include <array>
+#include <concepts>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "absl/hash/hash_testing.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 
 namespace {
 
@@ -95,6 +102,102 @@ TEST(ByteArrayTest, CreateFromAbslStringReturnsTheSame) {
 
   EXPECT_EQ(bytes.size(), kTestString.size());
   EXPECT_EQ(bytes.AsStringView(), kTestString);
+}
+
+TEST(ByteArrayTest, Read6BytesAsUint64EmptyByteArrayReturnsError) {
+  ByteArray bytes;
+  auto result = bytes.Read6BytesAsUint64();
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kFailedPrecondition);
+}
+
+TEST(ByteArrayTest, Read6BytesAsUint64NotEnoughBytesReturnsError) {
+  ByteArray bytes({0x01, 0x02, 0x03, 0x04, 0x05});
+  auto result = bytes.Read6BytesAsUint64();
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kFailedPrecondition);
+}
+
+TEST(ByteArrayTest, Read6BytesAsUint64) {
+  ByteArray bytes({0x01, 0x02, 0x03, 0x04, 0x05, 0x06});
+  auto result = bytes.Read6BytesAsUint64();
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(bytes.Read6BytesAsUint64().value(), 0x010203040506);
+}
+
+TEST(ByteArrayTest, IteratorTypes) {
+  static_assert(std::same_as<decltype(std::declval<ByteArray>().begin()),
+                             ByteArray::iterator>);
+  static_assert(std::same_as<decltype(std::declval<ByteArray>().cbegin()),
+                             ByteArray::const_iterator>);
+  static_assert(std::same_as<decltype(std::declval<ByteArray>().end()),
+                             ByteArray::iterator>);
+  static_assert(std::same_as<decltype(std::declval<ByteArray>().cend()),
+                             ByteArray::const_iterator>);
+
+  static_assert(std::same_as<decltype(std::declval<const ByteArray>().begin()),
+                             ByteArray::const_iterator>);
+  static_assert(std::same_as<decltype(std::declval<const ByteArray>().end()),
+                             ByteArray::const_iterator>);
+}
+
+TEST(ByteArrayTest, Iterators) {
+  ByteArray bytes("12345");
+  const ByteArray const_bytes("12345");
+  static constexpr auto kExpected = std::to_array({'1', '2', '3', '4', '5'});
+
+  // Check manual iteration.
+  {
+    size_t i = 0;
+    for (auto it = bytes.begin(); it != bytes.end(); ++it) {
+      ASSERT_LT(i, kExpected.size());
+      EXPECT_EQ(*it, kExpected[i++]);
+    }
+    EXPECT_EQ(i, kExpected.size());
+  }
+  {
+    size_t i = 0;
+    for (auto it = bytes.cbegin(); it != bytes.cend(); ++it) {
+      ASSERT_LT(i, kExpected.size());
+      EXPECT_EQ(*it, kExpected[i++]);
+    }
+    EXPECT_EQ(i, kExpected.size());
+  }
+  {
+    size_t i = 0;
+    for (auto it = const_bytes.begin(); it != const_bytes.end(); ++it) {
+      ASSERT_LT(i, kExpected.size());
+      EXPECT_EQ(*it, kExpected[i++]);
+    }
+    EXPECT_EQ(i, kExpected.size());
+  }
+
+  // Check range-for loops.
+  {
+    size_t i = 0;
+    for (auto c : bytes) {
+      ASSERT_LT(i, kExpected.size());
+      EXPECT_EQ(c, kExpected[i++]);
+    }
+    EXPECT_EQ(i, kExpected.size());
+  }
+  {
+    size_t i = 0;
+    for (auto c : const_bytes) {
+      ASSERT_LT(i, kExpected.size());
+      EXPECT_EQ(c, kExpected[i++]);
+    }
+    EXPECT_EQ(i, kExpected.size());
+  }
+}
+
+TEST(ByteArrayTest, EmptyArrayIterators) {
+  // It should be legal to call begin()/end() etc. on empty arrays.
+  ByteArray bytes;
+  const ByteArray const_bytes;
+  EXPECT_EQ(bytes.begin(), bytes.end());
+  EXPECT_EQ(bytes.cbegin(), bytes.cend());
+  EXPECT_EQ(const_bytes.begin(), const_bytes.end());
 }
 
 TEST(ByteArrayTest, Hash) {

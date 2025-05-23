@@ -38,8 +38,10 @@ cc_library(
         "//sharing:__subpackages__",
     ],
     deps = [
+        "//internal/base:file_path",
         "//internal/platform:types",
         "//internal/platform/implementation:account_manager",
+        "//proto/identity/v1:rpcs_cc_proto",
         "//sharing/analytics",
         "//sharing/proto:share_cc_proto",
         "@com_google_absl//absl/functional:any_invocable",
@@ -72,6 +74,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":platform",
+        "//internal/base:file_path",
         "//internal/platform:types",
         "//internal/platform/implementation:account_manager",
         "//sharing/analytics",

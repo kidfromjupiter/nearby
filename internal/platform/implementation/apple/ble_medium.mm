@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #import "internal/platform/implementation/apple/ble_medium.h"
-#import "internal/platform/implementation/apple/utils.h"
 
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <Foundation/Foundation.h>
@@ -31,15 +30,11 @@
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTCharacteristic.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTClient.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTServer.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEL2CAPClient.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEL2CAPConnection.h"
+#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEL2CAPServer.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEMedium.h"
 #import "internal/platform/implementation/apple/Mediums/BLEv2/GNCPeripheral.h"
-#import "internal/platform/implementation/apple/ble_gatt_client.h"
-#import "internal/platform/implementation/apple/ble_gatt_server.h"
-#import "internal/platform/implementation/apple/ble_peripheral.h"
-#import "internal/platform/implementation/apple/ble_server_socket.h"
-#import "internal/platform/implementation/apple/ble_socket.h"
-#import "internal/platform/implementation/apple/bluetooth_adapter_v2.h"
-#import "GoogleToolboxForMac/GTMLogger.h"
 
 // TODO(b/293336684): Old Weave imports that need to be deleted once shared Weave is complete.
 #import "internal/platform/implementation/apple/Mediums/Ble/GNCMBleConnection.h"
@@ -48,11 +43,42 @@
 #import "internal/platform/implementation/apple/Mediums/Ble/Sockets/Source/Central/GNSCentralPeerManager.h"
 #import "internal/platform/implementation/apple/Mediums/Ble/Sockets/Source/Peripheral/GNSPeripheralManager.h"
 #import "internal/platform/implementation/apple/Mediums/Ble/Sockets/Source/Peripheral/GNSPeripheralServiceManager.h"
+#import "internal/platform/implementation/apple/ble_gatt_client.h"
+#import "internal/platform/implementation/apple/ble_gatt_server.h"
+#import "internal/platform/implementation/apple/ble_l2cap_server_socket.h"
+#import "internal/platform/implementation/apple/ble_l2cap_socket.h"
+#import "internal/platform/implementation/apple/ble_server_socket.h"
+#import "internal/platform/implementation/apple/ble_socket.h"
+#import "internal/platform/implementation/apple/bluetooth_adapter_v2.h"
+#import "internal/platform/implementation/apple/utils.h"
+#import "GoogleToolboxForMac/GTMLogger.h"
 
 static NSString *const kWeaveServiceUUID = @"FEF3";
+static const UInt8 kRequestConnectionTimeoutInSeconds = 10;
+static NSTimeInterval const kThresholdInterval = 2;                                // 2 seconds
+static NSTimeInterval const kAdvertisementPacketsMapExpirationTimeInterval = 600;  // 10 minutes
 
 namespace nearby {
 namespace apple {
+namespace {
+
+NSString *ConvertDataToHexString(NSData *data) {
+  NSUInteger dataLength = data.length;
+  if (dataLength == 0) {
+    return @"0x";
+  }
+
+  const unsigned char *dataBuffer = (const unsigned char *)data.bytes;
+  NSMutableString *hexString = [NSMutableString stringWithCapacity:dataLength * 2];
+
+  for (NSUInteger i = 0; i < dataLength; ++i) {
+    [hexString appendFormat:@"%02lx", (unsigned long)dataBuffer[i]];
+  }
+
+  return [NSString stringWithFormat:@"0x%@", hexString];
+}
+
+}  // namespace
 
 BleMedium::BleMedium() : medium_([[GNCBLEMedium alloc] init]) {}
 
@@ -118,41 +144,55 @@ bool BleMedium::StopAdvertising() {
 
 void BleMedium::HandleAdvertisementFound(id<GNCPeripheral> peripheral,
                                          NSDictionary<CBUUID *, NSData *> *serviceData) {
-  absl::MutexLock lock(&peripherals_mutex_);
-  [socketCentralManager_ retrievePeripheralWithIdentifier:peripheral.identifier
-                                        advertisementData:@{}];
-
   api::ble_v2::BleAdvertisementData data;
+  NSDate *now = [NSDate date];
+
+  if ([now timeIntervalSinceDate:GetLastTimestampToCleanExpiredAdvertisementPackets()] >
+      kAdvertisementPacketsMapExpirationTimeInterval) {
+    ClearAdvertisementPacketsMap();
+  }
+
+  api::ble_v2::BlePeripheral::UniqueId peripheral_id = peripheral.identifier.hash;
+
+  if (!ShouldReportAdvertisement(now, peripheral_id, serviceData)) {
+    return;
+  }
+
   for (CBUUID *key in serviceData.allKeys) {
     data.service_data[CPPUUIDFromObjC(key)] = ByteArrayFromNSData(serviceData[key]);
   }
 
   // Add the peripheral to the map if we haven't discovered it yet.
-  auto ble_peripheral = std::make_unique<BlePeripheral>(peripheral);
-  auto unique_id = ble_peripheral->GetUniqueId();
-  auto it = peripherals_.find(unique_id);
-  if (it == peripherals_.end()) {
-    peripherals_[unique_id] = std::move(ble_peripheral);
+  api::ble_v2::BlePeripheral::UniqueId unique_id = peripherals_.Add(peripheral);
+  AddAdvertisementPacketInfo(unique_id, serviceData);
+
+#if DEBUG
+  for (NSData *service_data in serviceData.allValues) {
+    GTMLoggerDebug(@"Reporting the advertisement packet to upper layer for unique_id: %llu, %@, "
+                   @"advertisement_data: %@.",
+                   unique_id, peripheral, ConvertDataToHexString(service_data));
   }
+#endif
+
   if (scanning_cb_.advertisement_found_cb) {
-    scanning_cb_.advertisement_found_cb(*peripherals_[unique_id], data);
+    scanning_cb_.advertisement_found_cb(unique_id, data);
   }
   if (scan_cb_.advertisement_found_cb) {
-    scan_cb_.advertisement_found_cb(*peripherals_[unique_id], data);
+    scan_cb_.advertisement_found_cb(unique_id, data);
   }
 }
 
 std::unique_ptr<api::ble_v2::BleMedium::ScanningSession> BleMedium::StartScanning(
     const Uuid &service_uuid, api::ble_v2::TxPowerLevel tx_power_level,
     api::ble_v2::BleMedium::ScanningCallback callback) {
-  absl::MutexLock lock(&peripherals_mutex_);
   CBUUID *serviceUUID = CBUUID128FromCPP(service_uuid);
   scanning_cb_ = std::move(callback);
 
   // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
   // map every time we stopped a scan, we would not be able to connect to peripherals that we
   // discovered in that scan session.
-  peripherals_.clear();
+  peripherals_.Clear();
+  ClearAdvertisementPacketsMap();
 
   socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
   [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
@@ -177,14 +217,14 @@ std::unique_ptr<api::ble_v2::BleMedium::ScanningSession> BleMedium::StartScannin
 
 bool BleMedium::StartScanning(const Uuid &service_uuid, api::ble_v2::TxPowerLevel tx_power_level,
                               api::ble_v2::BleMedium::ScanCallback callback) {
-  absl::MutexLock lock(&peripherals_mutex_);
   CBUUID *serviceUUID = CBUUID128FromCPP(service_uuid);
   scan_cb_ = std::move(callback);
 
   // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
   // map every time we stopped a scan, we would not be able to connect to peripherals that we
   // discovered in that scan session.
-  peripherals_.clear();
+  peripherals_.Clear();
+  ClearAdvertisementPacketsMap();
 
   socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
   [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
@@ -207,6 +247,48 @@ bool BleMedium::StartScanning(const Uuid &service_uuid, api::ble_v2::TxPowerLeve
   return blockError == nil;
 }
 
+bool BleMedium::StartMultipleServicesScanning(const std::vector<Uuid> &service_uuids,
+                                              api::ble_v2::TxPowerLevel tx_power_level,
+                                              api::ble_v2::BleMedium::ScanCallback callback) {
+  if (service_uuids.empty()) {
+    GTMLoggerError(@"No service UUIDs provided");
+    return false;
+  }
+
+  NSMutableArray<CBUUID *> *serviceUUIDs = [NSMutableArray arrayWithCapacity:service_uuids.size()];
+  for (const Uuid &service_uuid : service_uuids) {
+    [serviceUUIDs addObject:CBUUID128FromCPP(service_uuid)];
+  }
+
+  scan_cb_ = std::move(callback);
+
+  // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
+  // map every time we stopped a scan, we would not be able to connect to peripherals that we
+  // discovered in that scan session.
+  peripherals_.Clear();
+  ClearAdvertisementPacketsMap();
+
+  socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUIDs[0]];
+  [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUIDs[0] ]];
+
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSError *blockError = nil;
+  [medium_ startScanningForMultipleServices:serviceUUIDs
+      advertisementFoundHandler:^(id<GNCPeripheral> peripheral,
+                                  NSDictionary<CBUUID *, NSData *> *serviceData) {
+        HandleAdvertisementFound(peripheral, serviceData);
+      }
+      completionHandler:^(NSError *error) {
+        if (error != nil) {
+          GTMLoggerError(@"Failed to start scanning for multiple services: %@", error);
+          blockError = error;
+        }
+        dispatch_semaphore_signal(semaphore);
+      }];
+  dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+  return blockError == nil;
+}
+
 bool BleMedium::StopScanning() {
   [socketCentralManager_ stopNoScanMode];
 
@@ -217,6 +299,22 @@ bool BleMedium::StopScanning() {
       GTMLoggerError(@"Failed to stop scanning: %@", error);
     }
     blockError = error;
+    dispatch_semaphore_signal(semaphore);
+  }];
+  dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+  return blockError == nil;
+}
+
+bool BleMedium::PauseMediumScanning() { return StopScanning(); }
+
+bool BleMedium::ResumeMediumScanning() {
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSError *blockError = nil;
+  [medium_ resumeMediumScanning:^(NSError *error) {
+    if (error != nil) {
+      GTMLoggerError(@"Failed to start scanning for multiple services: %@", error);
+      blockError = error;
+    }
     dispatch_semaphore_signal(semaphore);
   }];
   dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
@@ -243,12 +341,11 @@ std::unique_ptr<api::ble_v2::GattServer> BleMedium::StartGattServer(
 }
 
 std::unique_ptr<api::ble_v2::GattClient> BleMedium::ConnectToGattServer(
-    api::ble_v2::BlePeripheral &peripheral, api::ble_v2::TxPowerLevel tx_power_level,
+    api::ble_v2::BlePeripheral::UniqueId peripheral_id, api::ble_v2::TxPowerLevel tx_power_level,
     api::ble_v2::ClientGattConnectionCallback callback) {
-  // Check that the @c api::ble_v2::BlePeripheral is a @c nearby::apple::BlePeripheral and not a
-  // @c nearby::apple::EmptyBlePeripheral instance, so we can retreive the CBPeripheral object.
-  BlePeripheral *non_empty_peripheral = dynamic_cast<BlePeripheral *>(&peripheral);
-  if (non_empty_peripheral == nullptr) {
+  id<GNCPeripheral> peripheral = peripherals_.Get(peripheral_id);
+  if (!peripheral) {
+    GTMLoggerError(@"[NEARBY] Failed to connect to Gatt server: peripheral is not found.");
     return nullptr;
   }
 
@@ -256,7 +353,7 @@ std::unique_ptr<api::ble_v2::GattClient> BleMedium::ConnectToGattServer(
 
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block GNCBLEGATTClient *blockClient = nil;
-  [medium_ connectToGATTServerForPeripheral:non_empty_peripheral->GetPeripheral()
+  [medium_ connectToGATTServerForPeripheral:peripheral
       disconnectionHandler:^(void) {
         blockCallback.disconnected_cb();
       }
@@ -321,21 +418,60 @@ std::unique_ptr<api::ble_v2::BleServerSocket> BleMedium::OpenServerSocket(
   return std::move(server_socket);
 }
 
-// TODO(b/290385712): Add support for @c cancellation_flag.
-// TODO(b/293336684): Old Weave code that need to be deleted once shared Weave is complete.
-std::unique_ptr<api::ble_v2::BleSocket> BleMedium::Connect(const std::string &service_id,
-                                                           api::ble_v2::TxPowerLevel tx_power_level,
-                                                           api::ble_v2::BlePeripheral &peripheral,
-                                                           CancellationFlag *cancellation_flag) {
-  // Check that the @c api::ble_v2::BlePeripheral is a @c nearby::apple::BlePeripheral and not a
-  // @c nearby::apple::EmptyBlePeripheral instance, so we can retreive the CBPeripheral object.
-  BlePeripheral *non_empty_peripheral = dynamic_cast<BlePeripheral *>(&peripheral);
-  if (non_empty_peripheral == nullptr) {
+std::unique_ptr<api::ble_v2::BleL2capServerSocket> BleMedium::OpenL2capServerSocket(
+    const std::string &service_id) {
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSError *blockPSMPublishedError = nil;
+  auto l2cap_server_socket = std::make_unique<BleL2capServerSocket>();
+  __block auto l2cap_server_socket_ptr = l2cap_server_socket.get();
+  std::string service_id_str = service_id;
+  [medium_
+      openL2CAPServerWithPSMPublishedCompletionHandler:^(uint16_t PSM, NSError *_Nullable error) {
+        if (error) {
+          blockPSMPublishedError = error;
+          dispatch_semaphore_signal(semaphore);
+          return;
+        }
+        l2cap_server_socket_ptr->SetPSM(PSM);
+        dispatch_semaphore_signal(semaphore);
+      }
+      channelOpenedCompletionHandler:^(GNCBLEL2CAPStream *_Nullable stream,
+                                       NSError *_Nullable error) {
+        if (error != nil) {
+          GTMLoggerError(@"Error opening L2CAP channel in L2CAP server: %@", error);
+          return;
+        }
+        GNCBLEL2CAPConnection *connection =
+            [GNCBLEL2CAPConnection connectionWithStream:stream
+                                              serviceID:@(service_id_str.c_str())
+                                     incomingConnection:YES
+                                          callbackQueue:dispatch_get_main_queue()];
+        auto socket = std::make_unique<BleL2capSocket>(connection);
+        if (l2cap_server_socket_ptr) {
+          l2cap_server_socket_ptr->AddPendingSocket(std::move(socket));
+        }
+      }
+      peripheralManager:nil];
+  dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+  if (blockPSMPublishedError != nil) {
     return nullptr;
   }
 
-  GNSCentralPeerManager *updatedCentralPeerManager = [socketCentralManager_
-      retrieveCentralPeerWithIdentifier:non_empty_peripheral->GetPeripheral().identifier];
+  return std::move(l2cap_server_socket);
+}
+// TODO(b/290385712): Add support for @c cancellation_flag.
+// TODO(b/293336684): Old Weave code that need to be deleted once shared Weave is complete.
+std::unique_ptr<api::ble_v2::BleSocket> BleMedium::Connect(
+    const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
+    api::ble_v2::BlePeripheral::UniqueId peripheral_id, CancellationFlag *cancellation_flag) {
+  id<GNCPeripheral> peripheral = peripherals_.Get(peripheral_id);
+  if (!peripheral) {
+    GTMLoggerError(@"[NEARBY] Failed to connect to Gatt server: peripheral is not found.");
+    return nullptr;
+  }
+
+  GNSCentralPeerManager *updatedCentralPeerManager =
+      [socketCentralManager_ retrieveCentralPeerWithIdentifier:peripheral.identifier];
   if (!updatedCentralPeerManager) {
     return nullptr;
   }
@@ -360,8 +496,7 @@ std::unique_ptr<api::ble_v2::BleSocket> BleMedium::Connect(const std::string &se
                                               serviceID:@(service_id.c_str())
                                     expectedIntroPacket:NO
                                           callbackQueue:dispatch_get_main_queue()];
-                               socket =
-                                   std::make_unique<BleSocket>(connection, non_empty_peripheral);
+                               socket = std::make_unique<BleSocket>(connection, peripheral_id);
                                connection.connectionHandlers =
                                    socket->GetInputStream().GetConnectionHandlers();
                                dispatch_semaphore_signal(semaphore);
@@ -377,41 +512,141 @@ std::unique_ptr<api::ble_v2::BleSocket> BleMedium::Connect(const std::string &se
   return std::move(socket);
 }
 
+std::unique_ptr<api::ble_v2::BleL2capSocket> BleMedium::ConnectOverL2cap(
+    int psm, const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
+    api::ble_v2::BlePeripheral::UniqueId peripheral_id, CancellationFlag *cancellation_flag) {
+  id<GNCPeripheral> peripheral = peripherals_.Get(peripheral_id);
+  if (!peripheral) {
+    GTMLoggerError(@"[NEARBY] Failed to connect over L2CAP: peripheral is not found.");
+    return nullptr;
+  }
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  dispatch_time_t timeout =
+      dispatch_time(DISPATCH_TIME_NOW, kRequestConnectionTimeoutInSeconds * NSEC_PER_SEC);
+  __block std::unique_ptr<BleL2capSocket> socket;
+  const std::string &service_id_str = service_id;
+  [medium_ openL2CAPChannelWithPSM:psm
+                        peripheral:peripheral
+                 completionHandler:^(GNCBLEL2CAPStream *stream, NSError *error) {
+                   if (error) {
+                     dispatch_semaphore_signal(semaphore);
+                     return;
+                   }
+                   GNCBLEL2CAPConnection *connection =
+                       [GNCBLEL2CAPConnection connectionWithStream:stream
+                                                         serviceID:@(service_id_str.c_str())
+                                                incomingConnection:NO
+                                                     callbackQueue:dispatch_get_main_queue()];
+                   // Blocked call to wait for the packet validation result.
+                   // TODO: b/399815436 - Remove this once the packet validation is moved to the
+                   // Connections layer.
+                   [connection requestDataConnectionWithCompletion:^(BOOL result) {
+                     if (result) {
+                       socket = std::make_unique<BleL2capSocket>(connection, peripheral_id);
+                     }
+                     GTMLoggerInfo(result ? @"[NEARBY] Request data connection is ok"
+                                          : @"[NEARBY] Request data connection is not ok");
+                     dispatch_semaphore_signal(semaphore);
+                   }];
+                 }];
+  if (dispatch_semaphore_wait(semaphore, timeout) != 0) {
+    GTMLoggerError(@"[NEARBY] Failed to connect over L2CAP: timeout.");
+    return nullptr;
+  }
+  if (socket == nullptr) {
+    return nullptr;
+  }
+
+  return std::move(socket);
+}
+
 bool BleMedium::IsExtendedAdvertisementsAvailable() {
   return [medium_ supportsExtendedAdvertisements];
 }
 
-bool BleMedium::GetRemotePeripheral(const std::string &mac_address,
-                                    api::ble_v2::BleMedium::GetRemotePeripheralCallback callback) {
-  // Apple does not expose MAC address information, so we cannot retreive a peripheral via MAC
-  // address.
-  return false;
+void BleMedium::ClearAdvertisementPacketsMap() {
+  absl::MutexLock lock(&advertisement_packets_mutex_);
+  advertisement_packets_map_.clear();
+  last_timestamp_to_clean_expired_advertisement_packets_ = [NSDate date];
 }
 
-bool BleMedium::GetRemotePeripheral(api::ble_v2::BlePeripheral::UniqueId unique_id,
-                                    api::ble_v2::BleMedium::GetRemotePeripheralCallback callback) {
-  // If the unique_id is 0, that means it's the local/empty peripheral. We must return "true"
-  // otherwise the connection will be considered invalid and the application will crash.
-  if (unique_id == 0) {
-    callback(*local_peripheral_);
+NSDate *BleMedium::GetLastTimestampToCleanExpiredAdvertisementPackets() {
+  absl::MutexLock lock(&advertisement_packets_mutex_);
+  return last_timestamp_to_clean_expired_advertisement_packets_;
+}
+
+void BleMedium::CleanUpExpiredAdvertisementPackets(NSDate *now) {
+  absl::MutexLock lock(&advertisement_packets_mutex_);
+  for (auto it = advertisement_packets_map_.begin(); it != advertisement_packets_map_.end();) {
+    if ([now timeIntervalSinceDate:it->second.last_timestamp] >
+        kAdvertisementPacketsMapExpirationTimeInterval) {
+      advertisement_packets_map_.erase(it++);
+    } else {
+      ++it;
+    }
+  }
+  last_timestamp_to_clean_expired_advertisement_packets_ = now;
+}
+
+bool BleMedium::ShouldReportAdvertisement(NSDate *now,
+                                          api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+                                          NSDictionary<CBUUID *, NSData *> *service_data) {
+  absl::MutexLock lock(&advertisement_packets_mutex_);
+  if (service_data == nil || service_data.count == 0) {
+    return false;
+  }
+
+  auto it = advertisement_packets_map_.find(peripheral_id);
+  if (it == advertisement_packets_map_.end()) {
+    advertisement_packets_map_[peripheral_id] = {now, service_data};
     return true;
   }
 
-  BlePeripheral *peripheral;
-  {
-    absl::MutexLock lock(&peripherals_mutex_);
-    auto it = peripherals_.find(unique_id);
-    if (it == peripherals_.end()) {
-      return false;
+  if ([now timeIntervalSinceDate:it->second.last_timestamp] < kThresholdInterval &&
+          it -> second.last_service_data.count == service_data.count) {
+    bool is_same_advertisement = true;
+    for (CBUUID *service_uuid in service_data.allKeys) {
+      if (![service_data[service_uuid] isEqualToData:it->second.last_service_data[service_uuid]]) {
+        is_same_advertisement = false;
+        break;
+      }
     }
-    peripheral = it->second.get();
-    if (peripheral == nullptr) {
+    if (is_same_advertisement) {
       return false;
     }
   }
-  // We need to unlock before calling the callback, otherwise we will deadlock.
-  callback(*peripheral);
+
+  it->second.last_timestamp = now;
+  it->second.last_service_data = service_data;
   return true;
+}
+
+void BleMedium::AddAdvertisementPacketInfo(api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+                                           NSDictionary<CBUUID *, NSData *> *service_data) {
+  absl::MutexLock lock(&advertisement_packets_mutex_);
+  advertisement_packets_map_[peripheral_id] = {[NSDate date], service_data};
+}
+
+api::ble_v2::BlePeripheral::UniqueId BleMedium::PeripheralsMap::Add(id<GNCPeripheral> peripheral) {
+  absl::MutexLock lock(&mutex_);
+  api::ble_v2::BlePeripheral::UniqueId peripheral_id = peripheral.identifier.hash;
+  peripherals_.insert({peripheral_id, peripheral});
+  return peripheral_id;
+}
+
+id<GNCPeripheral> BleMedium::PeripheralsMap::Get(
+    api::ble_v2::BlePeripheral::UniqueId peripheral_id) {
+  absl::MutexLock lock(&mutex_);
+  auto peripheral_it = peripherals_.find(peripheral_id);
+  if (peripheral_it == peripherals_.end()) {
+    return nil;
+  }
+  return peripheral_it->second;
+}
+
+void BleMedium::PeripheralsMap::Clear() {
+  absl::MutexLock lock(&mutex_);
+  peripherals_.clear();
 }
 
 }  // namespace apple

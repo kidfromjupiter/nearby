@@ -29,6 +29,7 @@
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/cancellation_flag.h"
+#include "internal/platform/expected.h"
 #include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/mutex.h"
 
@@ -54,7 +55,7 @@ class BluetoothClassic {
   // Returns true, if name and scan mode are successfully set, and false
   // otherwise.
   // Called by server.
-  bool TurnOnDiscoverability(const std::string& device_name)
+  ErrorOr<bool> TurnOnDiscoverability(const std::string& device_name)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Disables BT discoverability, and restores scan mode and device name to
@@ -67,21 +68,24 @@ class BluetoothClassic {
   // Enables BT discovery for serviceId. If it is the first call to start
   // discovery, will enable BT discovery mode.
   // Returns true, if discovery enabled for serviceId, false otherwise.
-  bool StartDiscovery(const std::string& serviceId,
-                      DiscoveredDeviceCallback callback)
+  ErrorOr<bool> StartDiscovery(const std::string& serviceId,
+                               DiscoveredDeviceCallback callback)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Disables BT discovery for serviceId.
   // if it is the last call to stop discovery, will disable BT discovery mode.
   bool StopDiscovery(const std::string& serviceId) ABSL_LOCKS_EXCLUDED(mutex_);
 
+  // Stops BT discovery for all services.
+  void StopAllDiscovery() ABSL_LOCKS_EXCLUDED(mutex_);
+
   // Starts a worker thread, creates a BT server socket, associates it with a
   // service ID; in a worker thread repeatedly calls ServerSocket::Accept().
   // Any connected sockets returned from Accept() are passed to a callback.
   // Returns true, if server socket was successfully created, false otherwise.
   // Called by server.
-  bool StartAcceptingConnections(const std::string& service_id,
-                                 AcceptedConnectionCallback callback)
+  ErrorOr<bool> StartAcceptingConnections(const std::string& service_id,
+                                          AcceptedConnectionCallback callback)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Returns true, if object is currently running a Accept() loop.
@@ -111,9 +115,9 @@ class BluetoothClassic {
   // Blocks until connection is established, or server-side is terminated.
   // Returns socket instance. On success, BluetoothSocket.IsValid() return true.
   // Called by client.
-  BluetoothSocket Connect(BluetoothDevice& bluetooth_device,
-                          const std::string& service_id,
-                          CancellationFlag* cancellation_flag)
+  ErrorOr<BluetoothSocket> Connect(BluetoothDevice& bluetooth_device,
+                                   const std::string& service_id,
+                                   CancellationFlag* cancellation_flag)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   std::string GetMacAddress() const ABSL_LOCKS_EXCLUDED(mutex_);
@@ -177,16 +181,14 @@ class BluetoothClassic {
   bool IsDiscoveringLocked(const std::string& serviceId) const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  void StopAllDiscovery() ABSL_LOCKS_EXCLUDED(mutex_);
-
   // Establishes connection to BT service that was might be started on another
   // device with StartAcceptingConnections() using the same service_id.
   // Blocks until connection is established, or server-side is terminated.
   // Returns socket instance. On success, BluetoothSocket.IsValid() return true.
   // Called by client.
-  BluetoothSocket AttemptToConnect(BluetoothDevice& bluetooth_device,
-                                   const std::string& service_id,
-                                   CancellationFlag* cancellation_flag);
+  ErrorOr<BluetoothSocket> AttemptToConnect(
+      BluetoothDevice& bluetooth_device, const std::string& service_id,
+      CancellationFlag* cancellation_flag);
 
   // Accesses to discovery callbacks.
   bool HasDiscoveryCallbacks() const
@@ -234,12 +236,10 @@ class BluetoothClassic {
 
   // Whether the multiplex feature is enabled.
   bool is_multiplex_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableMultiplex);
+      config_package_nearby::nearby_connections_feature::kEnableMultiplex);
 
   // A map of Bluetooth MacAddress -> MultiplexSocket.
-  absl::flat_hash_map<std::string,
-                      mediums::multiplex::MultiplexSocket*>
+  absl::flat_hash_map<std::string, mediums::multiplex::MultiplexSocket*>
       multiplex_sockets_ ABSL_GUARDED_BY(mutex_);
 };
 

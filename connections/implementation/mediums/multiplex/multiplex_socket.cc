@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -23,10 +24,12 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "connections/implementation/mediums/multiplex/multiplex_frames.h"
 #include "connections/implementation/mediums/multiplex/multiplex_output_stream.h"
 #include "connections/implementation/mediums/utils.h"
+#include "internal/platform/atomic_boolean.h"
 #include "internal/platform/base64_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
@@ -64,6 +67,10 @@ using ::location::nearby::proto::connections::Medium;
 using ::location::nearby::proto::connections::Medium_Name;
 using ConnectionResponseCode = ConnectionResponseFrame::ConnectionResponseCode;
 
+// AtomicBoolean is trivial destructible, so it is safe to use it as a static
+// variable.
+AtomicBoolean MultiplexSocket::is_shutting_down_{false}; // NOLINT
+
 void MultiplexSocket::ListenForIncomingConnection(
     const std::string& service_id, Medium type,
     MultiplexIncomingConnectionCb incoming_connection_cb) {
@@ -88,45 +95,38 @@ MultiplexSocket::MultiplexSocket(std::shared_ptr<MediumSocket> physical_socket)
 absl::flat_hash_map<std::pair<std::string, Medium>,
                     MultiplexIncomingConnectionCb>&
 MultiplexSocket::GetIncomingConnectionCallbacks() {
-  static std::aligned_storage_t<
-      sizeof(absl::flat_hash_map<std::pair<std::string, Medium>,
-                                 MultiplexIncomingConnectionCb>),
-      alignof(absl::flat_hash_map<std::pair<std::string, Medium>,
-                                  MultiplexIncomingConnectionCb>)>
-      storage;
-  static absl::flat_hash_map<std::pair<std::string, Medium>,
-                             MultiplexIncomingConnectionCb>*
-      incoming_connection_callbacks =
-          new (&storage) absl::flat_hash_map<std::pair<std::string, Medium>,
-                                             MultiplexIncomingConnectionCb>();
+  using MapType = absl::flat_hash_map<std::pair<std::string, Medium>,
+                                      MultiplexIncomingConnectionCb>;
+  alignas(MapType) static char storage[sizeof(MapType)];
+  static MapType* incoming_connection_callbacks = new (&storage) MapType();
 
   return *incoming_connection_callbacks;
 }
 
 MultiplexSocket* MultiplexSocket::CreateIncomingSocket(
     std::shared_ptr<MediumSocket> physical_socket,
-    const std::string& service_id) {
+    const std::string& service_id, std::int32_t first_frame_len) {
+  while (is_shutting_down_.Get()) {
+    NEARBY_LOGS(WARNING)
+        << "Shutting down is going on, wait for 2ms to create incoming socket";
+    absl::SleepFor(absl::Milliseconds(2));
+  }
   static MultiplexSocket* multiplex_incoming_socket = nullptr;
   switch (physical_socket->GetMedium()) {
     case Medium::BLUETOOTH:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_bt;
+      alignas(MultiplexSocket) static char storage_bt[sizeof(MultiplexSocket)];
       multiplex_incoming_socket =
           new (&storage_bt) MultiplexSocket(physical_socket);
-
       break;
     case Medium::BLE:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_ble;
+      alignas(MultiplexSocket) static char storage_ble[sizeof(MultiplexSocket)];
       multiplex_incoming_socket =
           new (&storage_ble) MultiplexSocket(physical_socket);
       break;
     case Medium::WIFI_LAN:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_wlan;
+    case Medium::AWDL:
+      alignas(
+          MultiplexSocket) static char storage_wlan[sizeof(MultiplexSocket)];
       multiplex_incoming_socket =
           new (&storage_wlan) MultiplexSocket(physical_socket);
       break;
@@ -137,11 +137,12 @@ MultiplexSocket* MultiplexSocket::CreateIncomingSocket(
       return multiplex_incoming_socket;
   }
   NEARBY_LOGS(INFO) << "CreateIncomingSocket with serviceId=" << service_id
-                    << ", serviceIdHashSalt=" << kFakeSalt;
+                    << ", serviceIdHashSalt=" << kFakeSalt << " for medium="
+                    << Medium_Name(physical_socket->GetMedium());
 
   multiplex_incoming_socket->CreateFirstVirtualSocket(service_id,
                                                       (std::string)kFakeSalt);
-  multiplex_incoming_socket->StartReaderThread();
+  multiplex_incoming_socket->StartReaderThread(first_frame_len);
 
   return multiplex_incoming_socket;
 }
@@ -149,26 +150,27 @@ MultiplexSocket* MultiplexSocket::CreateIncomingSocket(
 MultiplexSocket* MultiplexSocket::CreateOutgoingSocket(
     std::shared_ptr<MediumSocket> physical_socket,
     const std::string& service_id, const std::string& service_id_hash_salt) {
+  while (is_shutting_down_.Get()) {
+    NEARBY_LOGS(WARNING)
+        << "Shutting down is going on, wait for 2ms to create outgoing socket";
+    absl::SleepFor(absl::Milliseconds(2));
+  }
   static MultiplexSocket* multiplex_outgoing_socket = nullptr;
   switch (physical_socket->GetMedium()) {
     case Medium::BLUETOOTH:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_bt;
+      alignas(MultiplexSocket) static char storage_bt[sizeof(MultiplexSocket)];
       multiplex_outgoing_socket =
           new (&storage_bt) MultiplexSocket(physical_socket);
       break;
     case Medium::BLE:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_ble;
+      alignas(MultiplexSocket) static char storage_ble[sizeof(MultiplexSocket)];
       multiplex_outgoing_socket =
           new (&storage_ble) MultiplexSocket(physical_socket);
       break;
     case Medium::WIFI_LAN:
-      static std::aligned_storage_t<sizeof(MultiplexSocket),
-                                    alignof(MultiplexSocket)>
-          storage_wlan;
+    case Medium::AWDL:
+      alignas(
+          MultiplexSocket) static char storage_wlan[sizeof(MultiplexSocket)];
       multiplex_outgoing_socket =
           new (&storage_wlan) MultiplexSocket(physical_socket);
       break;
@@ -178,11 +180,13 @@ MultiplexSocket* MultiplexSocket::CreateOutgoingSocket(
       return multiplex_outgoing_socket;
   }
   NEARBY_LOGS(INFO) << "CreateOutgoingSocket with serviceId=" << service_id
-                    << ", serviceIdHashSalt=" << service_id_hash_salt;
+                    << ", serviceIdHashSalt=" << service_id_hash_salt
+                    << " for medium="
+                    << Medium_Name(physical_socket->GetMedium());
 
   multiplex_outgoing_socket->CreateFirstVirtualSocket(service_id,
                                                       service_id_hash_salt);
-  multiplex_outgoing_socket->StartReaderThread();
+  multiplex_outgoing_socket->StartReaderThread(0);
   return multiplex_outgoing_socket;
 }
 
@@ -334,20 +338,26 @@ MediumSocket* MultiplexSocket::EstablishVirtualSocket(
   return nullptr;
 }
 
-void MultiplexSocket::StartReaderThread() {
+void MultiplexSocket::StartReaderThread(std::int32_t first_frame_len) {
   if (is_shutdown_) {
     NEARBY_LOGS(WARNING) << "Stop to start reader thread since socket is "
                             "shutdown.";
     return;
   }
   reader_thread_shutdown_barrier_ = std::make_unique<CountDownLatch>(1);
-  physical_reader_thread_.Execute([this]() {
+  physical_reader_thread_.Execute([this, first_frame_len]() {
     NEARBY_LOGS(INFO) << __func__ << " Reader thread starts.";
+    auto first_frame_len_copy = first_frame_len;
     while (!is_shutdown_) {
       bool fail = false;
       ExceptionOr<ByteArray> bytes;
-      ExceptionOr<std::int32_t> read_int =
-          Base64Utils::ReadInt(physical_reader_);
+      ExceptionOr<std::int32_t> read_int;
+      if (first_frame_len_copy > 0) {
+        read_int = ExceptionOr<std::int32_t>(first_frame_len);
+        first_frame_len_copy = 0;
+      } else {
+        read_int = Base64Utils::ReadInt(physical_reader_);
+      }
       if (!read_int.ok()) {
         NEARBY_LOGS(WARNING)
             << __func__ << "Failed to read. Exception:" << read_int.exception();
@@ -650,6 +660,7 @@ void MultiplexSocket::OnVirtualSocketClosed(const std::string& service_id) {
         if (virtual_sockets_.empty()) {
           NEARBY_LOGS(INFO) << "Close the physical socket because all virtual "
                                "sockets disconnected.";
+          is_shutting_down_.Set(true);
           Shutdown();
           shutdown = true;
         }
@@ -669,6 +680,7 @@ void MultiplexSocket::OnVirtualSocketClosed(const std::string& service_id) {
         << "Shutdown single_thread_offloader_ and physical_reader_thread_";
     single_thread_offloader_.Shutdown();
     physical_reader_thread_.Shutdown();
+    is_shutting_down_.Set(false);
   }
 }
 
@@ -761,9 +773,9 @@ void MultiplexSocket::ShutdownAll() {
   if (!latch
            .Await(FeatureFlags::GetInstance()
                       .GetFlags()
-                      .mediums_frame_write_timeout_millis)
-           .result() +
-      200) {
+                      .mediums_frame_write_timeout_millis +
+                  absl::Milliseconds(100))
+           .result()) {
     NEARBY_LOGS(ERROR) << "Timeout to close virtual socket";
   }
 

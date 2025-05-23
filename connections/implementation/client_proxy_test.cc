@@ -210,8 +210,9 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
         .info = ByteArray{"advertising endpoint name"},
         .id = client->GetLocalEndpointId(),
     };
-    client->StartedAdvertising(service_id_, strategy_, listener,
-                               absl::MakeSpan(mediums_), advertising_options);
+    client->StartedAdvertising(
+        service_id_, strategy_, listener, absl::MakeSpan(mediums_),
+        /*operation_result_with_medium=*/{}, advertising_options);
     return endpoint;
   }
 
@@ -256,7 +257,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
         .id = client->GetLocalEndpointId(),
     };
     client->StartedDiscovery(service_id_, strategy_, std::move(listener),
-                             absl::MakeSpan(mediums_));
+                             absl::MakeSpan(mediums_),
+                             /*operation_result_with_medium=*/{});
     return endpoint;
   }
 
@@ -607,7 +609,7 @@ TEST_F(ClientProxyTest, ResetClearsState) {
 }
 
 TEST_F(ClientProxyTest, StartedAdvertisingChangesStateFromIdle) {
-  client1()->StartedAdvertising(service_id_, strategy_, {}, {});
+  client1()->StartedAdvertising(service_id_, strategy_, {}, {}, {});
 
   EXPECT_TRUE(client1()->IsAdvertising());
   EXPECT_FALSE(client1()->IsDiscovering());
@@ -616,7 +618,7 @@ TEST_F(ClientProxyTest, StartedAdvertisingChangesStateFromIdle) {
 }
 
 TEST_F(ClientProxyTest, StartedDiscoveryChangesStateFromIdle) {
-  client1()->StartedDiscovery(service_id_, strategy_, {}, {});
+  client1()->StartedDiscovery(service_id_, strategy_, {}, {}, {});
 
   EXPECT_FALSE(client1()->IsAdvertising());
   EXPECT_TRUE(client1()->IsDiscovering());
@@ -1216,7 +1218,6 @@ TEST_F(ClientProxyTest, NotLogSessionForStoppedAdvertisingWithConnection) {
 
   // After
   StopAdvertising(client1());  // No Advertising
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1230,12 +1231,10 @@ TEST_F(ClientProxyTest,
       advertising_endpoint.id));             // No Connections
   EXPECT_FALSE(client1()->IsDiscovering());  // No Discovery
   EXPECT_TRUE(client1()->IsAdvertising());   // Advertising
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
 
   // After
   StopAdvertising(client1());
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1254,7 +1253,6 @@ TEST_F(ClientProxyTest, NotLogSessionForStoppedDiscoveryWithConnection) {
 
   // After
   StopDiscovery(client2());
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1273,7 +1271,6 @@ TEST_F(ClientProxyTest,
 
   // After
   StopDiscovery(client2());
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1292,7 +1289,6 @@ TEST_F(ClientProxyTest, LogSessionOnDisconnectedWithOneConnection) {
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1309,7 +1305,6 @@ TEST_F(ClientProxyTest,
 
   // After
   client2()->OnDisconnected(advertising_endpoint.id, /*notify=*/false);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1337,7 +1332,6 @@ TEST_F(ClientProxyTest, NotLogSessionOnDisconnectedWhenMoreThanOneConnection) {
 
   // After
   client2()->OnDisconnected(advertising_endpoint_1.id, /*notify=*/false);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1357,7 +1351,6 @@ TEST_F(ClientProxyTest,
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  client2()->GetAnalyticsRecorder().Sync();
   // Since we are no longer checking IsDiscovering(), we complete sessions now
   // solely based on advertising.
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 1);
@@ -1370,17 +1363,13 @@ TEST_F(ClientProxyTest, LogSessionForResetClientProxy) {
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
   OnDiscoveryConnectionInitiated(client2(), advertising_endpoint);
 
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
   client1()->Reset();
-  client1()->GetAnalyticsRecorder().Sync();
   // TODO(b/290936886): Why are there more than one complete sessions?
   EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
 
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
   client2()->Reset();
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1554,21 +1543,50 @@ TEST_F(ClientProxyTest, TestAutoBwuWhenListeningWithAutoBwu) {
 }
 
 TEST_F(ClientProxyTest, TestMultiplexSocketBitmask) {
-  EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
+  if (!NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableMultiplex)) {
+    EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
+  }
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::kEnableMultiplex,
       true);
-  EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(),
-            ClientProxy::kBtMultiplexEnabled);
+  EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexBluetooth,
+      true);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexWifiLan,
+      true);
+  EXPECT_EQ(
+      client1()->GetLocalMultiplexSocketBitmask(),
+      ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::kEnableMultiplex,
+      false);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexBluetooth,
+      false);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexWifiLan,
       false);
 }
 
 TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
-  EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::kEnableMultiplex,
+      true);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexBluetooth,
+      true);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexWifiLan,
       true);
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
@@ -1586,12 +1604,20 @@ TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
       ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
   EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
                                                     Medium::BLUETOOTH));
+  EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
+                                                    Medium::WIFI_LAN));
   EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-              Medium::WIFI_LAN));
-  EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-              Medium::WIFI_AWARE));
+                                                     Medium::WIFI_AWARE));
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::kEnableMultiplex,
+      false);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexBluetooth,
+      false);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableMultiplexWifiLan,
       false);
 }
 

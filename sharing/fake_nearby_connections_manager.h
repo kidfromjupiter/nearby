@@ -17,7 +17,6 @@
 
 #include <stdint.h>
 
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <map>
 #include <memory>
@@ -31,7 +30,9 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "internal/base/file_path.h"
 #include "sharing/common/nearby_share_enums.h"
+#include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
 
@@ -53,6 +54,7 @@ class FakeNearbyConnectionsManager : public NearbyConnectionsManager {
                         ConnectionsCallback callback) override;
   void StopAdvertising(ConnectionsCallback callback) override;
   void StartDiscovery(DiscoveryListener* listener, proto::DataUsage data_usage,
+                      std::optional<uint16_t> alternate_service_uuid,
                       ConnectionsCallback callback) override;
   void StopDiscovery() override;
   void Connect(std::vector<uint8_t> endpoint_info,
@@ -73,8 +75,7 @@ class FakeNearbyConnectionsManager : public NearbyConnectionsManager {
       absl::string_view endpoint_id) override;
   void UpgradeBandwidth(absl::string_view endpoint_id) override;
   void SetCustomSavePath(absl::string_view custom_save_path) override;
-  absl::flat_hash_set<std::filesystem::path>
-  GetAndClearUnknownFilePathsToDelete() override;
+  absl::flat_hash_set<FilePath> GetAndClearUnknownFilePathsToDelete() override;
 
   // Testing methods
   void SetRawAuthenticationToken(absl::string_view endpoint_id,
@@ -121,6 +122,7 @@ class FakeNearbyConnectionsManager : public NearbyConnectionsManager {
 
   std::optional<std::vector<uint8_t>> connection_endpoint_info(
       absl::string_view endpoint_id) {
+    absl::MutexLock lock(&endpoints_mutex_);
     auto it = connection_endpoint_infos_.find(std::string(endpoint_id));
     if (it == connection_endpoint_infos_.end()) return std::nullopt;
 
@@ -132,9 +134,13 @@ class FakeNearbyConnectionsManager : public NearbyConnectionsManager {
     return !incoming_payloads_.empty();
   }
 
-  absl::flat_hash_set<std::filesystem::path>
-  GetUnknownFilePathsToDeleteForTesting();
-  void AddUnknownFilePathsToDeleteForTesting(std::filesystem::path file_path);
+  absl::flat_hash_set<FilePath> GetUnknownFilePathsToDeleteForTesting();
+  void AddUnknownFilePathsToDeleteForTesting(FilePath file_path);
+
+  // Add `connection` to list of connections as if it was accepted.
+  void AcceptConnection(std::vector<uint8_t> endpoint_info,
+                        absl::string_view endpoint_id,
+                        NearbyConnection* connection);
 
  private:
   void HandleStartAdvertisingCallback(ConnectionsStatus status);
@@ -166,15 +172,17 @@ class FakeNearbyConnectionsManager : public NearbyConnectionsManager {
   ConnectionsCallback pending_start_advertising_callback_;
   std::string custom_save_path_;
 
+  absl::Mutex endpoints_mutex_;
   // Maps endpoint_id to endpoint_info.
-  std::map<std::string, std::vector<uint8_t>> connection_endpoint_infos_;
+  std::map<std::string, std::vector<uint8_t>> connection_endpoint_infos_
+      ABSL_GUARDED_BY(endpoints_mutex_);
 
   std::map<int64_t, std::weak_ptr<PayloadStatusListener>>
       payload_status_listeners_;
   mutable absl::Mutex incoming_payloads_mutex_;
   std::map<int64_t, std::unique_ptr<Payload>> incoming_payloads_
       ABSL_GUARDED_BY(incoming_payloads_mutex_);
-  absl::flat_hash_set<std::filesystem::path> file_paths_to_delete_;
+  absl::flat_hash_set<FilePath> file_paths_to_delete_;
   std::string Dump() const override;
 };
 

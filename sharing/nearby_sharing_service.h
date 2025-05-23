@@ -26,6 +26,7 @@
 #include "internal/platform/clock.h"
 #include "sharing/advertisement.h"
 #include "sharing/attachment_container.h"
+#include "sharing/certificates/nearby_share_certificate_manager.h"
 #include "sharing/internal/api/sharing_rpc_notifier.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/nearby_sharing_settings.h"
@@ -39,7 +40,6 @@ class AccountManager;
 namespace sharing {
 
 class NearbyNotificationDelegate;
-class NearbyShareCertificateManager;
 class NearbyShareContactManager;
 class NearbyShareHttpNotifier;
 
@@ -141,14 +141,6 @@ class NearbySharingService {
       std::function<void(StatusCodes)> status_codes_callback) = 0;
 
   // Registers a send surface for handling payload transfer status and device
-  // discovery.
-  ABSL_DEPRECATED("Use the variant with vendor ID/blocking request instead.")
-  virtual void RegisterSendSurface(
-      TransferUpdateCallback* transfer_callback,
-      ShareTargetDiscoveredCallback* discovery_callback, SendSurfaceState state,
-      std::function<void(StatusCodes)> status_codes_callback) = 0;
-
-  // Registers a send surface for handling payload transfer status and device
   // discovery, with optional blocking on a specified vendor ID.
   // `transfer_callback` is used as the main identity for the surface, so trying
   // to re-register the same transfer callback with a different
@@ -235,10 +227,6 @@ class NearbySharingService {
       int64_t share_target_id,
       std::function<void(StatusCodes status_codes)> status_codes_callback) = 0;
 
-  // Returns true if the local user cancelled the transfer to remote
-  // |share_target|.
-  virtual bool DidLocalUserCancelTransfer(int64_t share_target_id) = 0;
-
   // Checks to make sure visibility setting is valid and updates the service's
   // visibility if so.
   virtual void SetVisibility(
@@ -255,6 +243,8 @@ class NearbySharingService {
   virtual NearbyShareCertificateManager* GetCertificateManager() = 0;
   virtual AccountManager* GetAccountManager() = 0;
   virtual Clock& GetClock() = 0;
+  virtual void SetAlternateServiceUuidForDiscovery(
+      uint16_t alternate_service_uuid) = 0;
 };
 
 }  // namespace sharing

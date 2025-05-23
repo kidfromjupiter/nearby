@@ -31,7 +31,6 @@
 #include "internal/platform/output_stream.h"
 #include "internal/platform/single_thread_executor.h"
 #include "internal/platform/socket.h"
-#include "webrtc/api/data_channel_interface.h"
 
 namespace nearby {
 namespace connections {
@@ -47,8 +46,9 @@ constexpr int kMaxDataSize = 1 * 1024 * 1024;
 // which could lead to data loss.
 class WebRtcSocket : public Socket, public webrtc::DataChannelObserver {
  public:
-  WebRtcSocket(const std::string& name,
-               rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel);
+  WebRtcSocket(
+      const std::string& name,
+      webrtc::scoped_refptr<webrtc::DataChannelInterface> data_channel);
   ~WebRtcSocket() override;
 
   WebRtcSocket(const WebRtcSocket& other) = delete;
@@ -101,7 +101,7 @@ class WebRtcSocket : public Socket, public webrtc::DataChannelObserver {
   void OffloadFromSignalingThread(Runnable runnable);
 
   std::string name_;
-  rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel_;
+  webrtc::scoped_refptr<webrtc::DataChannelInterface> data_channel_;
 
   std::unique_ptr<InputStream> pipe_input_;
   std::unique_ptr<OutputStream> pipe_output_;

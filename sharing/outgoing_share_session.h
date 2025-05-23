@@ -16,7 +16,6 @@
 #define THIRD_PARTY_NEARBY_SHARING_OUTGOING_SHARE_SESSION_H_
 
 #include <cstdint>
-#include <filesystem>  // NOLINT
 #include <functional>
 #include <memory>
 #include <optional>
@@ -24,8 +23,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/clock.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/analytics/analytics_recorder.h"
@@ -53,7 +54,7 @@ class OutgoingShareSession : public ShareSession {
       NearbyConnectionsManager* connections_manager,
       analytics::AnalyticsRecorder& analytics_recorder, std::string endpoint_id,
       const ShareTarget& share_target,
-      std::function<void(OutgoingShareSession&, const TransferMetadata&)>
+      absl::AnyInvocable<void(OutgoingShareSession&, const TransferMetadata&)>
           transfer_update_callback);
   OutgoingShareSession(OutgoingShareSession&&);
   ~OutgoingShareSession() override;
@@ -83,7 +84,7 @@ class OutgoingShareSession : public ShareSession {
       PairedKeyVerificationRunner::PairedKeyVerificationResult result,
       location::nearby::proto::sharing::OSType share_target_os_type);
 
-  std::vector<std::filesystem::path> GetFilePaths() const;
+  std::vector<FilePath> GetFilePaths() const;
 
   void CreateTextPayloads();
   void CreateWifiCredentialsPayloads();
@@ -116,14 +117,13 @@ class OutgoingShareSession : public ShareSession {
 
   // Begin sending payloads.
   // Listen to the payload status change and send the status to
-  // `update_callback`.
+  // `payload_transder_update_callback`.
   // Any other frames received will be passed to `frame_read_callback`.
   void SendPayloads(
-      bool enable_transfer_cancellation_optimization,
       std::function<
           void(std::optional<nearby::sharing::service::proto::V1Frame> frame)>
           frame_read_callback,
-      std::function<void(int64_t, TransferMetadata)> update_callback);
+      std::function<void()> payload_transder_update_callback);
   // Send the next payload to NearbyConnectionManager.
   // Used only if enable_transfer_cancellation_optimization is true.
   void SendNextPayload();
@@ -131,13 +131,18 @@ class OutgoingShareSession : public ShareSession {
   // Called when all payloads have been sent.
   void SendAttachmentsCompleted(const TransferMetadata& metadata);
 
-  // Cache the kComplete metadata in pending_complete_metadata_ and forward a
-  // modified copy that changes kComplete into kInProgress.
-  void DelayCompleteMetadata(const TransferMetadata& complete_metadata);
-  // Disconnect timeout expired without receiving client disconnect.
-  void DisconnectionTimeout();
-  // Used only for OutgoingShareSession De-duplication.
-  void UpdateSessionForDedup(
+  // Wait for receiver to close connection before we notify that the transfer
+  // has succeeded.  Here we delay the `complete_metadata` update until receiver
+  // disconnects and forward a modified copy that changes kComplete into
+  // kInProgress.
+  // A 1 min timer is setup so that if we do not receive disconnect from
+  // receiver, we assume the transfer has failed.
+  void DelayComplete(const TransferMetadata& complete_metadata);
+  // Updates the share target in the session to `share_target`.
+  // If the session is not connected, also updates the `certificate` and
+  // `endpoint_id`.
+  // Returns true if the session is not connected and updated successfully.
+  bool UpdateSessionForDedup(
       const ShareTarget& share_target,
       std::optional<NearbyShareDecryptedPublicCertificate> certificate,
       absl::string_view endpoint_id);
@@ -148,12 +153,15 @@ class OutgoingShareSession : public ShareSession {
                std::optional<std::vector<uint8_t>> bluetooth_mac_address,
                nearby::sharing::proto::DataUsage data_usage,
                bool disable_wifi_hotspot,
-               std::function<void(NearbyConnection* connection, Status status)>
+               std::function<void(absl::string_view endpoint_id,
+                                  NearbyConnection* connection, Status status)>
                    callback);
 
   // Called to process the result of a connection attempt.
   // Returns true if the connection was successful.
   bool OnConnectResult(NearbyConnection* connection, Status status);
+
+  std::optional<TransferMetadata> ProcessPayloadTransferUpdates();
 
  protected:
   void InvokeTransferUpdateCallback(const TransferMetadata& metadata) override;
@@ -163,19 +171,6 @@ class OutgoingShareSession : public ShareSession {
   // Calculates transport type based on attachment size.
   TransportType GetTransportType(bool disable_wifi_hotspot) const;
 
-  // Create a payload status listener to send status change to
-  // `update_callback`.  Send all payloads to NearbyConnectionManager.
-  void SendAllPayloads(
-      std::function<void(int64_t, TransferMetadata)> update_callback);
-
-  // Create a payload status listener to send status change to
-  // `update_callback`.
-  void InitSendPayload(
-      std::function<void(int64_t, TransferMetadata)> update_callback);
-
-  std::vector<Payload> ExtractTextPayloads();
-  std::vector<Payload> ExtractFilePayloads();
-  std::vector<Payload> ExtractWifiCredentialsPayloads();
   std::optional<Payload> ExtractNextPayload();
   bool FillIntroductionFrame(
       nearby::sharing::service::proto::IntroductionFrame* introduction) const;
@@ -186,7 +181,7 @@ class OutgoingShareSession : public ShareSession {
   std::vector<Payload> file_payloads_;
   std::vector<Payload> wifi_credentials_payloads_;
   Status connection_layer_status_ = Status::kUnknown;
-  std::function<void(OutgoingShareSession&, const TransferMetadata&)>
+  absl::AnyInvocable<void(OutgoingShareSession&, const TransferMetadata&)>
       transfer_update_callback_;
   bool ready_for_accept_ = false;
   // This alarm is used to disconnect the sharing connection if both sides do
@@ -194,6 +189,8 @@ class OutgoingShareSession : public ShareSession {
   std::unique_ptr<ThreadTimer> mutual_acceptance_timeout_;
   std::optional<TransferMetadata> pending_complete_metadata_;
   absl::Time connection_start_time_;
+  // Timeout waiting for remote disconnect in order to complete transfer.
+  std::unique_ptr<ThreadTimer> disconnection_timeout_;
 };
 
 }  // namespace nearby::sharing

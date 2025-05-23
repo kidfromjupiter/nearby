@@ -20,15 +20,17 @@
 #include <string>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/analytics/packet_meta_data.h"
 #include "connections/implementation/endpoint_channel.h"
+#include "internal/platform/condition_variable.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/output_stream.h"
-#include "internal/platform/socket.h"
 
 namespace nearby {
 namespace connections {
@@ -63,6 +65,7 @@ class BaseEndpointChannel : public EndpointChannel {
       location::nearby::proto::connections::DisconnectionReason reason,
       location::nearby::analytics::proto::ConnectionsLog::
           EstablishedConnection::SafeDisconnectionResult result) override;
+  bool IsClosed() const ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
   std::string GetType() const override;
   std::string GetServiceId() const override;
   std::string GetName() const override;
@@ -83,6 +86,7 @@ class BaseEndpointChannel : public EndpointChannel {
       ABSL_LOCKS_EXCLUDED(last_read_mutex_) override;
   absl::Time GetLastWriteTimestamp() const
       ABSL_LOCKS_EXCLUDED(last_write_mutex_) override;
+  uint32_t GetNextKeepAliveSeqNo() const override;
   void SetAnalyticsRecorder(analytics::AnalyticsRecorder* analytics_recorder,
                             const std::string& endpoint_id) override;
 
@@ -92,11 +96,11 @@ class BaseEndpointChannel : public EndpointChannel {
   std::unique_ptr<std::string> EncodeMessageForTests(absl::string_view data);
 
  private:
-  // Used to sanity check that our frame sizes are reasonable.
-  static constexpr std::int32_t kMaxAllowedReadBytes = 1048576;  // 1MB
+  // Gets the maximum number of bytes that can be read from the channel.
+  int GetMaxAllowedReadBytes() const;
 
-  // The default maximum transmit unit/packet size.
-  static constexpr int kDefaultMaxTransmitPacketSize = 65536;  // 64 KB
+  // Gets the default maximum transmit unit/packet size.
+  int GetDefaultMaxTransmitPacketSize() const;
 
   bool IsEncryptionEnabledLocked() const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(crypto_mutex_);
@@ -116,8 +120,15 @@ class BaseEndpointChannel : public EndpointChannel {
   absl::Time last_write_timestamp_ ABSL_GUARDED_BY(last_write_mutex_) =
       absl::InfinitePast();
 
+  mutable Mutex keep_alive_mutex_;
+  mutable uint32_t next_keep_alive_seq_no_ ABSL_GUARDED_BY(keep_alive_mutex_) =
+      0;
+
   const std::string service_id_;
   const std::string channel_name_;
+
+  const int max_allowed_read_bytes_;
+  const int default_max_transmit_packet_size_;
 
   // The reader and writer are synchronized independently since we can't have
   // writes waiting on reads that might potentially block forever.

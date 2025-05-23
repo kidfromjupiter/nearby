@@ -18,10 +18,10 @@ cc_library(
     name = "connection_types",
     hdrs = ["nearby_connections_types.h"],
     deps = [
+        "//internal/base:file_path",
         "//internal/base:files",
         "//internal/crypto_cros",  # buildcleaner: keep
         "//internal/interop:authentication_status",
-        "//sharing/common:compatible_u8_string",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
@@ -51,8 +51,9 @@ cc_library(
         "//sharing:__subpackages__",
     ],
     deps = [
+        "//internal/base:file_path",
         "//internal/network:url",
-        "//sharing/common:compatible_u8_string",
+        "//proto:sharing_enums_cc_proto",
         "//sharing/common:enum",
         "//sharing/internal/base",
         "//sharing/proto:wire_format_cc_proto",
@@ -84,11 +85,11 @@ cc_library(
     ],
     deps = [
         ":connection_types",
+        "//internal/base:file_path",
         "//internal/network:url",
         "//sharing/common:enum",
         "//sharing/internal/public:logging",
         "//sharing/proto:enums_cc_proto",
-        "//sharing/proto:wire_format_cc_proto",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -133,6 +134,18 @@ cc_library(
 )
 
 cc_library(
+    name = "worker_queue",
+    hdrs = ["worker_queue.h"],
+    deps = [
+        "//internal/platform:types",
+        "//sharing/internal/public:logging",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
     name = "incoming_frame_reader",
     srcs = ["incoming_frames_reader.cc"],
     hdrs = ["incoming_frames_reader.h"],
@@ -155,7 +168,6 @@ cc_library(
     hdrs = ["paired_key_verification_runner.h"],
     deps = [
         ":incoming_frame_reader",
-        ":types",
         "//internal/platform:types",
         "//proto:sharing_enums_cc_proto",
         "//sharing/certificates",
@@ -163,6 +175,7 @@ cc_library(
         "//sharing/proto:enums_cc_proto",
         "//sharing/proto:share_cc_proto",
         "//sharing/proto:wire_format_cc_proto",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/time",
     ],
 )
@@ -204,18 +217,20 @@ cc_library(
         ":thread_timer",
         ":transfer_metadata",
         ":types",
+        ":worker_queue",
+        "//internal/base:file_path",
         "//internal/base:files",
         "//internal/platform:types",
         "//proto:sharing_enums_cc_proto",
         "//sharing/analytics",
         "//sharing/certificates",
-        "//sharing/common:compatible_u8_string",
         "//sharing/internal/api:platform",
         "//sharing/internal/public:logging",
         "//sharing/proto:enums_cc_proto",
         "//sharing/proto:wire_format_cc_proto",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
@@ -247,7 +262,6 @@ cc_library(
         "nearby_connections_service.cc",
         "nearby_connections_service_impl.cc",
         "nearby_connections_stream_buffer_manager.cc",
-        "nearby_share_profile_info_provider_impl.cc",
         "nearby_sharing_service.cc",
         "nearby_sharing_service_factory.cc",
         "nearby_sharing_service_impl.cc",
@@ -264,7 +278,6 @@ cc_library(
         "nearby_connections_service.h",
         "nearby_connections_service_impl.h",
         "nearby_connections_stream_buffer_manager.h",
-        "nearby_share_profile_info_provider_impl.h",
         "nearby_sharing_service.h",
         "nearby_sharing_service_extension.h",
         "nearby_sharing_service_factory.h",
@@ -303,6 +316,8 @@ cc_library(
         "//internal/analytics:event_logger",
         "//internal/base",
         "//internal/base:bluetooth_address",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/flags:nearby_flags",
         "//internal/network:url",
         "//internal/platform:base",
@@ -313,7 +328,6 @@ cc_library(
         "//sharing/analytics",
         "//sharing/certificates",
         "//sharing/common",
-        "//sharing/common:compatible_u8_string",
         "//sharing/common:enum",
         "//sharing/contacts",
         "//sharing/fast_initiation:nearby_fast_initiation",
@@ -350,12 +364,10 @@ cc_library(
     name = "test_support",
     testonly = True,
     srcs = [
-        "fake_nearby_connection.cc",
         "fake_nearby_connections_manager.cc",
         "fake_nearby_sharing_service.cc",
     ],
     hdrs = [
-        "fake_nearby_connection.h",
         "fake_nearby_connections_manager.h",
         "fake_nearby_sharing_service.h",
     ],
@@ -367,6 +379,7 @@ cc_library(
         ":transfer_metadata",
         ":types",
         "//internal/base",
+        "//internal/base:file_path",
         "//internal/platform:types",
         "//sharing/common:enum",
         "//sharing/internal/api:platform",
@@ -430,7 +443,9 @@ cc_test(
     size = "small",
     srcs = ["paired_key_verification_runner_test.cc"],
     deps = [
+        ":connection_types",
         ":incoming_frame_reader",
+        ":nearby_connection_impl",
         ":paired_key_verification_runner",
         ":test_support",
         ":types",
@@ -496,6 +511,8 @@ cc_test(
         ":incoming_frame_reader",
         ":nearby_connection_impl",
         ":test_support",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
         "//sharing/proto:wire_format_cc_proto",
@@ -516,6 +533,8 @@ cc_test(
         ":connection_types",
         ":nearby_sharing_service",
         ":types",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/flags:nearby_flags",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
@@ -542,6 +561,7 @@ cc_test(
     deps = [
         ":attachments",
         ":connection_types",
+        ":nearby_connection_impl",
         ":nearby_sharing_service",
         ":share_session",
         ":test_support",
@@ -550,7 +570,10 @@ cc_test(
         ":types",
         "//base:casts",
         "//internal/analytics:mock_event_logger",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/flags:nearby_flags",
+        "//internal/platform/implementation:signin_attempt",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
         "//internal/test:mocks",
@@ -558,7 +581,6 @@ cc_test(
         "//sharing/certificates",
         "//sharing/certificates:test_support",
         "//sharing/common",
-        "//sharing/common:compatible_u8_string",
         "//sharing/common:enum",
         "//sharing/contacts",
         "//sharing/contacts:test_support",
@@ -575,6 +597,7 @@ cc_test(
         "//sharing/proto:share_cc_proto",
         "//sharing/proto:wire_format_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -583,7 +606,6 @@ cc_test(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
-        "@com_google_protobuf//:protobuf_lite",
     ],
 )
 
@@ -617,25 +639,13 @@ cc_test(
     srcs = ["nearby_file_handler_test.cc"],
     deps = [
         ":share_session",
+        "//internal/base:file_path",
         "//internal/base:files",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//sharing/internal/api:mock_sharing_platform",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "nearby_share_profile_info_provider_impl_test",
-    srcs = ["nearby_share_profile_info_provider_impl_test.cc"],
-    deps = [
-        ":nearby_sharing_service",
-        "//internal/platform/implementation:account_manager",
-        "//internal/platform/implementation/g3",  # fixdeps: keep
-        "//internal/test",
-        "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -661,10 +671,10 @@ cc_test(
     srcs = ["nearby_sharing_settings_test.cc"],
     deps = [
         ":nearby_sharing_service",
+        "//internal/base:files",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
         "//sharing/common",
-        "//sharing/common:compatible_u8_string",
         "//sharing/common:enum",
         "//sharing/internal/test:nearby_test",
         "//sharing/local_device_data:test_support",
@@ -752,6 +762,8 @@ cc_test(
     name = "share_session_test",
     srcs = ["share_session_test.cc"],
     deps = [
+        ":connection_types",
+        ":nearby_connection_impl",
         ":paired_key_verification_runner",
         ":share_session",
         ":test_support",
@@ -759,6 +771,7 @@ cc_test(
         ":transfer_metadata_matchers",
         ":types",
         "//internal/analytics:mock_event_logger",
+        "//internal/base:file_path",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
         "//sharing/analytics",
@@ -777,6 +790,8 @@ cc_test(
     deps = [
         ":attachment_compare",
         ":attachments",
+        "//internal/base:file_path",
+        "//proto:sharing_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],
@@ -800,6 +815,7 @@ cc_test(
     deps = [
         ":attachments",
         ":connection_types",
+        ":nearby_connection_impl",
         ":paired_key_verification_runner",
         ":share_session",
         ":test_support",
@@ -807,6 +823,7 @@ cc_test(
         ":transfer_metadata_matchers",
         ":types",
         "//internal/analytics:mock_event_logger",
+        "//internal/base:file_path",
         "//internal/network:url",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
@@ -828,6 +845,7 @@ cc_test(
         ":attachment_compare",
         ":attachments",
         ":connection_types",
+        ":nearby_connection_impl",
         ":paired_key_verification_runner",
         ":share_session",
         ":test_support",
@@ -835,6 +853,7 @@ cc_test(
         ":transfer_metadata_matchers",
         ":types",
         "//internal/analytics:mock_event_logger",
+        "//internal/base:file_path",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "//internal/test",
         "//proto:sharing_enums_cc_proto",
@@ -873,6 +892,19 @@ cc_test(
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # fixdeps: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "worker_queue_test",
+    srcs = ["worker_queue_test.cc"],
+    deps = [
+        ":worker_queue",
+        "//internal/platform/implementation/g3",  # fixdeps: keep
+        "//internal/test",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest_main",
     ],
 )

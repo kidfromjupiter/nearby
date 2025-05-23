@@ -17,7 +17,6 @@
 
 #include <stdint.h>
 
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <memory>
 #include <optional>
@@ -27,23 +26,21 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "internal/base/file_path.h"
 #include "sharing/common/nearby_share_enums.h"
+#include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_types.h"
 #include "sharing/proto/enums.pb.h"
 
-namespace nearby {
-namespace sharing {
-
-class NearbyConnection;
-class PayloadTransferUpdatePtr;
+namespace nearby::sharing {
 
 using ConnectionsStatus = nearby::sharing::Status;
 
 class NearbyConnectionsManager {
  public:
   using ConnectionsCallback = std::function<void(ConnectionsStatus status)>;
-  using NearbyConnectionCallback =
-      std::function<void(NearbyConnection*, Status status)>;
+  using NearbyConnectionCallback = std::function<void(
+      absl::string_view endpoint_id, NearbyConnection*, Status status)>;
 
   // A callback for handling incoming connections while advertising.
   class IncomingConnectionListener {
@@ -84,11 +81,8 @@ class NearbyConnectionsManager {
       return weak_from_this();
     }
 
-    // Note: `upgraded_medium` is passed in for use in metrics, and it is
-    // absl::nullopt if the bandwidth has not upgraded yet or if the upgrade
-    // status is not known.
-    virtual void OnStatusUpdate(std::unique_ptr<PayloadTransferUpdate> update,
-                                std::optional<Medium> upgraded_medium) = 0;
+    virtual void OnStatusUpdate(
+        std::unique_ptr<PayloadTransferUpdate> update) = 0;
   };
 
   // Converts the status to a logging-friendly string.
@@ -118,6 +112,7 @@ class NearbyConnectionsManager {
   // `listener` remains valid until StopDiscovery is called.
   virtual void StartDiscovery(DiscoveryListener* listener,
                               proto::DataUsage data_usage,
+                              std::optional<uint16_t> alternate_service_uuid,
                               ConnectionsCallback callback) = 0;
 
   // Stops discovery through Nearby Connections.
@@ -162,14 +157,13 @@ class NearbyConnectionsManager {
   virtual void SetCustomSavePath(absl::string_view custom_save_path) = 0;
 
   // Gets the file paths to delete and clear the hash set.
-  virtual absl::flat_hash_set<std::filesystem::path>
+  virtual absl::flat_hash_set<FilePath>
   GetAndClearUnknownFilePathsToDelete() = 0;
 
   // Dump internal state for debugging purposes.
   virtual std::string Dump() const = 0;
 };
 
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing
 
 #endif  // THIRD_PARTY_NEARBY_SHARING_NEARBY_CONNECTIONS_MANAGER_H_

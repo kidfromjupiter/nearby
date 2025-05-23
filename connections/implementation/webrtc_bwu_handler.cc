@@ -26,18 +26,39 @@
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/mediums/mediums.h"
-#include "connections/implementation/mediums/utils.h"
 #include "connections/implementation/mediums/webrtc_peer_id.h"
 #include "connections/implementation/mediums/webrtc_socket.h"
 #include "connections/implementation/offline_frames.h"
+#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/implementation/webrtc_endpoint_channel.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/expected.h"
 #include "internal/platform/logging.h"
 
 namespace nearby {
 namespace connections {
+
+namespace {
 using ::location::nearby::connections::LocationHint;
 using ::location::nearby::connections::LocationStandard;
+using ::location::nearby::proto::connections::OperationResultCode;
+
+LocationHint BuildLocationHint(const std::string& location) {
+  LocationHint location_hint;
+  location_hint.set_format(LocationStandard::UNKNOWN);
+
+  if (!location.empty()) {
+    location_hint.set_location(location);
+    if (location.at(0) == '+') {
+      location_hint.set_format(LocationStandard::E164_CALLING);
+    } else {
+      location_hint.set_format(LocationStandard::ISO_3166_1_ALPHA_2);
+    }
+  }
+  return location_hint;
+}
+
+}  // namespace
 
 WebrtcBwuHandler::WebrtcIncomingSocket::WebrtcIncomingSocket(
     const std::string& name, mediums::WebRtcSocketWrapper socket)
@@ -54,7 +75,7 @@ WebrtcBwuHandler::WebrtcBwuHandler(
 
 // Called by BWU target. Retrieves a new medium info from incoming message,
 // and establishes connection over WebRTC using this info.
-std::unique_ptr<EndpointChannel>
+ErrorOr<std::unique_ptr<EndpointChannel>>
 WebrtcBwuHandler::CreateUpgradedEndpointChannel(
     ClientProxy* client, const std::string& service_id,
     const std::string& endpoint_id, const UpgradePathInfo& upgrade_path_info) {
@@ -72,14 +93,14 @@ WebrtcBwuHandler::CreateUpgradedEndpointChannel(
       << peer_id.GetId() << ", location hint "
       << absl::StrCat(location_hint.location());
 
-  mediums::WebRtcSocketWrapper socket = webrtc_.Connect(
+  ErrorOr<mediums::WebRtcSocketWrapper> socket_result = webrtc_.Connect(
       service_id, peer_id, location_hint,
       client->GetCancellationFlag(endpoint_id), client->GetWebRtcNonCellular());
-  if (!socket.IsValid()) {
+  if (socket_result.has_error()) {
     NEARBY_LOGS(ERROR) << "WebRtcBwuHandler failed to connect to remote peer ("
                        << peer_id.GetId() << ") on endpoint " << endpoint_id
                        << ", aborting upgrade.";
-    return nullptr;
+    return {Error(socket_result.error().operation_result_code().value())};
   }
 
   NEARBY_LOGS(INFO) << "WebRtcBwuHandler successfully connected to remote "
@@ -89,15 +110,17 @@ WebrtcBwuHandler::CreateUpgradedEndpointChannel(
 
   // Create a new WebRtcEndpointChannel.
   auto channel = std::make_unique<WebRtcEndpointChannel>(
-      service_id, /*channel_name=*/service_id, socket);
+      service_id, /*channel_name=*/service_id, socket_result.value());
   if (channel == nullptr) {
-    socket.Close();
+    socket_result.value().Close();
     NEARBY_LOGS(ERROR)
         << "WebRtcBwuHandler failed to create new EndpointChannel for "
            "outgoing socket, aborting upgrade.";
+    return {Error(
+        OperationResultCode::NEARBY_WEB_RTC_ENDPOINT_CHANNEL_CREATION_FAILURE)};
   }
 
-  return channel;
+  return {std::move(channel)};
 }
 
 void WebrtcBwuHandler::HandleRevertInitiatorStateForService(
@@ -115,7 +138,7 @@ ByteArray WebrtcBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
     ClientProxy* client, const std::string& upgrade_service_id,
     const std::string& endpoint_id) {
   LocationHint location_hint =
-      Utils::BuildLocationHint(webrtc_.GetDefaultCountryCode());
+      BuildLocationHint(webrtc_.GetDefaultCountryCode());
 
   mediums::WebrtcPeerId self_id{mediums::WebrtcPeerId::FromRandom()};
   if (!webrtc_.IsAcceptingConnections(upgrade_service_id)) {

@@ -15,6 +15,7 @@
 #include "connections/implementation/encryption_runner.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -28,7 +29,6 @@
 #include "internal/platform/input_stream.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/pipe.h"
-#include "internal/platform/system_clock.h"
 #include "proto/connections_enums.pb.h"
 #include "third_party/ukey2/src/main/cpp/include/securegcm/ukey2_handshake.h"
 
@@ -74,6 +74,7 @@ class FakeEndpointChannel : public EndpointChannel {
           EstablishedConnection::SafeDisconnectionResult result) override {
     Close();
   }
+  bool IsClosed() const override { return false; }
   location::nearby::proto::connections::ConnectionTechnology GetTechnology()
       const override {
     return location::nearby::proto::connections::ConnectionTechnology::
@@ -103,6 +104,9 @@ class FakeEndpointChannel : public EndpointChannel {
   void Resume() override {}
   absl::Time GetLastReadTimestamp() const override { return read_timestamp_; }
   absl::Time GetLastWriteTimestamp() const override { return write_timestamp_; }
+  uint32_t GetNextKeepAliveSeqNo() const override {
+    return next_keep_alive_seq_no_++;
+  }
   void SetAnalyticsRecorder(analytics::AnalyticsRecorder* analytics_recorder,
                             const std::string& endpoint_id) override {}
 
@@ -111,6 +115,7 @@ class FakeEndpointChannel : public EndpointChannel {
   OutputStream* out_ = nullptr;
   absl::Time read_timestamp_ = absl::InfinitePast();
   absl::Time write_timestamp_ = absl::InfinitePast();
+  mutable uint32_t next_keep_alive_seq_no_ = 0;
 };
 
 struct User {

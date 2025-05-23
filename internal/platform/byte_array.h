@@ -17,19 +17,22 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <cstring>
+#include <cstdint>
 #include <string>
-#include <type_traits>
 #include <utility>
 
-#include "absl/strings/str_cat.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
 namespace nearby {
 
 class ByteArray {
  public:
+  using iterator = std::string::iterator;
+  using const_iterator = std::string::const_iterator;
+
   // Create an empty ByteArray
   ByteArray() = default;
   template <size_t N>
@@ -78,11 +81,38 @@ class ByteArray {
     return true;
   }
 
+  // Returns the value of the ByteArray as a uint64_t. If the ByteArray is
+  // not exactly 6 bytes, returns an error status instead.
+  absl::StatusOr<uint64_t> Read6BytesAsUint64() const {
+    if (data_.size() != 6) {
+      return absl::FailedPreconditionError("ByteArray must be 6 bytes.");
+    }
+
+    uint64_t result = 0;
+    for (int i = 0; i < data_.size(); i++) {
+      result <<= 8;
+      result |= ((static_cast<uint64_t>(data()[i])) & 0xFF);
+    }
+
+    return result;
+  }
+
   char* data() { return &data_[0]; }
   std::string string_data() const { return data_; }
   const char* data() const { return data_.data(); }
   size_t size() const { return data_.size(); }
   bool Empty() const { return data_.empty(); }
+  void resize(size_t new_size) { data_.resize(new_size); }
+
+  // Iterators. These allow `ByteArray` to meet the requirements of
+  // `std::ranges::contiguous_range`, which in turn make it implicitly
+  // convertible to e.g. `std::span`.
+  iterator begin() { return data_.begin(); }
+  const_iterator begin() const { return data_.begin(); }
+  const_iterator cbegin() const { return data_.cbegin(); }
+  iterator end() { return data_.end(); }
+  const_iterator end() const { return data_.end(); }
+  const_iterator cend() const { return data_.cend(); }
 
   friend bool operator==(const ByteArray& lhs, const ByteArray& rhs);
   friend bool operator!=(const ByteArray& lhs, const ByteArray& rhs);

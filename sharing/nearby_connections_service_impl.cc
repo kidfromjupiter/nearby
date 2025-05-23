@@ -19,22 +19,20 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/meta/type_traits.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
-#include "connections/payload.h"
 #include "connections/strategy.h"
 #include "internal/analytics/event_logger.h"
 #include "internal/platform/logging.h"
+#include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/nearby_connections_service.h"
 #include "sharing/nearby_connections_types.h"
 
@@ -49,8 +47,16 @@ Core* GetService(NearbyConnectionsService::HANDLE handle) {
 }  // namespace
 
 NearbyConnectionsServiceImpl::NearbyConnectionsServiceImpl(
-    nearby::analytics::EventLogger* event_logger) {
-  static ServiceControllerRouter* router = new ServiceControllerRouter();
+    nearby::ConnectivityManager* connectivity_manager,
+    nearby::analytics::EventLogger* event_logger)
+    : connectivity_manager_(*connectivity_manager) {
+  static ServiceControllerRouter* router =
+      new ServiceControllerRouter([this]() {
+        // WARNING: there can be only 1 instance of
+        // NearbyConnectionsServiceImpl, otherwise the router could be pointing
+        // at an invalid instance.
+        return connectivity_manager_.IsHPRealtekDevice();
+      });
   static Core* core = new Core(event_logger, router);
   service_handle_ = core;
 }
@@ -59,7 +65,7 @@ NearbyConnectionsServiceImpl::~NearbyConnectionsServiceImpl() = default;
 
 void NearbyConnectionsServiceImpl::StartAdvertising(
     absl::string_view service_id, const std::vector<uint8_t>& endpoint_info,
-    AdvertisingOptions advertising_options,
+    const AdvertisingOptions& advertising_options,
     ConnectionListener advertising_listener,
     std::function<void(Status status)> callback) {
   advertising_listener_ = std::move(advertising_listener);
@@ -129,13 +135,16 @@ void NearbyConnectionsServiceImpl::StopAdvertising(
 }
 
 void NearbyConnectionsServiceImpl::StartDiscovery(
-    absl::string_view service_id, DiscoveryOptions discovery_options,
+    absl::string_view service_id, const DiscoveryOptions& discovery_options,
     DiscoveryListener discovery_listener,
     std::function<void(Status status)> callback) {
   discovery_listener_ = std::move(discovery_listener);
 
   NcDiscoveryOptions options{};
   options.strategy = ConvertToServiceStrategy(discovery_options.strategy);
+  // NcDiscoveryOptions enabled all mediums by default, we should apply the
+  // settings from discovery_options.
+  options.allowed.SetAll(false);
   options.allowed.ble = discovery_options.allowed_mediums.ble;
   options.allowed.bluetooth = discovery_options.allowed_mediums.bluetooth;
   options.allowed.web_rtc = discovery_options.allowed_mediums.web_rtc;
@@ -147,6 +156,12 @@ void NearbyConnectionsServiceImpl::StartDiscovery(
 
   options.is_out_of_band_connection =
       discovery_options.is_out_of_band_connection;
+
+  if (discovery_options.alternate_service_uuid.has_value()) {
+    options.ble_options.alternate_uuid =
+        discovery_options.alternate_service_uuid;
+  }
+
   NcDiscoveryListener listener;
   listener.endpoint_found_cb = [this](const std::string& endpoint_id,
                                       const NcByteArray& endpoint_info,
@@ -179,7 +194,7 @@ void NearbyConnectionsServiceImpl::StopDiscovery(
 
 void NearbyConnectionsServiceImpl::RequestConnection(
     absl::string_view service_id, const std::vector<uint8_t>& endpoint_info,
-    absl::string_view endpoint_id, ConnectionOptions connection_options,
+    absl::string_view endpoint_id, const ConnectionOptions& connection_options,
     ConnectionListener connection_listener,
     std::function<void(Status status)> callback) {
   connection_listener_ = std::move(connection_listener);

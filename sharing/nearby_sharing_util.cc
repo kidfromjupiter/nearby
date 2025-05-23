@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-#include <filesystem>  // NOLINT(build/c++17)
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,6 +25,7 @@
 #include "absl/hash/hash.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/device_info.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/advertisement.h"
@@ -77,17 +77,17 @@ std::string PowerLevelToString(PowerLevel level) {
 std::optional<std::vector<uint8_t>> GetBluetoothMacAddressFromCertificate(
     const NearbyShareDecryptedPublicCertificate& certificate) {
   if (!certificate.unencrypted_metadata().has_bluetooth_mac_address()) {
-    NL_LOG(WARNING) << __func__ << ": Public certificate "
-                    << nearby::utils::HexEncode(certificate.id())
-                    << " did not contain a Bluetooth mac address.";
+    LOG(WARNING) << __func__ << ": Public certificate "
+                 << nearby::utils::HexEncode(certificate.id())
+                 << " did not contain a Bluetooth mac address.";
     return std::nullopt;
   }
 
   std::string mac_address =
       certificate.unencrypted_metadata().bluetooth_mac_address();
   if (mac_address.size() != 6) {
-    NL_LOG(ERROR) << __func__ << ": Invalid bluetooth mac address: '"
-                  << mac_address << "'";
+    LOG(ERROR) << __func__ << ": Invalid bluetooth mac address: '"
+               << mac_address << "'";
     return std::nullopt;
   }
 
@@ -137,7 +137,7 @@ std::string GetDeviceId(
   return std::string(endpoint_id);
 }
 
-bool IsOutOfStorage(DeviceInfo& device_info, std::filesystem::path file_path,
+bool IsOutOfStorage(DeviceInfo& device_info, FilePath file_path,
                     int64_t storage_required) {
   std::optional<size_t> available_storage =
       device_info.GetAvailableDiskSpaceInBytes(file_path);

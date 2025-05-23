@@ -31,7 +31,7 @@ option objc_class_prefix = "GNCP";
 
 // Top-level log proto for all NearbySharing logging.
 // Each log contains a key (event_type), value (a verb-noun event) pair.
-// Next Tag: 80
+// Next Tag: 83
 // LINT.IfChange
 message SharingLog {
   /* collection_basis = {
@@ -215,6 +215,12 @@ message SharingLog {
   optional RpcCallStatus rpc_call_status = 78;
 
   optional StartQrCodeSession start_qr_code_session = 79;
+
+  optional QrCodeOpenedInWebClient qr_code_opened_in_web_client = 80;
+
+  optional HatsJointEvent hats_joint_event = 81;
+
+  optional ReceivePreviews receive_previews = 82;
 
   // Used only for Nearby Share Windows app now.
   message AppInfo {
@@ -423,13 +429,16 @@ message SharingLog {
     optional location.nearby.proto.sharing.SharingUseCase use_case = 1;
     // The opt-in status before the user enters the first opt-in screen in each
     // time file share or it is always “true” if the user has opted in before.
-    optional bool initial_opt_in = 2;
+    // Deprecated.
+    optional bool initial_opt_in = 2 [deprecated = true];
     // The opt-in status after the user leaves the first opt-in screen in each
     // time file share or it is always “true” if the user has opted in before.
-    optional bool opt_in = 3;
+    // Deprecated.
+    optional bool opt_in = 3 [deprecated = true];
     // The Nearby Share enable status before the user enters the first
     // opt-in screen in each time file share.
-    optional bool initial_enable_status = 4;
+    // Deprecated.
+    optional bool initial_enable_status = 4 [deprecated = true];
     // The same id means it is in the same sharing file flow of sender side.
     // Ex: when sender share file to 2 receivers, the flow_id in sender side is
     // the same for all the discovery/connection/transfer events.
@@ -490,6 +499,9 @@ message SharingLog {
   // EventType: DESCRIBE_ATTACHMENTS
   message DescribeAttachments {
     optional AttachmentsInfo attachments_info = 1;
+
+    // Time taken to download the attachments before sending
+    optional google.protobuf.Duration download_duration = 2;
   }
 
   // TODO(fdi): may want to add duration_from_scanning_millis later.
@@ -560,6 +572,10 @@ message SharingLog {
     // Exact transfer count stored on device, but when logging put the transfer
     // count in buckets, initially we use buckets: 1, 2, 3, …, 10, 11+
     optional int32 lifetime_transfer_count = 13;
+    // The medium used for the connection.
+    optional int32 connection_medium = 14;
+    // The data usage of the user settings.
+    optional location.nearby.proto.sharing.DataUsage data_usage = 15;
   }
 
   // EventType: RECEIVE_ATTACHMENTS_START
@@ -591,6 +607,10 @@ message SharingLog {
     // Exact transfer count stored on device, but when logging put the transfer
     // count in buckets, initially we use buckets: 1, 2, 3, …, 10, 11+
     optional int32 lifetime_transfer_count = 8;
+    // The medium used for the connection.
+    optional int32 connection_medium = 14;
+    // The data usage of the user settings.
+    optional location.nearby.proto.sharing.DataUsage data_usage = 15;
   }
 
   // EventType: CANCEL_CONNECTION
@@ -913,6 +933,8 @@ message SharingLog {
     optional bool is_timeout = 4;
     optional int32 original_quality = 5;
     optional int32 connection_medium = 6;
+    optional int32 connection_mode = 7;
+    optional int32 instant_connection_result = 8;
   }
 
   message RpcCallStatus {
@@ -933,5 +955,34 @@ message SharingLog {
 
   // EventType: START_QR_CODE_SESSION
   message StartQrCodeSession {}
+
+  // EventType: QR_CODE_OPENED_IN_WEB_CLIENT
+  message QrCodeOpenedInWebClient {
+    enum ClientPlatform {
+      UNKNOWN_CLIENT_PLATFORM = 0;
+      // Used when the client platform is not one of the types below
+      GENERIC = 1;
+      ANDROID = 2;
+      IOS = 3;
+      CHROME_OS = 4;
+      WINDOWS = 5;
+    }
+    optional ClientPlatform client_platform = 1;
+
+    // Whether the /qrcode page was opened in the browser again after the user
+    // clicked on the "Try again" button
+    optional bool is_retry = 2;
+  }
+  // EventType: HATS_JOINT_EVENT
+  message HatsJointEvent {
+    optional int64 flow_id = 1 /* type = ST_SESSION_ID */;
+    optional string hats_session_id = 2
+        /* type = ST_SESSION_ID */;
+  }
+
+  // EventType: RECEIVE_PREVIEWS
+  message ReceivePreviews {
+    optional int32 num_previews = 1;
+  }
 }
 // LINT.ThenChange(//depot/google3/logs/proto/location/nearby/nearby_client_log.proto)

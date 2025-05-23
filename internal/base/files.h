@@ -15,9 +15,12 @@
 #ifndef THIRD_PARTY_NEARBY_INTERNAL_BASE_FILES_H_
 #define THIRD_PARTY_NEARBY_INTERNAL_BASE_FILES_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <optional>
+
+#include "internal/base/file_path.h"
 
 // This file contains exception safe wrappers to access common std::filesystem
 // functions.
@@ -36,11 +39,13 @@ bool DirectoryExists(const std::filesystem::path& path);
 // Returns false if path does not exist, is not a file or cannot be removed.
 bool RemoveFile(const std::filesystem::path& path);
 
+bool RemoveDirectory(const FilePath& path);
+
 // Returns path to a temporary directory if available.
-std::optional<std::filesystem::path> GetTemporaryDirectory();
+std::optional<FilePath> GetTemporaryDirectory();
 
 // Returns path to the current directory.  On failure returns an empty path.
-std::filesystem::path CurrentDirectory();
+FilePath CurrentDirectory();
 
 // Renames the file at old_path to new_path.
 // Returns true on success.
@@ -60,6 +65,11 @@ bool CreateHardLink(const std::filesystem::path& target,
 // Returns true on success.
 bool CopyFileSafely(const std::filesystem::path& old_path,
                     const std::filesystem::path& new_path);
+
+// Returns the available disk space in bytes for the given path.
+// Returns nullopt if the path does not exist or if the space cannot be
+// determined.
+std::optional<size_t> GetAvailableDiskSpaceInBytes(const FilePath& path);
 
 }  // namespace nearby::sharing
 

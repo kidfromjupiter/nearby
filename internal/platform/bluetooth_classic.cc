@@ -31,16 +31,6 @@
 namespace nearby {
 using location::nearby::proto::connections::Medium;
 
-MediumSocket* BluetoothSocket::CreateVirtualSocket(OutputStream* outputstream) {
-  if (IsVirtualSocket()) {
-    LOG(WARNING)
-        << "Creating the virtual socket on a virtual socket is not allowed.";
-    return nullptr;
-  }
-  auto virtual_socket = std::make_shared<BluetoothSocket>(outputstream);
-  return virtual_socket.get();
-}
-
 MediumSocket* BluetoothSocket::CreateVirtualSocket(
     const std::string& salted_service_id_hash_key, OutputStream* outputstream,
     Medium medium,
@@ -99,6 +89,7 @@ bool BluetoothClassicMedium::StartDiscovery(DiscoveryCallback callback) {
           [this](api::BluetoothDevice& device) {
             VLOG(1) << "BT .device_discovered_cb for " << device.GetName();
             MutexLock lock(&mutex_);
+            if (!discovery_enabled_) return;
             auto pair = devices_.emplace(
                 &device, std::make_unique<DeviceDiscoveryInfo>());
             auto& context = *pair.first->second;
@@ -111,26 +102,26 @@ bool BluetoothClassicMedium::StartDiscovery(DiscoveryCallback callback) {
             context.device = BluetoothDevice(&device);
             LOG(INFO) << "Adding device=" << context.device.GetMacAddress()
                       << ",impl=" << &device;
-            if (!discovery_enabled_) return;
             discovery_callback_.device_discovered_cb(context.device);
           },
       .device_name_changed_cb =
           [this](api::BluetoothDevice& device) {
             VLOG(1) << "BT .device_name_changed_cb for " << device.GetName();
             MutexLock lock(&mutex_);
+            if (!discovery_enabled_) return;
             // If the device is not already in devices_, we should not be able
             // to change its name.
             if (devices_.find(&device) == devices_.end()) return;
             auto& context = *devices_[&device];
             LOG(INFO) << "Renaming device=" << context.device.GetMacAddress()
                       << ",impl=" << &device;
-            if (!discovery_enabled_) return;
             discovery_callback_.device_name_changed_cb(context.device);
           },
       .device_lost_cb =
           [this](api::BluetoothDevice& device) {
             VLOG(1) << "BT .device_lost_cb for " << device.GetMacAddress();
             MutexLock lock(&mutex_);
+            if (!discovery_enabled_) return;
             auto item = devices_.extract(&device);
             if (!item) {
               LOG(WARNING) << "Removing unknown device: "
@@ -140,7 +131,6 @@ bool BluetoothClassicMedium::StartDiscovery(DiscoveryCallback callback) {
             auto& context = *item.mapped();
             LOG(INFO) << "Removing device=" << context.device.GetMacAddress()
                       << ",impl=" << &device;
-            if (!discovery_enabled_) return;
             discovery_callback_.device_lost_cb(context.device);
           },
   });

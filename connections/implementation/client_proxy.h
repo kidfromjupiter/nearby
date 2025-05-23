@@ -53,6 +53,7 @@
 #include "absl/types/span.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/scheduled_executor.h"
+#include "internal/proto/analytics/connections_log.pb.h"
 
 namespace nearby {
 namespace connections {
@@ -101,6 +102,9 @@ class ClientProxy final {
       const std::string& service_id, Strategy strategy,
       const ConnectionListener& connection_lifecycle_listener,
       absl::Span<location::nearby::proto::connections::Medium> mediums,
+      const std::vector<location::nearby::analytics::proto::ConnectionsLog::
+                            OperationResultWithMedium>&
+          operation_result_with_medium,
       const AdvertisingOptions& advertising_options = AdvertisingOptions{});
   // Marks this client as not advertising.
   void StoppedAdvertising();
@@ -123,6 +127,9 @@ class ClientProxy final {
       const std::string& service_id, Strategy strategy,
       DiscoveryListener discovery_listener,
       absl::Span<location::nearby::proto::connections::Medium> mediums,
+      const std::vector<location::nearby::analytics::proto::ConnectionsLog::
+                            OperationResultWithMedium>&
+          operation_result_with_medium,
       const DiscoveryOptions& discovery_options = DiscoveryOptions{});
   // Marks this client as not discovering at all.
   void StoppedDiscovery();
@@ -179,6 +186,9 @@ class ClientProxy final {
   // ConnectionListener.disconnected_cb() callback.
   void OnDisconnected(const std::string& endpoint_id, bool notify);
 
+  // Returns the medium we're currently connected to the endpoint over, or
+  // UNKNOWN if we don't know or don't have a connection.
+  Medium GetConnectedMedium(const std::string& endpoint_id) const;
   // Returns all mediums eligible for upgrade.
   BooleanMediumSelector GetUpgradeMediums(const std::string& endpoint_id) const;
   // Returns if this endpoint support 5G for WIFI.
@@ -275,9 +285,11 @@ class ClientProxy final {
 
   std::string Dump();
 
-  const location::nearby::connections::OsInfo& GetLocalOsInfo() const;
+  virtual const location::nearby::connections::OsInfo& GetLocalOsInfo() const;
   std::optional<location::nearby::connections::OsInfo> GetRemoteOsInfo(
       absl::string_view endpoint_id) const;
+  void SetLocalOsType(
+      const location::nearby::connections::OsInfo::OsType& os_type);
   void SetRemoteOsInfo(
       absl::string_view endpoint_id,
       const location::nearby::connections::OsInfo& remote_os_info);
@@ -329,6 +341,20 @@ class ClientProxy final {
   // Sets the WebRTC non cellular network status.
   void SetWebRtcNonCellular(bool webrtc_non_cellular);
 
+  // Returns true if DCT advertising/scanning is enabled.
+  bool IsDctEnabled() const;
+
+  // Gets the DCT dedup value. This is used to dedup the same device name when
+  // scanning for multiple devices.
+  // It is 7 bits derived from the local endpoint ID.
+  uint8_t GetDctDedup() const;
+
+  // Updates the DCT device name before advertising.
+  void UpdateDctDeviceName(absl::string_view device_name);
+
+  std::optional<location::nearby::connections::MediumRole> GetMediumRole(
+      absl::string_view endpoint_id) const;
+
   /** Bitmask for bt multiplex connection support. */
   // Note. Deprecates the first and second bit of BT_MULTIPLEX_ENABLED and
   // WIFI_LAN_MULTIPLEX_ENABLED and shift them to the third and the forth bit.
@@ -363,6 +389,7 @@ class ClientProxy final {
       kConnected = 1 << 4,
     };
     bool is_incoming{false};
+    Medium connected_medium{Medium::UNKNOWN_MEDIUM};
     Status status{kPending};
     ConnectionListener connection_listener;
     ConnectionOptions connection_options;
@@ -424,6 +451,15 @@ class ClientProxy final {
       api::OSName osName);
 
   std::string ToString(PayloadProgressInfo::Status status) const;
+
+  std::optional<std::string> GetEndpointIdForDct() const;
+
+  // The device name used for DCT advertising.
+  std::string dct_device_name_;
+  // The dedup value used for DCT advertising.
+  uint8_t dct_dedup_ = 0;
+  // The endpoint ID used for DCT advertising.
+  std::string dct_endpoint_id_;
 
   mutable RecursiveMutex mutex_;
   std::int64_t client_id_;
@@ -510,6 +546,8 @@ class ClientProxy final {
   std::int32_t local_safe_to_disconnect_version_;
   // Allowed to use WebRTC over non-cellular networks.
   bool webrtc_non_cellular_ = false;
+  // Whether DCT is enabled.
+  bool is_dct_enabled_ = false;
 };
 
 }  // namespace connections

@@ -14,10 +14,14 @@
 
 #include "internal/base/files.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <optional>
 #include <system_error>  // NOLINT(build/c++11)
+
+#include "internal/base/file_path.h"
+#include "internal/platform/logging.h"
 
 namespace nearby::sharing {
 
@@ -60,20 +64,28 @@ bool RemoveFile(const std::filesystem::path& path) {
   return std::filesystem::remove(path, error_code);
 }
 
-std::optional<std::filesystem::path> GetTemporaryDirectory() {
+bool RemoveDirectory(const FilePath& path) {
+  if (!DirectoryExists(path.GetPath())) {
+    return false;
+  }
+  std::error_code error_code;
+  return std::filesystem::remove_all(path.GetPath(), error_code) != -1;
+}
+
+std::optional<FilePath> GetTemporaryDirectory() {
   std::error_code error_code;
   std::filesystem::path temp_dir =
       std::filesystem::temp_directory_path(error_code);
   if (temp_dir.empty()) {
     return std::nullopt;
   }
-  return temp_dir;
+  return FilePath::FromPath(temp_dir);
 }
 
-std::filesystem::path CurrentDirectory() {
+FilePath CurrentDirectory() {
   // temp_directory_path() returns empty path on error.
   std::error_code error_code;
-  return std::filesystem::current_path(error_code);
+  return FilePath::FromPath(std::filesystem::current_path(error_code));
 }
 
 bool Rename(const std::filesystem::path& old_path,
@@ -81,6 +93,7 @@ bool Rename(const std::filesystem::path& old_path,
   std::error_code error_code;
   std::filesystem::rename(old_path, new_path, error_code);
   if (error_code) {
+    VLOG(1) << "Failed to rename file: " << error_code.message();
     return false;
   }
   return true;
@@ -90,6 +103,7 @@ bool CreateDirectories(const std::filesystem::path& path) {
   std::error_code error_code;
   std::filesystem::create_directories(path, error_code);
   if (error_code) {
+    VLOG(1) << "Failed to create directories: " << error_code.message();
     return false;
   }
   return true;
@@ -100,6 +114,7 @@ bool CreateHardLink(const std::filesystem::path& target,
   std::error_code error_code;
   std::filesystem::create_hard_link(target, link_path, error_code);
   if (error_code) {
+    VLOG(1) << "Failed to create hard link: " << error_code.message();
     return false;
   }
   return true;
@@ -110,9 +125,20 @@ bool CopyFileSafely(const std::filesystem::path& old_path,
   std::error_code error_code;
   std::filesystem::copy(old_path, new_path, error_code);
   if (error_code) {
+    VLOG(1) << "Failed to copy file: " << error_code.message();
     return false;
   }
   return true;
+}
+
+std::optional<size_t> GetAvailableDiskSpaceInBytes(const FilePath& path) {
+  std::error_code error_code;
+  std::filesystem::space_info space_info =
+      std::filesystem::space(path.GetPath(), error_code);
+  if (error_code.value() == 0) {
+    return space_info.available;
+  }
+  return std::nullopt;
 }
 
 }  // namespace nearby::sharing

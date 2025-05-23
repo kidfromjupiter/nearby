@@ -33,21 +33,13 @@ namespace nearby_platform_feature {
 constexpr auto kEnableHotspotWin32Socket =
     flags::Flag<bool>(kConfigPackage, "45401992", true);
 
-// Disable/Enable GATT feature in BLE V2.
-constexpr auto kEnableBleV2Gatt =
-    flags::Flag<bool>(kConfigPackage, "45415180", false);
-
-// Disable/Enable GATT feature in BLE V2.
-constexpr auto kEnableBleV2GattOnNonExtendedDevice =
-    flags::Flag<bool>(kConfigPackage, "45415267", false);
-
 // The maximum scanning times for available hotspots.
 constexpr auto kWifiHotspotScanMaxRetries =
     flags::Flag<int64_t>(kConfigPackage, "45415883", 3);
 
 // The maximum IP check times during Wi-Fi hotspot connection.
 constexpr auto kWifiHotspotCheckIpMaxRetries =
-    flags::Flag<int64_t>(kConfigPackage, "45415884", 10);
+    flags::Flag<int64_t>(kConfigPackage, "45415884", 20);
 
 // The interval between 2 IP check attempts.
 constexpr auto kWifiHotspotCheckIpIntervalMillis =
@@ -73,9 +65,21 @@ constexpr auto kEnableIntelPieSdk =
 constexpr auto kEnableNewBluetoothRefactor =
     flags::Flag<bool>(kConfigPackage, "45615156", false);
 
-// Enable/Disable task scheduler for ScheduledExecutor and timer
-constexpr auto kEnableTaskScheduler =
-    flags::Flag<bool>(kConfigPackage, "45643835", false);
+// Enable/Disable Wi-Fi hotspot scan in native
+constexpr auto kEnableWifiHotspotNativeScan =
+    flags::Flag<bool>(kConfigPackage, "45670001", false);
+
+// Enable/Disable blocking socket
+constexpr auto kEnableBlockingSocket =
+    flags::Flag<bool>(kConfigPackage, "45672381", false);
+
+// The send buffer size of blocking socket
+constexpr auto kSocketSendBufferSize =
+    flags::Flag<int64_t>(kConfigPackage, "45673785", 524288);
+
+// Run scheduled executor callback on executor thread.
+constexpr auto kRunScheduledExecutorCallbackOnExecutorThread =
+    flags::Flag<bool>(kConfigPackage, "45686494", false);
 
 }  // namespace nearby_platform_feature
 }  // namespace config_package_nearby

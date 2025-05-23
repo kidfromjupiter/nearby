@@ -24,6 +24,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/platform/implementation:account_manager",
+        "//internal/platform/implementation:signin_attempt",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings:string_view",
@@ -56,10 +57,13 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/base",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/network:types",
         "//internal/platform:comm",
         "//internal/platform:types",
         "//internal/platform/implementation:account_manager",
+        "//internal/platform/implementation:signin_attempt",
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -90,6 +94,8 @@ cc_test(
     shard_count = 8,
     deps = [
         ":test",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/network:types",
         "//internal/network:url",
         "//internal/platform:types",
