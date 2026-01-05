@@ -39,41 +39,6 @@ sdbus::ObjectPath adapter_object_path(absl::string_view name) {
   return absl::Substitute("/org/bluez/$0", name);
 }
 
-sdbus::ObjectPath gatt_service_path(size_t num) {
-  return absl::Substitute("$0/service$1", NEARBY_BLE_GATT_PATH_ROOT, num);
-}
-
-sdbus::ObjectPath gatt_characteristic_path(
-    const sdbus::ObjectPath &service_path, size_t num) {
-  return absl::Substitute("$0/char$1", service_path, num);
-}
-
-sdbus::ObjectPath ble_advertisement_path(size_t num) {
-  return absl::Substitute("/com/google/nearby/medium/ble/advertisement/$0",
-                          num);
-}
-
-sdbus::ObjectPath advertisement_monitor_path(absl::string_view uuid) {
-  return absl::Substitute(
-      "/com/google/nearby/medium/ble/advertisement/monitor/$0",
-      absl::StrReplaceAll(uuid, {{"-", "_"}}));
-}
-
-int16_t TxPowerLevelDbm(api::ble_v2::TxPowerLevel level) {
-  switch (level) {
-    case api::ble_v2::TxPowerLevel::kUnknown:
-      return 0;
-    case api::ble_v2::TxPowerLevel::kUltraLow:
-      return -3;
-    case api::ble_v2::TxPowerLevel::kLow:
-      return 0;
-    case api::ble_v2::TxPowerLevel::kMedium:
-      return 3;
-    case api::ble_v2::TxPowerLevel::kHigh:
-      return 6;
-  }
-}
-
 }  // namespace bluez
 }  // namespace linux
 }  // namespace nearby

@@ -20,8 +20,6 @@
 #include <sdbus-c++/Types.h>
 
 #include "absl/strings/string_view.h"
-#include "internal/platform/implementation/ble_v2.h"
-
 #include <string>
 
 #define BLUEZ_LOG_METHOD_CALL_ERROR(proxy, method, err)                  \
@@ -46,19 +44,10 @@ static constexpr const char *DEVICE_PROP_PAIRED = "Paired";
 static constexpr const char *DEVICE_PROP_CONNECTED = "Connected";
 static constexpr const char *DEVICE_NAME = "Name";
 
-static constexpr const char *NEARBY_BLE_GATT_PATH_ROOT =
-    "/com/google/nearby/medium/ble/gatt";
-
 std::string device_object_path(const sdbus::ObjectPath &adapter_object_path,
                                absl::string_view mac_address);
 sdbus::ObjectPath profile_object_path(absl::string_view service_uuid);
 sdbus::ObjectPath adapter_object_path(absl::string_view name);
-sdbus::ObjectPath gatt_service_path(size_t num);
-sdbus::ObjectPath gatt_characteristic_path(
-    const sdbus::ObjectPath &service_path, size_t num);
-sdbus::ObjectPath ble_advertisement_path(size_t num);
-sdbus::ObjectPath advertisement_monitor_path(absl::string_view uuid);
-int16_t TxPowerLevelDbm(api::ble_v2::TxPowerLevel level);
 
 class BluezObjectManager
     : public sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {

@@ -29,7 +29,6 @@
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/linux/atomic_boolean.h"
 #include "internal/platform/implementation/linux/atomic_uint32.h"
-//#include "internal/platform/implementation/linux/ble_v2_medium.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_medium.h"
 #include "internal/platform/implementation/linux/bluez.h"
@@ -40,10 +39,6 @@
 #include "internal/platform/implementation/linux/preferences_manager.h"
 #include "internal/platform/implementation/linux/submittable_executor.h"
 #include "internal/platform/implementation/linux/timer.h"
-// #include "internal/platform/implementation/linux/wifi_direct.h"
-// #include "internal/platform/implementation/linux/wifi_hotspot.h"
-// #include "internal/platform/implementation/linux/wifi_lan.h"
-// #include "internal/platform/implementation/linux/wifi_medium.h"
 #include "internal/platform/implementation/platform.h"
 
 #include "absl/strings/str_cat.h"
@@ -51,8 +46,6 @@
 #include "internal/platform/implementation/shared/count_down_latch.h"
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/implementation/submittable_executor.h"
-#include "internal/platform/implementation/wifi_hotspot.h"
-#include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/payload_id.h"
 #include "scheduled_executor.h"
 
@@ -245,54 +238,7 @@ std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(
 std::unique_ptr<api::ble_v2::BleMedium>
 ImplementationPlatform::CreateBleV2Medium(api::BluetoothAdapter &adapter) {
   return nullptr;
-  // TODO: Enable BLEv2 once BlueZ support is added.
-  // return std::make_unique<linux::BleV2Medium>(
-  //     dynamic_cast<linux::BluetoothAdapter &>(adapter));
 }
-
-namespace {
-// static std::unique_ptr<linux::NetworkManagerWifiMedium> createWifiMedium(
-//     std::shared_ptr<linux::networkmanager::NetworkManager> nm) {
-//   return nullptr;
-//   std::vector<sdbus::ObjectPath> device_paths;
-//
-//   try {
-//     device_paths = nm->GetAllDevices();
-//   } catch (const sdbus::Error &e) {
-//     DBUS_LOG_METHOD_CALL_ERROR(nm, "GetAllDevices", e);
-//     return nullptr;
-//   }
-//
-//   auto manager = linux::networkmanager::ObjectManager(nm->GetConnection());
-//
-//   std::map<sdbus::ObjectPath,
-//            std::map<std::string, std::map<std::string, sdbus::Variant>>>
-//       objects;
-//   try {
-//     objects = manager.GetManagedObjects();
-//   } catch (const sdbus::Error &e) {
-//     DBUS_LOG_METHOD_CALL_ERROR(nm, "GetManagedObjects", e);
-//     return nullptr;
-//   }
-//
-//   for (auto &device_path : device_paths) {
-//     if (objects.count(device_path) == 1) {
-//       auto device = objects[device_path];
-//       if (device.count(org::freedesktop::NetworkManager::Device::
-//                            Wireless_proxy::INTERFACE_NAME) == 1) {
-//         LOG(INFO) << __func__
-//                           << ": Found a wireless device at :" << device_path;
-//         return std::make_unique<linux::NetworkManagerWifiMedium>(nm,
-//                                                                  device_path);
-//       }
-//     }
-//   }
-//
-//   LOG(ERROR) << __func__
-//                      << ": couldn't find a wireless device on this system";
-//   return nullptr;
-// }
-}  // namespace
 
 std::unique_ptr<api::WifiMedium> ImplementationPlatform::CreateWifiMedium() {
   return nullptr;
