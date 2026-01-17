@@ -28,8 +28,6 @@
 // #include "internal/platform/implementation/linux/ble_gatt_client.h"
 #include "ble_gatt_client.h"
 #include "bluez_gatt_manager.h"
-#include "internal/platform/implementation/linux/ble_l2cap_server_socket.h"
-#include "internal/platform/implementation/linux/ble_l2cap_socket.h"
 #include "internal/platform/implementation/linux/ble_v2_server_socket.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
