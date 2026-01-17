@@ -16,9 +16,11 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <string>
 
 #include <sdbus-c++/Types.h>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
@@ -32,6 +34,29 @@
 namespace nearby {
 namespace linux {
 static constexpr std::chrono::minutes kLostPeripheralsCleanupMinFreq(5);
+absl::Mutex g_shared_devices_lock;
+absl::flat_hash_map<std::string, std::weak_ptr<SharedBluetoothDevices>>
+    g_shared_devices ABSL_GUARDED_BY(g_shared_devices_lock);
+
+std::shared_ptr<SharedBluetoothDevices> GetSharedBluetoothDevices(
+    std::shared_ptr<sdbus::IConnection> system_bus,
+    const sdbus::ObjectPath& adapter_object_path) {
+  const std::string key = adapter_object_path;
+  absl::MutexLock lock(&g_shared_devices_lock);
+  auto it = g_shared_devices.find(key);
+  if (it != g_shared_devices.end()) {
+    if (auto existing = it->second.lock()) {
+      return existing;
+    }
+  }
+  auto shared = std::make_shared<SharedBluetoothDevices>();
+  shared->observers =
+      std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>();
+  shared->devices = std::make_shared<BluetoothDevices>(
+      std::move(system_bus), adapter_object_path, *shared->observers);
+  g_shared_devices[key] = shared;
+  return shared;
+}
 
 std::shared_ptr<BluetoothDevice> BluetoothDevices::get_device_by_path(
     const sdbus::ObjectPath &device_object_path) {

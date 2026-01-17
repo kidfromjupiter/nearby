@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 
 #include <sdbus-c++/AdaptorInterfaces.h>
 #include <sdbus-c++/IConnection.h>
@@ -82,6 +83,15 @@ class BluetoothDevices final {
   std::chrono::time_point<std::chrono::steady_clock> last_cleanup_
       ABSL_GUARDED_BY(devices_by_path_lock_);
 };
+
+struct SharedBluetoothDevices {
+  std::shared_ptr<BluetoothDevices> devices;
+  std::shared_ptr<ObserverList<api::BluetoothClassicMedium::Observer>> observers;
+};
+
+std::shared_ptr<SharedBluetoothDevices> GetSharedBluetoothDevices(
+    std::shared_ptr<sdbus::IConnection> system_bus,
+    const sdbus::ObjectPath& adapter_object_path);
 
 class DeviceWatcher final : sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {
  public:

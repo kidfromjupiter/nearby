@@ -37,13 +37,18 @@ namespace linux {
 BluetoothClassicMedium::BluetoothClassicMedium(BluetoothAdapter &adapter)
     : system_bus_(adapter.GetConnection()),
       adapter_(adapter),
-      observers_(std::make_shared<ObserverList<Observer>>()),
-      devices_(std::make_shared<BluetoothDevices>(
-          system_bus_, adapter.GetObjectPath(), *observers_)),
+      observers_(nullptr),
+      devices_(nullptr),
       device_watcher_(nullptr),
       // agent_manager_(std::make_unique<AgentManager>(*system_bus_)),
-      profile_manager_(
-          std::make_unique<ProfileManager>(*system_bus_, *devices_)) {}
+      profile_manager_(nullptr) {
+  auto shared =
+      GetSharedBluetoothDevices(system_bus_, adapter_.GetObjectPath());
+  observers_ = shared->observers;
+  devices_ = shared->devices;
+  profile_manager_ =
+      std::make_unique<ProfileManager>(*system_bus_, *devices_);
+}
 
 bool BluetoothClassicMedium::StartDiscovery(
     DiscoveryCallback discovery_callback) {
@@ -160,6 +165,7 @@ BluetoothClassicMedium::ListenForService(const std::string &service_name,
 
 api::BluetoothDevice *BluetoothClassicMedium::GetRemoteDevice(
 MacAddress mac_address) {
+  // When BLE is discovering, it looks for remote devices to connect to using BT classic. If only
   auto device = devices_->get_device_by_address(mac_address.ToString());
   if (device == nullptr) return nullptr;
 
