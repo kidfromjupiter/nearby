@@ -28,8 +28,6 @@
 // #include "internal/platform/implementation/linux/ble_gatt_client.h"
 #include "ble_gatt_client.h"
 #include "bluez_gatt_manager.h"
-#include "internal/platform/implementation/linux/ble_l2cap_server_socket.h"
-#include "internal/platform/implementation/linux/ble_l2cap_socket.h"
 #include "internal/platform/implementation/linux/ble_v2_server_socket.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
@@ -142,7 +140,9 @@ class BleV2Medium final : public api::ble_v2::BleMedium {
 
   std::shared_ptr<sdbus::IConnection> system_bus_;
   BluetoothAdapter adapter_;
-  ObserverList<api::BluetoothClassicMedium::Observer> observers_ = {};
+  // Why do we have observers her
+  std::shared_ptr<ObserverList<api::BluetoothClassicMedium::Observer>>
+      observers_;
   std::shared_ptr<BluetoothDevices> devices_;
   std::shared_ptr<BluezGattDiscovery> gatt_discovery_;
 
