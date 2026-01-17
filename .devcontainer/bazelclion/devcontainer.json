@@ -1,0 +1,52 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/cpp
+{
+	"name": "C++ Latest",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+  "mounts": [
+    {
+      "source": "bashhistory",
+      "target": "/commandhistory",
+      "type": "volume"
+    },
+    {
+      "source": "/run/dbus",
+      "target": "/run/dbus",
+      "type": "bind"
+    },
+    {
+      "source": "${localWorkspaceFolder}/bazel-output",
+      "target": "/bazel-output",
+      "type": "bind"
+    }
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	// "postCreateCommand": "gcc -v",
+
+	// Configure tool-specific properties.
+  "customizations" : {
+    "jetbrains" : {
+      "backend" : "CLion",
+      //"plugins":[
+      //  "com.google.idea.bazel.clwb",
+      //  "com.github.copilot"
+      //]
+    }
+  },
+  "runArgs": [
+    "--network=host",
+    "--dns=1.1.1.1",
+    "--dns=8.8.8.8"
+  ]
+}
