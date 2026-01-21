@@ -47,6 +47,35 @@ If you are adding a feature or fixing a missing capability:
 - Follow the Medium definitions to understand the required interface.
 - Implement or extend the Linux counterparts under `internal/platform/implementation/linux`.
 
+## Architecture overview
+
+### Nearby Connections
+
+At a high level, Nearby Connections is a cross-platform peer-to-peer connectivity stack with these layers:
+
+1) Public API and internal orchestration: session management, discovery/advertising, and payload handling.
+2) Core transport logic: connection lifecycle, endpoint negotiation, and encryption/authentication workflows.
+3) Platform abstraction layer: the platform contract in `internal/platform/implementation/platform.h` defines the interfaces the core uses for discovery, advertising, and data transfer.
+4) Medium implementations: concrete implementations of BLE, Bluetooth Classic, and Wi-Fi-based transports.
+
+The platform layer is the bridge between the core stack and OS-specific capabilities. If a Medium is missing or incomplete at the platform layer, the corresponding transport features will be unavailable in Nearby Connections.
+
+### Linux implementation
+
+The Linux implementation mirrors the platform contract and wires it to Linux facilities (primarily D-Bus and BlueZ for Bluetooth). The implementation is organized as follows:
+
+- `internal/platform/implementation/platform.h`: platform interfaces and contract.
+- `internal/platform/implementation/linux`: Linux-specific implementations of the platform contract and Mediums.
+
+Typical data flow:
+
+1) The Nearby Connections core requests an operation (advertise, discover, connect, or send data).
+2) The Linux platform layer maps the request to the relevant Medium implementation.
+3) The Medium invokes Linux facilities (D-Bus, BlueZ, or network sockets) to perform the operation.
+4) Events and data are surfaced back through the platform interfaces to the core stack.
+
+When adding a new capability, start by matching the required interface in `internal/platform/implementation/platform.h`, then implement it for Linux in `internal/platform/implementation/linux` in the same shape as other Mediums. Use the Windows platform as a reference for expected behavior and edge cases.
+
 ## About Nearby Sharing on Linux
 
 Nearby Sharing builds on top of Nearby Connections. The Linux implementation still uses the same platform abstractions described above.
