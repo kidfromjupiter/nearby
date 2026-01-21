@@ -309,6 +309,11 @@ class FileShareApp {
                                 : options_.mediums;
           options.auto_upgrade_bandwidth = true;
           auto device = CacheDiscoveredDevice(remote_device);
+          // disable advertising
+          core_ -> StopAdvertisingV3(
+              [](nearby::connections::Status status) {
+                LOG(INFO) << "StopAdvertising status: " << status.ToString();
+              });
           core_->RequestConnectionV3(
               local_device_, *device, options, MakeConnectionListener(),
               [](nearby::connections::Status status) {
