@@ -39,12 +39,47 @@ class MyTransferUpdateCallback : public TransferUpdateCallback {
                        const TransferMetadata& transfer_metadata) override {
     std::cout << "\n=== Transfer Update ===" << std::endl;
     std::cout << "Device: " << share_target.device_name << std::endl;
+    std::cout << "Target ID: " << share_target.id << " ← USE THIS ID" << std::endl;
     std::cout << "Status: " << TransferMetadata::StatusToString(transfer_metadata.status()) << std::endl;
     std::cout << "Progress: " << (transfer_metadata.progress() * 100) << "%" << std::endl;
     std::cout << "Transferred: " << transfer_metadata.transferred_bytes() << " bytes" << std::endl;
     std::cout << "Total attachments: " << transfer_metadata.total_attachments_count() << std::endl;
+    
+    // Track incoming transfer requests
+    if (transfer_metadata.status() == TransferMetadata::Status::kAwaitingLocalConfirmation) {
+      std::cout << "\n*** INCOMING TRANSFER REQUEST ***" << std::endl;
+      std::cout << "From: " << share_target.device_name << std::endl;
+      std::cout << "Target ID: " << share_target.id << std::endl;
+      std::cout << "Use menu option 6 to ACCEPT (ID: " << share_target.id << ")" << std::endl;
+      std::cout << "Use menu option 7 to REJECT (ID: " << share_target.id << ")" << std::endl;
+      std::cout << "**********************************" << std::endl;
+      
+      pending_target_id_ = share_target.id;
+      has_pending_request_ = true;
+    }
+    
+    // Show completed transfers
+    if (transfer_metadata.status() == TransferMetadata::Status::kComplete) {
+      std::cout << "\n*** TRANSFER COMPLETE ***" << std::endl;
+      for (const auto& file : attachment_container.GetFileAttachments()) {
+        std::cout << "Received file: " << file.file_name() << std::endl;
+      }
+      for (const auto& text : attachment_container.GetTextAttachments()) {
+        std::cout << "Received text: " << text.text_body() << std::endl;
+      }
+      std::cout << "*************************" << std::endl;
+      has_pending_request_ = false;
+    }
+    
     std::cout << "======================" << std::endl;
   }
+  
+  bool HasPendingRequest() const { return has_pending_request_; }
+  int64_t GetPendingTargetId() const { return pending_target_id_; }
+
+ private:
+  bool has_pending_request_ = false;
+  int64_t pending_target_id_ = -1;
 };
 
 class MyShareTargetDiscoveredCallback : public ShareTargetDiscoveredCallback {
@@ -204,6 +239,14 @@ class NearbySharingApp {
           }
         });
   }
+  
+  void AcceptPendingShare() {
+    if (!transfer_callback_->HasPendingRequest()) {
+      std::cout << "No pending incoming transfer request!" << std::endl;
+      return;
+    }
+    AcceptIncomingShare(transfer_callback_->GetPendingTargetId());
+  }
 
   void RejectIncomingShare(int64_t target_id) {
     std::cout << "\n=== Rejecting Incoming Share ===" << std::endl;
@@ -219,6 +262,14 @@ class NearbySharingApp {
                      << NearbySharingService::StatusCodeToString(status) << std::endl;
           }
         });
+  }
+  
+  void RejectPendingShare() {
+    if (!transfer_callback_->HasPendingRequest()) {
+      std::cout << "No pending incoming transfer request!" << std::endl;
+      return;
+    }
+    RejectIncomingShare(transfer_callback_->GetPendingTargetId());
   }
 
   void CancelTransfer(int64_t target_id) {
@@ -283,8 +334,8 @@ void PrintMenu() {
   std::cout << "3. List discovered devices" << std::endl;
   std::cout << "4. Send file to device" << std::endl;
   std::cout << "5. Send text to device" << std::endl;
-  std::cout << "6. Accept incoming share" << std::endl;
-  std::cout << "7. Reject incoming share" << std::endl;
+  std::cout << "6. Accept pending incoming share (auto-detects ID)" << std::endl;
+  std::cout << "7. Reject pending incoming share (auto-detects ID)" << std::endl;
   std::cout << "8. Cancel transfer" << std::endl;
   std::cout << "9. Print status" << std::endl;
   std::cout << "0. Exit" << std::endl;
@@ -351,21 +402,13 @@ int main(int argc, char* argv[]) {
         break;
       }
       
-      case 6: {
-        int64_t target_id;
-        std::cout << "Enter target ID to accept: ";
-        std::cin >> target_id;
-        app.AcceptIncomingShare(target_id);
+      case 6:
+        app.AcceptPendingShare();
         break;
-      }
       
-      case 7: {
-        int64_t target_id;
-        std::cout << "Enter target ID to reject: ";
-        std::cin >> target_id;
-        app.RejectIncomingShare(target_id);
+      case 7:
+        app.RejectPendingShare();
         break;
-      }
       
       case 8: {
         int64_t target_id;
