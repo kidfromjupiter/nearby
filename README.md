@@ -28,7 +28,13 @@ What is tested:
 
 What is not tested or unknown:
 
-- Android to Linux Nearby Sharing with Quick Share end-to-end.
+- Android to Linux Nearby Sharing with Quick Share end-to-end; current status is that it fails during the Quick Share connecting stage.
+
+Debugging tip: when investigating Quick Share failures on Android, this helps:
+
+```shell
+adb logcat | grep -Ei 'NearbySharing|NearbyConnections|NeabyMediums'
+```
 
 This is not an officially supported Google product.
 
