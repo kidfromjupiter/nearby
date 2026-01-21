@@ -1,6 +1,4 @@
-// ...existing code...
-// filepath: /workspace/internal/platform/implementation/linux/system_clock.cc
-// Copyright 2020 Google LLC
+// Copyright 2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,28 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef PLATFORM_IMPL_LINUX_SYSTEM_CLOCK_H_
+#define PLATFORM_IMPL_LINUX_SYSTEM_CLOCK_H_
+
 #include "internal/platform/implementation/system_clock.h"
-
-#include <chrono>
-
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
-#include "internal/platform/exception.h"
 
 namespace nearby {
 
 // Initialize global system state.
 void SystemClock::Init() {}
 
-// Returns current elapsed (monotonic) time.
+// Returns current absolute time. It is guaranteed to be monotonic.
 absl::Time SystemClock::ElapsedRealtime() {
-  const auto now = std::chrono::steady_clock::now().time_since_epoch();
-  const auto nanos =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
-
-  // Represent monotonic time as an absl::Time value.
-  // (Anchor is arbitrary; only differences matter for elapsed time.)
-  return absl::FromUnixNanos(static_cast<int64_t>(nanos));
+  return absl::FromUnixNanos(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
 }
 
 // Pauses current thread for the specified duration.
@@ -46,4 +38,4 @@ Exception SystemClock::Sleep(absl::Duration duration) {
 
 }  // namespace nearby
 
-
+#endif  // PLATFORM_IMPL_LINUX_SYSTEM_CLOCK_H_

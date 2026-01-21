@@ -1,0 +1,20 @@
+{
+  "name": "Bazel Dev Container",
+  "dockerFile": "Dockerfile",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "C_Cpp.intelliSenseEngine": "Default"
+      },
+      "extensions": ["bazelbuild.vscode-bazel"]
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=bashhistory,target=/commandhistory,type=volume",
+    "source=${localWorkspaceFolder}/bazel-output,target=/bazel-output,type=bind",
+    "source=/run/dbus,target=/run/dbus,type=bind"
+    //  "source=${localWorkspaceFolder}/build-bin,target=/workspace/bazel-bin,type=bind",
+    //  "source=${localWorkspaceFolder}/build-out,target=/workspace/bazel-out,type=bind"
+  ]
+}

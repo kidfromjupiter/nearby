@@ -1,0 +1,17 @@
+directories:
+  .
+  -bazel-*
+
+targets:
+  //internal/platform/implementation/linux/test:all
+  //internal/platform/implementation/linux:all
+  //internal/platform/implementation/windows:all
+
+derive_targets_from_directories: true
+
+additional_languages:
+  c++
+  
+# Ensure external dependencies are indexed
+build_flags:
+  --keep_going

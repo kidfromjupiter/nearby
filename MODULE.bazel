@@ -18,6 +18,17 @@ git_repository(
     remote = "https://beto-core.googlesource.com/beto-core",
 )
 
+# Hedron's Compile Commands Extractor for Bazel
+# https://github.com/hedronvision/bazel-compile-commands-extractor
+# Hedron's Compile Commands Extractor for Bazel
+# https://github.com/hedronvision/bazel-compile-commands-extractor
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    remote = "https://github.com/mikael-s-persson/bazel-compile-commands-extractor",
+    commit = "02d15621b528efd877f5d5657c4b738523a0eb17"
+)
+
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2021",
@@ -71,7 +82,7 @@ cc_library(
   hdrs = glob([
     "include/nlohmann/**/*.hpp",
   ]),
-  includes = ["include"],
+    strip_include_prefix = "include",
   visibility = ["//visibility:public"],
   alwayslink = True,
 )""",

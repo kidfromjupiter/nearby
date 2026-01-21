@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,80 +12,110 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sdbus-c++/ProxyInterfaces.h>
+#include <sdbus-c++/Types.h>
 
-
-#include "absl/base/attributes.h"
-#include "absl/strings/string_view.h"
+#include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
+#include "internal/platform/implementation/linux/dbus.h"
+#include "internal/platform/implementation/linux/generated/dbus/bluez/adapter_client.h"
+#include "internal/platform/logging.h"
 
 namespace nearby {
 namespace linux {
-  bool BluetoothAdapter::SetStatus(Status status)
-  {
-    if (status == Status::kEnabled)
-    {
-      Powered(true);
-    }
-    else
-    {
-      Powered(false);
-    }
+
+bool BluetoothAdapter::SetStatus(Status status) {
+  try {
+    bool val = status == api::BluetoothAdapter::Status::kEnabled;
+    bluez_adapter_->Powered(val);
     return true;
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_SET_ERROR(bluez_adapter_, "Powered", e);
+    return false;
   }
-  bool BluetoothAdapter::IsEnabled() const
-  {
-    return Powered();
+}
+
+bool BluetoothAdapter::IsEnabled() const {
+  try {
+    return bluez_adapter_->Powered();
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(bluez_adapter_, "Powered", e);
+    return false;
   }
-  api::BluetoothAdapter::ScanMode BluetoothAdapter::GetScanMode() const
-  {
-    if (!IsEnabled())
-    {
-      return ScanMode::kNone;
-    }
-    if (Discoverable())
-    {
-      return ScanMode::kConnectableDiscoverable;
-    }
-    return ScanMode::kConnectable;
+}
+
+BluetoothAdapter::ScanMode BluetoothAdapter::GetScanMode() const {
+  bool powered = IsEnabled();
+  if (!powered) {
+    return ScanMode::kNone;
   }
-  bool BluetoothAdapter::SetScanMode(ScanMode scan_mode)
-  {
-    if (!IsEnabled()) return false;
-    switch (scan_mode)
-    {
+
+  try {
+    bool discoverable = bluez_adapter_->Discoverable();
+    return discoverable ? ScanMode::kConnectableDiscoverable
+                        : ScanMode::kConnectable;
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(bluez_adapter_, "Discoverable", e);
+    return ScanMode::kUnknown;
+  }
+}
+
+bool BluetoothAdapter::SetScanMode(ScanMode scan_mode) {
+  switch (scan_mode) {
     case ScanMode::kConnectable:
-      Discoverable(false);
+      return SetStatus(Status::kEnabled);
+    case ScanMode::kConnectableDiscoverable: {
+      if (!SetStatus(Status::kEnabled)) {
+        return false;
+      }
+
+      try {
+        bluez_adapter_->Discoverable(true);
+      } catch (const sdbus::Error &e) {
+        DBUS_LOG_PROPERTY_SET_ERROR(bluez_adapter_, "Discoverable", e);
+        return false;
+      }
+
       return true;
-    case ScanMode::kConnectableDiscoverable:
-      Discoverable(true);
-      return true;
+    }
+    case ScanMode::kNone:
+      return SetStatus(Status::kDisabled);
     default:
       return false;
-    }
   }
-  std::string BluetoothAdapter::GetMacAddress() const
-  {
-    return Address();
-  }
-  std::string BluetoothAdapter::GetName() const
-  {
-    return Alias();
-  }
-  bool BluetoothAdapter::SetName(absl::string_view name)
-  {
-    try {
-        Alias(std::string(name));
-        return true;
-    } catch (const sdbus::Error&) {return false;}
-  }
+}
 
-  bool BluetoothAdapter::SetName(absl::string_view name,bool persist)
-  {
-    return BluetoothAdapter::SetName(name);
+std::string BluetoothAdapter::GetName() const {
+  try {
+    return bluez_adapter_->Alias();
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(bluez_adapter_, "Alias", e);
+    return {};
   }
+}
 
+bool BluetoothAdapter::SetName(absl::string_view name, bool  /*persist*/) {
+  return SetName(name);
+}
 
+bool BluetoothAdapter::SetName(absl::string_view name) {
+  try {
+    bluez_adapter_->Alias(std::string(name));
+    return true;
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_SET_ERROR(bluez_adapter_, "Alias", e);
+    return false;
+  }
+}
+
+std::string BluetoothAdapter::GetMacAddress() const {
+  try {
+    return bluez_adapter_->Address();
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(bluez_adapter_, "Address", e);
+    return {};
+  }
+}
 
 }  // namespace linux
 }  // namespace nearby
-

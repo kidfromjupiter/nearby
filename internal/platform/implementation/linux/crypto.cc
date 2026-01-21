@@ -1,5 +1,3 @@
-// ...existing code...
-// filepath: /workspace/internal/platform/implementation/linux/crypto.cc
 // Copyright 2020 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,9 +19,10 @@
 
 #include "absl/strings/string_view.h"
 #include "internal/platform/byte_array.h"
+
 #include <openssl/evp.h>
 
-// Function implementations for platform/api/crypto.h.
+// Function implementations for platform/implementation/crypto.h.
 
 namespace nearby {
 
@@ -53,5 +52,3 @@ ByteArray Crypto::Sha256(absl::string_view input) {
 }
 
 }  // namespace nearby
-
-// ...existing code...

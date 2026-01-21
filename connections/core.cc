@@ -15,6 +15,7 @@
 #include "connections/core.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -215,13 +216,15 @@ void Core::StartAdvertisingV3(absl::string_view service_id,
                               const NearbyDevice& local_device,
                               v3::ConnectionListener listener,
                               ResultCallback callback) {
+  auto listener_ptr =
+      std::make_shared<v3::ConnectionListener>(std::move(listener));
   ConnectionListener old_listener = {
       .initiated_cb =
-          [&listener](const std::string& endpoint_id,
-                      const ConnectionResponseInfo& info) {
+          [listener_ptr](const std::string& endpoint_id,
+                         const ConnectionResponseInfo& info) {
             auto remote_device = v3::ConnectionsDevice(
                 endpoint_id, info.remote_endpoint_info.AsStringView(), {});
-            listener.initiated_cb(
+            listener_ptr->initiated_cb(
                 remote_device,
                 v3::InitialConnectionInfo{
                     .authentication_digits = info.authentication_token,
@@ -231,7 +234,7 @@ void Core::StartAdvertisingV3(absl::string_view service_id,
                 });
           },
       .accepted_cb =
-          [v3_cb = listener.result_cb](const std::string& endpoint_id) {
+          [v3_cb = listener_ptr->result_cb](const std::string& endpoint_id) {
             auto remote_device = v3::ConnectionsDevice(endpoint_id, "", {});
             v3_cb(remote_device,
                   v3::ConnectionResult{.status = Status{
@@ -239,23 +242,23 @@ void Core::StartAdvertisingV3(absl::string_view service_id,
                                        }});
           },
       .rejected_cb =
-          [v3_cb = listener.result_cb](const std::string& endpoint_id,
-                                       Status status) {
+          [v3_cb = listener_ptr->result_cb](const std::string& endpoint_id,
+                                            Status status) {
             auto remote_device = v3::ConnectionsDevice(endpoint_id, "", {});
             v3_cb(remote_device, v3::ConnectionResult{
                                      .status = status,
                                  });
           },
       .disconnected_cb =
-          [&listener](const std::string& endpoint_id) {
+          [listener_ptr](const std::string& endpoint_id) {
             auto remote_device = v3::ConnectionsDevice(endpoint_id, "", {});
-            listener.disconnected_cb(remote_device);
+            listener_ptr->disconnected_cb(remote_device);
           },
       .bandwidth_changed_cb =
-          [&listener](const std::string& endpoint_id, Medium medium) {
+          [listener_ptr](const std::string& endpoint_id, Medium medium) {
             auto remote_device = v3::ConnectionsDevice(endpoint_id, "", {});
-            listener.bandwidth_changed_cb(remote_device,
-                                          v3::BandwidthInfo{.medium = medium});
+            listener_ptr->bandwidth_changed_cb(
+                remote_device, v3::BandwidthInfo{.medium = medium});
           }};
   ByteArray local_endpoint_info;
   if (local_device.GetType() == NearbyDevice::kConnectionsDevice) {
