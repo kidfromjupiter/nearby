@@ -1,27 +1,40 @@
-# Nearby
+# Unofficial Linux Nearby
 
-Nearby is a collection of projects focused on connectivity that enable building cross-device experiences.
+This repository is an unofficial Linux implementation of Google Nearby, forked from the official Nearby codebase. It focuses on Linux platform support for Nearby Connections, Nearby Sharing, and Nearby Presence.
 
 This is not an officially supported Google product.
 
-## Projects
+## What is included
 
-### [Nearby Connections](connections/)
+- Nearby Connections
+- Nearby Sharing
+- Nearby Presence
 
-A peer-to-peer networking API that allows apps to easily discover, connect to, and exchange data with nearby devices in real-time, regardless of network connectivity.
+## Linux platform support
 
-### [Nearby Presence](presence/)
+The Linux platform implementation provides abstraction layers over local networking and Bluetooth hardware to support Nearby radio operations. The current Linux implementation supports:
 
-An extension to Nearby Connections that features an extensible identity model for authentication and restricted visibility, resource management for system health, and proximity detection through sensor fusion.
+- BLE discovery and advertising
+- GATT advertising and discovery
+- Data transfer over Bluetooth Classic
+- Wi-Fi LAN
+- Wi-Fi Hotspot
+- Wi-Fi Direct
+- Wi-Fi LAN advertising and discovery
 
-### [Nearby for Embedded Systems](embedded/)
+## Example applications
 
-A lightweight implementation of Fast Pair intended for embedded systems.
+- Nearby Sharing service example: `sharing/linux`
+- Nearby Connections examples:
+  - Walkie-talkie: `nearby/connection/walkietalkie`
+  - File share: `nearby/connections/file_share`
 
 ## Contributing
 
-We encourage you to contribute to Nearby! Please check out the [Contributing to Nearby guide](CONTRIBUTING.md) for guidelines about how to proceed.
+General contribution guidelines are in `CONTRIBUTING.md`.
+
+If you are working on the Linux platform, start with `LINUX_CONTRIBUTING.md`.
 
 ## License
 
-Nearby is released under the [Apache License 2.0](LICENSE)
+Nearby is released under the `LICENSE`.

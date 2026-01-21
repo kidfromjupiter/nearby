@@ -59,6 +59,6 @@ bazel-*
 /.clwb/
 
 # Devcontainers
-/.devcontainer/
+# /.devcontainer/
 /connections/walkietalkie/
 /third_party/
