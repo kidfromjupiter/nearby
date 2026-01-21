@@ -42,14 +42,6 @@ This is not an officially supported Google product.
 
 The Linux platform implementation provides abstraction layers over local networking and Bluetooth hardware to support Nearby radio operations. The current Linux implementation supports:
 
-- BLE discovery and advertising
-- GATT advertising and discovery
-- Data transfer over Bluetooth Classic
-- Wi-Fi LAN
-- Wi-Fi Hotspot
-- Wi-Fi Direct
-- Wi-Fi LAN advertising and discovery
-
 ### Supported mediums (Linux)
 
 <table>
