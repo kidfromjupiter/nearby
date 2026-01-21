@@ -21,13 +21,16 @@ RUN curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-
 
 RUN apt-get install -y pkg-config libasound2-dev
 
-RUN apt-get install -y libunistring-dev libldap-dev libkrb5-dev libgpg-error-dev gdb libc6-dbg googletest
+RUN apt-get install -y libunistring-dev libldap-dev libkrb5-dev libgpg-error-dev gdb libc6-dbg libgtest-dev libbluetooth-dev clangd
 
 #gtest
-RUN cd /usr/src/googletest
-RUN cmake -S . -B build
-RUN cmake --build build -j
-RUN cmake --install build
+RUN apt-get update && apt-get install -y \
+    googletest cmake g++ make \
+    && rm -rf /var/lib/apt/lists/* \
+    && cd /usr/src/googletest \
+    && cmake -S . -B build \
+    && cmake --build build -j"$(nproc)" \
+    && cmake --install build
 
 # bash history
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \

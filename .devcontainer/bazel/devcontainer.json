@@ -4,15 +4,9 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "C_Cpp.default.configurationProvider": "ms-vscode.cpptools",
         "C_Cpp.intelliSenseEngine": "Default"
       },
-      "extensions": [
-        "ms-vscode.cpptools",
-        "bazelbuild.vscode-bazel",
-        "ms-vscode.cpptools-extension-pack"
-      ],
-
+      "extensions": ["bazelbuild.vscode-bazel"]
     }
   },
   "mounts": [

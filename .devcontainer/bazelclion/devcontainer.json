@@ -47,6 +47,9 @@
   "runArgs": [
     "--network=host",
     "--dns=1.1.1.1",
-    "--dns=8.8.8.8"
+    "--dns=8.8.8.8",
+    "--memory=8g",
+    "--cpus=6",
+    "--shm-size=2g"
   ]
 }

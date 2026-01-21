@@ -21,7 +21,7 @@ RUN curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-
 
 RUN apt-get install -y pkg-config libasound2-dev
 
-RUN apt-get install -y libunistring-dev libldap-dev libkrb5-dev libgpg-error-dev gdb libc6-dbg libgtest-dev libbluetooth-dev
+RUN apt-get install -y libunistring-dev libldap-dev libkrb5-dev libgpg-error-dev gdb libc6-dbg libgtest-dev libbluetooth-dev clangd
 
 #gtest
 RUN apt-get update && apt-get install -y \
