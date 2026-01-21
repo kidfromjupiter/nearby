@@ -63,7 +63,17 @@ std::string WifiLanServerSocket::GetIPAddress() const {
       }
 
       if (address_data.size() > 0) {
-        return address_data[0]["address"];
+        std::string ip_address = address_data[0]["address"];
+        struct in_addr addr {};
+        if (inet_aton(ip_address.c_str(), &addr) == 0) {
+          LOG(ERROR) << __func__
+                             << ": Invalid IPv4 address: " << ip_address;
+          return std::string();
+        }
+
+        char addr_bytes[4];
+        memcpy(addr_bytes, &addr.s_addr, sizeof(addr_bytes));
+        return std::string(addr_bytes, sizeof(addr_bytes));
       }
     }
   }
