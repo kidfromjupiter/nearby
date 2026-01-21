@@ -23,6 +23,8 @@ refresh_compile_commands(
     # For example, specify a dict of targets and any flags required to build.
     targets = {
       ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+      "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+      "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
     },
     # No need to add flags already in .bazelrc. They're automatically picked up.
     # If you don't need flags, a list of targets is also okay, as is a single target string.
