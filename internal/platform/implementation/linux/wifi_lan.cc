@@ -37,6 +37,42 @@
 
 namespace nearby {
 namespace linux {
+namespace {
+constexpr char kDeviceIpv4TxtRecord[] = "IPv4";
+
+std::string GetActiveIpv4Address(
+    const std::shared_ptr<networkmanager::NetworkManager> &network_manager,
+    const std::shared_ptr<sdbus::IConnection> &system_bus) {
+  std::vector<sdbus::ObjectPath> connection_paths;
+  try {
+    connection_paths = network_manager->ActiveConnections();
+  } catch (const sdbus::Error &e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(network_manager, "ActiveConnections", e);
+    return {};
+  }
+
+  for (auto &path : connection_paths) {
+    auto active_connection =
+        std::make_unique<networkmanager::ActiveConnection>(system_bus, path);
+    std::string conn_type;
+    try {
+      conn_type = active_connection->Type();
+    } catch (const sdbus::Error &e) {
+      DBUS_LOG_PROPERTY_GET_ERROR(active_connection, "Type", e);
+      continue;
+    }
+    if (conn_type == "802-11-wireless" || conn_type == "802-3-ethernet") {
+      auto ip4addresses = active_connection->GetIP4Addresses();
+      if (!ip4addresses.empty()) {
+        return ip4addresses[0];
+      }
+    }
+  }
+
+  return {};
+}
+}  // namespace
+
 WifiLanMedium::WifiLanMedium(
     std::shared_ptr<networkmanager::NetworkManager> network_manager)
     : system_bus_(network_manager->GetConnection()),
@@ -83,10 +119,17 @@ bool WifiLanMedium::StartAdvertising(const NsdServiceInfo &nsd_service_info) {
   }
 
   auto txt_records_map = nsd_service_info.GetTxtRecords();
+  if (txt_records_map.find(kDeviceIpv4TxtRecord) == txt_records_map.end()) {
+    std::string ip_address =
+        GetActiveIpv4Address(network_manager_, system_bus_);
+    if (!ip_address.empty()) {
+      txt_records_map.insert_or_assign(kDeviceIpv4TxtRecord, ip_address);
+    }
+  }
   std::vector<std::vector<std::uint8_t>> txt_records(txt_records_map.size());
   std::size_t i = 0;
 
-  for (auto [key, value] : nsd_service_info.GetTxtRecords()) {
+  for (auto [key, value] : txt_records_map) {
     std::string entry = absl::Substitute("$0=$1", key, value);
     txt_records[i++] = std::vector<std::uint8_t>(entry.begin(), entry.end());
   }
@@ -213,6 +256,7 @@ std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
 
 std::unique_ptr<api::WifiLanServerSocket> WifiLanMedium::ListenForService(
     int port) {
+  LOG(INFO)<< __func__ << ": Listening for service WifiLanMedium";
   auto socket = TCPServerSocket::Listen(std::nullopt, port);
   if (!socket.has_value()) return nullptr;
 
