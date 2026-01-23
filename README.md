@@ -6,6 +6,10 @@ Status: This is still a work in progress, and there are known bugs and issues th
 
 Motivation: Google has multiple Linux implementation PRs open, but they have not been merged into the official repo. I am tired of begging maintainers, so I am maintaining this Linux-focused fork.
 
+Learn more:
+---------------
+> - Nearby wiki: https://github.com/kidfromjupiter/nearby/wiki
+
 If you spot bugs, help identifying them is appreciated. Filing issues is always welcome. If you want to contribute, please start a discussion about the guidance you need.
 
 Bazel is a terrible build system when it does not work and a pretty good one when it does. There is no in-between. The source code is unwieldy and it took me months to understand what everything does and where things go. It does not help that this is how I decided I am going to learn C++. Blessed be my naive soul.
