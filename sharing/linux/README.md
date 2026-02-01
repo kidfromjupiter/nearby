@@ -2,6 +2,17 @@
 
 This directory contains the Linux-specific implementation of Nearby Sharing and a sample application demonstrating its usage.
 
+## ⚠️ Important Compatibility Notice
+
+**This is a simplified implementation for Linux-to-Linux transfers only.**
+
+- ✅ **Works**: Linux ↔ Linux device transfers
+- ❌ **Does NOT work**: Linux ↔ Android/ChromeOS (authentication failure)
+
+**Reason**: The full Nearby Sharing protocol requires certificate-based authentication, introduction frame exchange, and protocol frame handling which are not implemented in this simplified version.
+
+**For Android/ChromeOS compatibility**, you need the full implementation in `sharing/nearby_sharing_service_impl.{h,cc}` which requires additional platform support. See [ANDROID_COMPATIBILITY.md](ANDROID_COMPATIBILITY.md) for details.
+
 ## Overview
 
 Nearby Sharing is a feature that allows users to share files, text, and other content between nearby devices using Bluetooth Low Energy (BLE) and Wi-Fi Direct. This implementation provides a simplified Linux interface built on top of the Nearby Connections API.
