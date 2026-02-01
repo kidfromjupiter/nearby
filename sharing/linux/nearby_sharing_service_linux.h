@@ -222,6 +222,10 @@ class NearbySharingServiceLinux : public NearbySharingService {
   int64_t next_share_target_id_ = 1;
   bool last_advertise_with_name_ = false;
   uint8_t last_advertise_vendor_id_ = 0;
+  
+  // QR code related
+  mutable std::string qr_code_url_;
+  std::string GenerateQrCodeUrl() const;
 };
 
 }  // namespace nearby::sharing::linux

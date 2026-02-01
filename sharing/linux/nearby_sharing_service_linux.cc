@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "connections/advertising_options.h"
@@ -31,10 +32,14 @@
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
+#include "internal/crypto_cros/ec_private_key.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/file.h"
 #include "internal/platform/logging.h"
 #include "sharing/certificates/common.h"
+#include <openssl/bn.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
 
 namespace nearby::sharing::linux {
 namespace {
@@ -240,12 +245,96 @@ bool NearbySharingServiceLinux::IsBluetoothPowered() const {
 }
 
 bool NearbySharingServiceLinux::IsExtendedAdvertisingSupported() const {
-  return false;
+  return true;
 }
 
 bool NearbySharingServiceLinux::IsLanConnected() const { return false; }
 
-std::string NearbySharingServiceLinux::GetQrCodeUrl() const { return ""; }
+std::string NearbySharingServiceLinux::GenerateQrCodeUrl() const {
+  // Generate ECDSA P-256 key pair
+  auto ec_key = nearby::crypto::ECPrivateKey::Create();
+  if (!ec_key) {
+    LOG(ERROR) << "Failed to generate EC key for QR code";
+    return "";
+  }
+
+  // Get the EC_KEY from EVP_PKEY
+  EC_KEY* raw_ec_key = EVP_PKEY_get0_EC_KEY(ec_key->key());
+  if (!raw_ec_key) {
+    LOG(ERROR) << "Failed to get EC_KEY from EVP_PKEY";
+    return "";
+  }
+
+  const EC_GROUP* group = EC_KEY_get0_group(raw_ec_key);
+  const EC_POINT* pub_key = EC_KEY_get0_public_key(raw_ec_key);
+  if (!group || !pub_key) {
+    LOG(ERROR) << "Failed to get EC group or public key";
+    return "";
+  }
+
+  // Get the X and Y coordinates
+  BIGNUM* x = BN_new();
+  BIGNUM* y = BN_new();
+  if (!x || !y) {
+    BN_free(x);
+    BN_free(y);
+    LOG(ERROR) << "Failed to allocate BIGNUMs";
+    return "";
+  }
+
+  if (!EC_POINT_get_affine_coordinates_GFp(group, pub_key, x, y, nullptr)) {
+    BN_free(x);
+    BN_free(y);
+    LOG(ERROR) << "Failed to get affine coordinates";
+    return "";
+  }
+
+  // Convert X coordinate to bytes (32 bytes for P-256)
+  std::vector<uint8_t> x_bytes(32, 0);
+  int x_len = BN_num_bytes(x);
+  if (x_len > 32) {
+    BN_free(x);
+    BN_free(y);
+    LOG(ERROR) << "X coordinate too large";
+    return "";
+  }
+  
+  // Pad with leading zeros if needed
+  int offset = 32 - x_len;
+  BN_bn2bin(x, x_bytes.data() + offset);
+
+  // Determine prefix byte based on Y coordinate parity
+  // 0x02 if Y is even, 0x03 if Y is odd
+  uint8_t prefix = BN_is_odd(y) ? 0x03 : 0x02;
+
+  BN_free(x);
+  BN_free(y);
+
+  // Build the key data: [version (2 bytes), prefix (1 byte), X coordinate (32 bytes)]
+  std::vector<uint8_t> key_data;
+  key_data.reserve(35);  // 2 + 1 + 32
+  key_data.push_back(0x00);  // Version byte 1
+  key_data.push_back(0x00);  // Version byte 2
+  key_data.push_back(prefix);  // Prefix byte (0x02 or 0x03)
+  key_data.insert(key_data.end(), x_bytes.begin(), x_bytes.end());  // X coordinate
+
+  // Base64url encode
+  std::string encoded;
+  absl::WebSafeBase64Escape(
+      std::string(reinterpret_cast<const char*>(key_data.data()), key_data.size()),
+      &encoded);
+
+  // Build the final URL
+  return "https://quickshare.google/qrcode#key=" + encoded;
+}
+
+std::string NearbySharingServiceLinux::GetQrCodeUrl() const {
+  // Generate the URL once and cache it
+  if (qr_code_url_.empty()) {
+    qr_code_url_ = GenerateQrCodeUrl();
+  }
+  return qr_code_url_;
+}
 
 void NearbySharingServiceLinux::SendAttachments(
     int64_t share_target_id,

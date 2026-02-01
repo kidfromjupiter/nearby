@@ -28,6 +28,7 @@
 #include "sharing/transfer_update_callback.h"
 #include "sharing/share_target_discovered_callback.h"
 #include "internal/base/file_path.h"
+#include "internal/base/files.h"
 
 using namespace nearby::sharing;
 using namespace nearby::sharing::linux;
@@ -37,22 +38,24 @@ class MyTransferUpdateCallback : public TransferUpdateCallback {
   void OnTransferUpdate(const ShareTarget& share_target,
                        const AttachmentContainer& attachment_container,
                        const TransferMetadata& transfer_metadata) override {
-    std::cout << "\n=== Transfer Update ===" << std::endl;
-    std::cout << "Device: " << share_target.device_name << std::endl;
-    std::cout << "Target ID: " << share_target.id << " ← USE THIS ID" << std::endl;
-    std::cout << "Status: " << TransferMetadata::StatusToString(transfer_metadata.status()) << std::endl;
-    std::cout << "Progress: " << (transfer_metadata.progress() * 100) << "%" << std::endl;
-    std::cout << "Transferred: " << transfer_metadata.transferred_bytes() << " bytes" << std::endl;
-    std::cout << "Total attachments: " << transfer_metadata.total_attachments_count() << std::endl;
+    std::cout << "\n┌─────────────────────────────────────┐" << std::endl;
+    std::cout << "│     TRANSFER UPDATE                 │" << std::endl;
+    std::cout << "├─────────────────────────────────────┤" << std::endl;
+    std::cout << "│ Device: " << share_target.device_name << std::endl;
+    std::cout << "│ Target ID: " << share_target.id << " ← USE THIS ID" << std::endl;
+    std::cout << "│ Status: " << TransferMetadata::StatusToString(transfer_metadata.status()) << std::endl;
+    std::cout << "│ Progress: " << (transfer_metadata.progress() * 100) << "%" << std::endl;
+    std::cout << "│ Transferred: " << transfer_metadata.transferred_bytes() << " bytes" << std::endl;
+    std::cout << "│ Total attachments: " << transfer_metadata.total_attachments_count() << std::endl;
     
     // Track incoming transfer requests
     if (transfer_metadata.status() == TransferMetadata::Status::kAwaitingLocalConfirmation) {
-      std::cout << "\n*** INCOMING TRANSFER REQUEST ***" << std::endl;
-      std::cout << "From: " << share_target.device_name << std::endl;
-      std::cout << "Target ID: " << share_target.id << std::endl;
-      std::cout << "Use menu option 6 to ACCEPT (ID: " << share_target.id << ")" << std::endl;
-      std::cout << "Use menu option 7 to REJECT (ID: " << share_target.id << ")" << std::endl;
-      std::cout << "**********************************" << std::endl;
+      std::cout << "├─────────────────────────────────────┤" << std::endl;
+      std::cout << "│ ⚠️  INCOMING TRANSFER REQUEST       │" << std::endl;
+      std::cout << "│ From: " << share_target.device_name << std::endl;
+      std::cout << "│ Target ID: " << share_target.id << std::endl;
+      std::cout << "│ → Press 6 to ACCEPT                 │" << std::endl;
+      std::cout << "│ → Press 7 to REJECT                 │" << std::endl;
       
       pending_target_id_ = share_target.id;
       has_pending_request_ = true;
@@ -60,18 +63,19 @@ class MyTransferUpdateCallback : public TransferUpdateCallback {
     
     // Show completed transfers
     if (transfer_metadata.status() == TransferMetadata::Status::kComplete) {
-      std::cout << "\n*** TRANSFER COMPLETE ***" << std::endl;
+      std::cout << "├─────────────────────────────────────┤" << std::endl;
+      std::cout << "│ ✓ TRANSFER COMPLETE                 │" << std::endl;
       for (const auto& file : attachment_container.GetFileAttachments()) {
-        std::cout << "Received file: " << file.file_name() << std::endl;
+        std::cout << "│ Received file: " << file.file_name() << std::endl;
       }
       for (const auto& text : attachment_container.GetTextAttachments()) {
-        std::cout << "Received text: " << text.text_body() << std::endl;
+        std::cout << "│ Received text: " << text.text_body() << std::endl;
       }
-      std::cout << "*************************" << std::endl;
       has_pending_request_ = false;
     }
     
-    std::cout << "======================" << std::endl;
+    std::cout << "└─────────────────────────────────────┘" << std::endl;
+    PrintMenuAtBottom();
   }
   
   bool HasPendingRequest() const { return has_pending_request_; }
@@ -80,24 +84,42 @@ class MyTransferUpdateCallback : public TransferUpdateCallback {
  private:
   bool has_pending_request_ = false;
   int64_t pending_target_id_ = -1;
+  
+  void PrintMenuAtBottom() {
+    std::cout << "\n╔═════════════════════════════════════════════════════════╗" << std::endl;
+    std::cout << "║           NEARBY SHARING - MENU                         ║" << std::endl;
+    std::cout << "╠═════════════════════════════════════════════════════════╣" << std::endl;
+    std::cout << "║ 1. Start as Receiver     │ 6. Accept pending request   ║" << std::endl;
+    std::cout << "║ 2. Start as Sender       │ 7. Reject pending request   ║" << std::endl;
+    std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
+    std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
+    std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
+    std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
+    std::cout << "Choice: ";
+  }
 };
 
 class MyShareTargetDiscoveredCallback : public ShareTargetDiscoveredCallback {
  public:
   void OnShareTargetDiscovered(const ShareTarget& share_target) override {
-    std::cout << "\n*** Device Discovered ***" << std::endl;
-    std::cout << "ID: " << share_target.id << std::endl;
-    std::cout << "Name: " << share_target.device_name << std::endl;
-    std::cout << "Vendor ID: " << static_cast<int>(share_target.vendor_id) << std::endl;
-    std::cout << "*************************" << std::endl;
+    std::cout << "\n┌─────────────────────────────────────┐" << std::endl;
+    std::cout << "│ 📱 DEVICE DISCOVERED                │" << std::endl;
+    std::cout << "├─────────────────────────────────────┤" << std::endl;
+    std::cout << "│ ID: " << share_target.id << std::endl;
+    std::cout << "│ Name: " << share_target.device_name << std::endl;
+    std::cout << "│ Vendor ID: " << static_cast<int>(share_target.vendor_id) << std::endl;
+    std::cout << "└─────────────────────────────────────┘" << std::endl;
     
     discovered_targets_.push_back(share_target);
+    PrintMenuAtBottom();
   }
 
   void OnShareTargetLost(const ShareTarget& share_target) override {
-    std::cout << "\n*** Device Lost ***" << std::endl;
-    std::cout << "Name: " << share_target.device_name << std::endl;
-    std::cout << "*******************" << std::endl;
+    std::cout << "\n┌─────────────────────────────────────┐" << std::endl;
+    std::cout << "│ ❌ DEVICE LOST                      │" << std::endl;
+    std::cout << "├─────────────────────────────────────┤" << std::endl;
+    std::cout << "│ Name: " << share_target.device_name << std::endl;
+    std::cout << "└─────────────────────────────────────┘" << std::endl;
     
     for (auto it = discovered_targets_.begin(); it != discovered_targets_.end(); ++it) {
       if (it->id == share_target.id) {
@@ -105,12 +127,16 @@ class MyShareTargetDiscoveredCallback : public ShareTargetDiscoveredCallback {
         break;
       }
     }
+    PrintMenuAtBottom();
   }
 
   void OnShareTargetUpdated(const ShareTarget& share_target) override {
-    std::cout << "\n*** Device Updated ***" << std::endl;
-    std::cout << "Name: " << share_target.device_name << std::endl;
-    std::cout << "**********************" << std::endl;
+    std::cout << "\n┌─────────────────────────────────────┐" << std::endl;
+    std::cout << "│ 🔄 DEVICE UPDATED                   │" << std::endl;
+    std::cout << "├─────────────────────────────────────┤" << std::endl;
+    std::cout << "│ Name: " << share_target.device_name << std::endl;
+    std::cout << "└─────────────────────────────────────┘" << std::endl;
+    PrintMenuAtBottom();
   }
 
   const std::vector<ShareTarget>& GetDiscoveredTargets() const {
@@ -119,6 +145,19 @@ class MyShareTargetDiscoveredCallback : public ShareTargetDiscoveredCallback {
 
  private:
   std::vector<ShareTarget> discovered_targets_;
+  
+  void PrintMenuAtBottom() {
+    std::cout << "\n╔═════════════════════════════════════════════════════════╗" << std::endl;
+    std::cout << "║           NEARBY SHARING - MENU                         ║" << std::endl;
+    std::cout << "╠═════════════════════════════════════════════════════════╣" << std::endl;
+    std::cout << "║ 1. Start as Receiver     │ 6. Accept pending request   ║" << std::endl;
+    std::cout << "║ 2. Start as Sender       │ 7. Reject pending request   ║" << std::endl;
+    std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
+    std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
+    std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
+    std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
+    std::cout << "Choice: ";
+  }
 };
 
 class NearbySharingApp {
@@ -142,9 +181,25 @@ class NearbySharingApp {
         transfer_callback_.get(),
         NearbySharingService::ReceiveSurfaceState::kForeground,
         Advertisement::BlockedVendorId::kNone,
-        [](NearbySharingService::StatusCodes status) {
+        [this](NearbySharingService::StatusCodes status) {
           if (status == NearbySharingService::StatusCodes::kOk) {
             std::cout << "Successfully registered as receiver!" << std::endl;
+            
+            // Display QR code URL
+            std::string qr_url = service_->GetQrCodeUrl();
+            if (!qr_url.empty()) {
+              std::cout << "\n┌──────────────────────────────────────────────────────────────┐" << std::endl;
+              std::cout << "│ QR CODE URL:                                                 │" << std::endl;
+              std::cout << "│ " << qr_url;
+              // Add padding if needed
+              if (qr_url.length() < 61) {
+                std::cout << std::string(61 - qr_url.length(), ' ');
+              }
+              std::cout << "│" << std::endl;
+              std::cout << "│                                                              │" << std::endl;
+              std::cout << "│ Scan this with your phone to connect!                        │" << std::endl;
+              std::cout << "└──────────────────────────────────────────────────────────────┘" << std::endl;
+            }
           } else {
             std::cout << "Failed to register as receiver: " 
                      << NearbySharingService::StatusCodeToString(status) << std::endl;
@@ -163,9 +218,25 @@ class NearbySharingApp {
         NearbySharingService::SendSurfaceState::kForeground,
         Advertisement::BlockedVendorId::kNone,
         false, // disable_wifi_hotspot
-        [](NearbySharingService::StatusCodes status) {
+        [this](NearbySharingService::StatusCodes status) {
           if (status == NearbySharingService::StatusCodes::kOk) {
             std::cout << "Successfully registered as sender!" << std::endl;
+            
+            // Display QR code URL
+            std::string qr_url = service_->GetQrCodeUrl();
+            if (!qr_url.empty()) {
+              std::cout << "\n┌──────────────────────────────────────────────────────────────┐" << std::endl;
+              std::cout << "│ QR CODE URL:                                                 │" << std::endl;
+              std::cout << "│ " << qr_url;
+              // Add padding if needed
+              if (qr_url.length() < 61) {
+                std::cout << std::string(61 - qr_url.length(), ' ');
+              }
+              std::cout << "│" << std::endl;
+              std::cout << "│                                                              │" << std::endl;
+              std::cout << "│ Scan this with your phone to connect!                        │" << std::endl;
+              std::cout << "└──────────────────────────────────────────────────────────────┘" << std::endl;
+            }
           } else {
             std::cout << "Failed to register as sender: " 
                      << NearbySharingService::StatusCodeToString(status) << std::endl;
@@ -180,9 +251,34 @@ class NearbySharingApp {
     std::cout << "Target ID: " << target_id << std::endl;
     std::cout << "File: " << file_path << std::endl;
     
+    nearby::FilePath path(file_path);
+    auto file_size = nearby::Files::GetFileSize(path);
+    if (!file_size.has_value()) {
+      std::cout << "Error: Could not get file size for " << file_path << std::endl;
+      return;
+    }
+    
     auto attachment_container = std::make_unique<AttachmentContainer>();
     
-    attachment_container->AddFileAttachment(FileAttachment(nearby::FilePath(file_path)));
+    // Use the constructor that accepts size
+    std::string file_name = path.GetFileName().ToString();
+    std::string mime_type = "";  // Will be auto-detected from extension
+    
+    // Create file attachment with proper size
+    FileAttachment file_attachment(
+        /*id=*/0,  // ID will be auto-generated
+        /*size=*/static_cast<int64_t>(*file_size),
+        /*file_name=*/file_name,
+        /*mime_type=*/mime_type,
+        /*type=*/service::proto::FileMetadata::UNKNOWN,
+        /*parent_folder=*/"",
+        /*batch_id=*/0
+    );
+    
+    // Set the file path after construction
+    file_attachment.set_file_path(path);
+    
+    attachment_container->AddFileAttachment(std::move(file_attachment));
     
     service_->SendAttachments(
         target_id,
@@ -328,19 +424,16 @@ class NearbySharingApp {
 };
 
 void PrintMenu() {
-  std::cout << "\n========== Nearby Sharing Menu ==========" << std::endl;
-  std::cout << "1. Start as Receiver (advertise)" << std::endl;
-  std::cout << "2. Start as Sender (discover)" << std::endl;
-  std::cout << "3. List discovered devices" << std::endl;
-  std::cout << "4. Send file to device" << std::endl;
-  std::cout << "5. Send text to device" << std::endl;
-  std::cout << "6. Accept pending incoming share (auto-detects ID)" << std::endl;
-  std::cout << "7. Reject pending incoming share (auto-detects ID)" << std::endl;
-  std::cout << "8. Cancel transfer" << std::endl;
-  std::cout << "9. Print status" << std::endl;
-  std::cout << "0. Exit" << std::endl;
-  std::cout << "=========================================" << std::endl;
-  std::cout << "Enter choice: ";
+  std::cout << "\n╔═════════════════════════════════════════════════════════╗" << std::endl;
+  std::cout << "║           NEARBY SHARING - MENU                         ║" << std::endl;
+  std::cout << "╠═════════════════════════════════════════════════════════╣" << std::endl;
+  std::cout << "║ 1. Start as Receiver     │ 6. Accept pending request   ║" << std::endl;
+  std::cout << "║ 2. Start as Sender       │ 7. Reject pending request   ║" << std::endl;
+  std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
+  std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
+  std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
+  std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
+  std::cout << "Choice: ";
 }
 
 int main(int argc, char* argv[]) {
@@ -350,9 +443,15 @@ int main(int argc, char* argv[]) {
     device_name = argv[1];
   }
 
-  std::cout << "========================================" << std::endl;
-  std::cout << "  Nearby Sharing Linux Application" << std::endl;
-  std::cout << "========================================" << std::endl;
+  // Clear screen and show header
+  std::cout << "\033[2J\033[1;1H";  // Clear screen
+  std::cout << "╔═════════════════════════════════════════════════════════╗" << std::endl;
+  std::cout << "║                                                         ║" << std::endl;
+  std::cout << "║         NEARBY SHARING - LINUX APPLICATION              ║" << std::endl;
+  std::cout << "║         Device: " << device_name << std::string(32 - device_name.length(), ' ') << "║" << std::endl;
+  std::cout << "║                                                         ║" << std::endl;
+  std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
+  std::cout << "\n[LOG AREA - Updates will appear above the menu]\n" << std::endl;
 
   NearbySharingApp app(device_name);
 
