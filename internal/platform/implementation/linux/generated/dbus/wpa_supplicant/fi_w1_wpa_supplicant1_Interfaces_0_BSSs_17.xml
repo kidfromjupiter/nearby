@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+        "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+    <interface name="org.freedesktop.DBus.Introspectable">
+        <method name="Introspect">
+            <arg name="data" type="s" direction="out"/>
+        </method>
+    </interface>
+    <interface name="org.freedesktop.DBus.Properties">
+        <method name="Get">
+            <arg name="interface" type="s" direction="in"/>
+            <arg name="propname" type="s" direction="in"/>
+            <arg name="value" type="v" direction="out"/>
+        </method>
+        <method name="GetAll">
+            <arg name="interface" type="s" direction="in"/>
+            <arg name="props" type="a{sv}" direction="out"/>
+        </method>
+        <method name="Set">
+            <arg name="interface" type="s" direction="in"/>
+            <arg name="propname" type="s" direction="in"/>
+            <arg name="value" type="v" direction="in"/>
+        </method>
+    </interface>
+    <interface name="fi.w1.wpa_supplicant1.BSS">
+        <signal name="PropertiesChanged">
+            <arg name="properties" type="a{sv}"/>
+        </signal>
+        <property name="SSID" type="ay" access="read"/>
+        <property name="BSSID" type="ay" access="read"/>
+        <property name="Privacy" type="b" access="read"/>
+        <property name="Mode" type="s" access="read"/>
+        <property name="Signal" type="n" access="read"/>
+        <property name="Frequency" type="q" access="read"/>
+        <property name="Rates" type="au" access="read"/>
+        <property name="WPA" type="a{sv}" access="read"/>
+        <property name="RSN" type="a{sv}" access="read"/>
+        <property name="WPS" type="a{sv}" access="read"/>
+        <property name="IEs" type="ay" access="read"/>
+        <property name="Age" type="u" access="read"/>
+        <property name="ANQP" type="a{sv}" access="read"/>
+    </interface>
+</node>
