@@ -328,7 +328,7 @@ ImplementationPlatform::CreateWifiHotspotMedium() {
 
 std::unique_ptr<api::WifiDirectMedium>
 ImplementationPlatform::CreateWifiDirectMedium() {
-  // return nullptr;
+  return nullptr;
   auto nm =
       std::make_shared<linux::networkmanager::NetworkManager>(linux::getSystemBusConnection());
   auto wifiMedium = createWifiMedium(nm);
