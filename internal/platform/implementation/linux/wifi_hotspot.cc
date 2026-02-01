@@ -21,6 +21,7 @@
 
 #include "internal/platform/implementation/linux/dbus.h"
 #include "internal/platform/implementation/linux/network_manager.h"
+#include "internal/platform/implementation/linux/network_manager_access_point.h"
 #include "internal/platform/implementation/linux/utils.h"
 #include "internal/platform/implementation/linux/wifi_hotspot.h"
 #include "internal/platform/implementation/linux/wifi_hotspot_server_socket.h"
@@ -197,6 +198,24 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
         << reason->ToString();
     DisconnectWifiHotspot();
     return false;
+  }
+
+  // Get the frequency of the active hotspot
+  try {
+    sdbus::ObjectPath active_ap_path = wireless_device_->ActiveAccessPoint();
+    if (!active_ap_path.empty()) {
+      auto access_point = NetworkManagerAccessPoint(*system_bus_, active_ap_path);
+      uint32_t frequency = access_point.Frequency();
+      hotspot_credentials->SetFrequency(static_cast<int>(frequency));
+      LOG(INFO) << __func__ << ": Hotspot frequency set to " << frequency
+                << " MHz";
+    } else {
+      LOG(WARNING) << __func__
+                   << ": Could not get active access point to retrieve frequency";
+    }
+  } catch (const sdbus::Error &e) {
+    LOG(WARNING) << __func__ << ": Could not retrieve hotspot frequency: "
+                 << e.what();
   }
 
   LOG(INFO) << __func__ << ": Started a WiFi hotspot on device "

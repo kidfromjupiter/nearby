@@ -121,6 +121,7 @@ bool NetworkManagerWifiDirectMedium::StartWifiDirect(
 
   wifi_direct_credentials->SetSSID(hotspot_creds.GetSSID());
   wifi_direct_credentials->SetPassword(hotspot_creds.GetPassword());
+  wifi_direct_credentials->SetFrequency(hotspot_creds.GetFrequency());
   return true;
 }
 

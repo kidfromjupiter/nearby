@@ -86,7 +86,7 @@ std::string RandSSID() {
       "abcdefghijklmnopqrstuvwxyz"
       "0123456789";
 
-  return absl::StrCat("DIRECT-", RandString(allowed_chars, 25));
+  return absl::StrCat("DIRECT-", RandString(allowed_chars, 24));
 }
 
 std::string RandWPAPassphrase() {

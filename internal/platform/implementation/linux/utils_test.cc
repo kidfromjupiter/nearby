@@ -43,7 +43,7 @@ TEST(UtilsTests, GenNewUuid) {
 
 TEST(UtilsTests, GenRandSSID) {
   std::string ssid = RandSSID();
-  EXPECT_EQ(ssid.length(), 32);
+  EXPECT_EQ(ssid.length(), 31);
   EXPECT_EQ(ssid.find("DIRECT-"), 0);
 }
 
