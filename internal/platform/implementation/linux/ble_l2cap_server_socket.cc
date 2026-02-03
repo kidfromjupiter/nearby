@@ -65,7 +65,6 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleL2capServerSocket::Accept() {
   std::memset(&addr, 0, sizeof(addr));
   addr.l2_family = AF_BLUETOOTH;
   addr.l2_psm = htobs(psm_);
-  addr.l2_cid = 0;
   addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
   // Set BDADDR_ANY (all zeros)
   std::memset(&addr.l2_bdaddr, 0, sizeof(addr.l2_bdaddr));

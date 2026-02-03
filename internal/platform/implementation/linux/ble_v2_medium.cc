@@ -31,21 +31,23 @@
 // #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "internal/platform/implementation/linux/ble_v2_medium.h"
 
+#include "absl/types/span.h"
 #include "ble_gatt_client.h"
 #include "ble_gatt_server.h"
+#include "ble_l2cap_server_socket.h"
+#include "ble_l2cap_socket.h"
+#include "internal/base/observer_list.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_device.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
 #include "internal/platform/implementation/linux/bluez.h"
-#include "internal/platform/mac_address.h"
-#include "internal/platform/prng.h"
-#include "absl/types/span.h"
-#include "internal/base/observer_list.h"
 #include "internal/platform/implementation/linux/bluez_advertisement_monitor.h"
 #include "internal/platform/implementation/linux/bluez_advertisement_monitor_manager.h"
 #include "internal/platform/implementation/linux/bluez_le_advertisement.h"
 #include "internal/platform/implementation/linux/dbus.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/advertisement_monitor_server.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/le_advertisement_manager_client.h"
+#include "internal/platform/mac_address.h"
+#include "internal/platform/prng.h"
 
 namespace nearby {
 namespace linux {
@@ -458,17 +460,17 @@ std::unique_ptr<api::ble_v2::BleServerSocket> BleV2Medium::OpenServerSocket(
 
 std::unique_ptr<api::ble_v2::BleL2capServerSocket>
 BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
-  return nullptr;
-  // LOG(INFO) << __func__ << ": Opening L2CAP server socket for service "
-  //           << service_id;
-  //
-  // Prng prng;
-  // auto psm = 0x80 + (prng.NextUint32() % 0x80);
-  // auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm);
-  //
-  // LOG(INFO) << __func__ << ": L2CAP server socket created with PSM: "
-  //           << server_socket->GetPSM();
-  // return server_socket;
+  // return nullptr;
+  LOG(INFO) << __func__ << ": Opening L2CAP server socket for service "
+            << service_id;
+
+  Prng prng;
+  auto psm = 0x80 + (prng.NextUint32() % 0x80);
+  auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm);
+
+  LOG(INFO) << __func__ << ": L2CAP server socket created with PSM: "
+            << server_socket->GetPSM();
+  return server_socket;
 }
 
 // This is supposed to be for a socket on top of Weave protocol.
@@ -530,48 +532,51 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
     api::ble_v2::TxPowerLevel tx_power_level,
     api::ble_v2::BlePeripheral::UniqueId peripheral_id,
     CancellationFlag *cancellation_flag) {
-  return nullptr;
-  // auto device = devices_->get_device_by_unique_id(peripheral_id);
-  // if (!device) {
-  //   LOG(ERROR) << __func__ << ": Failed to find device with unique ID "
-  //              << peripheral_id;
-  //   return nullptr;
-  // }
-  //
-  // LOG(INFO) << __func__ << ": Connecting to L2CAP PSM " << psm
-  //           << " on device " << device->GetMacAddress();
-  //
-  //
-  // int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
-  // if (fd < 0) {
-  //   LOG(ERROR) << __func__ << ": Failed to create L2CAP socket: "
-  //              << std::strerror(errno);
-  //   return nullptr;
-  // }
-  //
-  // struct sockaddr_l2 addr;
-  // std::memset(&addr, 0, sizeof(addr));
-  // addr.l2_family = AF_BLUETOOTH;
-  // addr.l2_psm = htobs(psm);
-  // addr.l2_cid = 0;
-  // addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
-  //
-  // std::string mac_addr = device->GetMacAddress();
-  // if (str2ba(mac_addr.c_str(), &addr.l2_bdaddr) < 0) {
-  //   LOG(ERROR) << __func__ << ": Invalid Bluetooth address: " << mac_addr;
-  //   close(fd);
-  //   return nullptr;
-  // }
-  //
-  // if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-  //   LOG(ERROR) << __func__ << ": Failed to connect to L2CAP socket: "
-  //              << std::strerror(errno);
-  //   close(fd);
-  //   return nullptr;
-  // }
-  //
-  // LOG(INFO) << __func__ << ": Successfully connected to L2CAP socket";
-  // return std::make_unique<BleL2capSocket>(fd, peripheral_id);
+  // return nullptr;
+  auto device = devices_->get_device_by_unique_id(peripheral_id);
+  if (!device) {
+    LOG(ERROR) << __func__ << ": Failed to find device with unique ID "
+               << peripheral_id;
+    return nullptr;
+  }
+
+  LOG(INFO) << __func__ << ": Connecting to L2CAP PSM " << psm
+            << " on device " << device->GetMacAddress();
+
+
+  int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+  if (fd < 0) {
+    LOG(ERROR) << __func__ << ": Failed to create L2CAP socket: "
+               << std::strerror(errno);
+    return nullptr;
+  }
+
+  struct sockaddr_l2 addr;
+  std::memset(&addr, 0, sizeof(addr));
+  addr.l2_family = AF_BLUETOOTH;
+  addr.l2_psm = htobs(psm);
+  if (device -> GetAddressType() == "random") {
+    addr.l2_bdaddr_type = BDADDR_LE_RANDOM;
+  }else {
+    addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
+  }
+
+  std::string mac_addr = device->GetMacAddress();
+  if (str2ba(mac_addr.c_str(), &addr.l2_bdaddr) < 0) {
+    LOG(ERROR) << __func__ << ": Invalid Bluetooth address: " << mac_addr;
+    close(fd);
+    return nullptr;
+  }
+
+  if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    LOG(ERROR) << __func__ << ": Failed to connect to L2CAP socket: "
+               << std::strerror(errno);
+    close(fd);
+    return nullptr;
+  }
+
+  LOG(INFO) << __func__ << ": Successfully connected to L2CAP socket";
+  return std::make_unique<BleL2capSocket>(fd, peripheral_id);
 }
 
 bool BleV2Medium::StartMultipleServicesScanning(

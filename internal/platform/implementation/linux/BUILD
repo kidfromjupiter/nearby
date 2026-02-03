@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-licenses(["notice"])
-
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
+licenses(["notice"])
 
 refresh_compile_commands(
     name = "refresh_compile_commands",
@@ -22,19 +22,24 @@ refresh_compile_commands(
     # Specify the targets of interest.
     # For example, specify a dict of targets and any flags required to build.
     targets = {
-      ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
-      "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
-      "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+        ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+        "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+        "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
     },
     # No need to add flags already in .bazelrc. They're automatically picked up.
     # If you don't need flags, a list of targets is also okay, as is a single target string.
     # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
-      # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
+    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
     # And if you're working on a header-only library, specify a test or binary target that compiles it.
 )
 
 cc_library(
     name = "types",
+    srcs = [
+        "device_info.cc",
+        #"log_message.cc",
+        "timer.cc",
+    ],
     hdrs = [
         "atomic_boolean.h",
         "atomic_reference.h",
@@ -54,19 +59,14 @@ cc_library(
         #"log_message.h",
         "utils.h",
     ],
-    srcs = [
-        "device_info.cc",
-        #"log_message.cc",
-        "timer.cc",
-    ],
     copts = ["-lrt"],
     visibility = ["//third_party/nearby/sharing/internal/impl/linux:__pkg__"],
     deps = [
         ":comm",
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/strings",
+        "@sdbus_cpp",
         "@sdbus_cpp//:libsystemd",
-        "@sdbus_cpp//:sdbus_cpp",
     ],
 )
 
@@ -76,10 +76,12 @@ cc_library(
         "avahi.h",
         "ble_gatt_server.h",
         "ble_gatt_client.h",
-#        "ble_medium.h",
+        #        "ble_medium.h",
         "ble_v2_medium.h",
         "ble_v2_server_socket.h",
         "ble_v2_socket.h",
+        "ble_l2cap_server_socket.h",
+        "ble_l2cap_socket.h",
         "bluetooth_adapter.h",
         "bluetooth_bluez_profile.h",
         "bluetooth_classic_device.h",
@@ -90,7 +92,7 @@ cc_library(
         "bluetooth_pairing.h",
         "bluez.h",
         "bluez_device.h",
-#        "bluez_agent.h",
+        #        "bluez_agent.h",
         "bluez_advertisement_monitor.h",
         "bluez_advertisement_monitor_manager.h",
         "bluez_gatt_characteristic_client.h",
@@ -118,6 +120,7 @@ cc_library(
         "wifi_medium.h",
         "wifi_socket.h",
     ],
+    visibility = ["//visibility:private"],
     deps = [
         ":crypto",
         "//internal/platform:base",
@@ -138,10 +141,9 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
+        "@sdbus_cpp",
         "@sdbus_cpp//:libsystemd",
-        "@sdbus_cpp//:sdbus_cpp",
     ],
-    visibility = ["//visibility:private"],
 )
 
 cc_library(
@@ -155,7 +157,8 @@ cc_library(
         "//internal/platform/implementation:types",
         "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
-])
+    ],
+)
 
 cc_library(
     name = "linux",
@@ -163,10 +166,12 @@ cc_library(
         "avahi.cc",
         "ble_gatt_client.cc",
         "ble_gatt_server.cc",
-#        "ble_medium.cc",
+        #        "ble_medium.cc",
         "ble_v2_medium.cc",
         "ble_v2_server_socket.cc",
         "ble_v2_socket.cc",
+        "ble_l2cap_server_socket.cc",
+        "ble_l2cap_socket.cc",
         "bluetooth_adapter.cc",
         "bluetooth_bluez_profile.cc",
         "bluetooth_classic_socket.cc",
@@ -203,7 +208,10 @@ cc_library(
         "wifi_lan_server_socket.cc",
         "wifi_medium.cc",
     ],
-    linkopts = ["-lcurl"],
+    linkopts = [
+        "-lcurl",
+        "-lbluetooth",
+    ],
     visibility = [
         "//connections:__subpackages__",
         "//fastpair:__subpackages__",
@@ -225,9 +233,9 @@ cc_library(
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation:types",
+        "//internal/platform/implementation/linux/generated:types",
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/shared:file",
-        "//internal/platform/implementation/linux/generated:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
@@ -241,8 +249,8 @@ cc_library(
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
         "@nlohmann_json//:json",
+        "@sdbus_cpp",
         "@sdbus_cpp//:libsystemd",
-        "@sdbus_cpp//:sdbus_cpp",
     ],
 )
 
@@ -259,9 +267,9 @@ cc_library(
         "//visibility:private",  # Only private by automation, not intent. Owner may accept CLs adding visibility. See go/scheuklappen#explicit-private.
     ],
     deps = [
+        ":types",
         "//internal/platform:base",
         "@nlohmann_json//:json",
-        ":types",
     ],
 )
 
@@ -290,9 +298,9 @@ cc_test(
     deps = [
         ":comm",
         ":crypto",
+        ":linux",
         ":test_utils",
         ":types",
-        ":linux",
         "//internal/platform:base",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",

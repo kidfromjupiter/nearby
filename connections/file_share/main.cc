@@ -25,7 +25,9 @@
 #include "connections/v3/discovery_options.h"
 #include "connections/v3/listeners.h"
 #include "connections/implementation/service_controller_router.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/platform/file.h"
+#include "internal/flags/nearby_flags.h"
 
 namespace {
 constexpr char kDefaultServiceId[] = "com.google.nearby.fileshare.cli";
@@ -303,7 +305,7 @@ class FileShareApp {
           LOG(INFO) << "Found endpoint " << remote_device.GetEndpointId()
                     << " service_id=" << service_id;
           nearby::connections::ConnectionOptions options;
-          options.strategy = nearby::connections::Strategy::kP2pCluster;
+          options.strategy = nearby::connections::Strategy::kP2pStar;
           options.allowed = options_.upgrade_mediums_set
                                 ? options_.upgrade_mediums
                                 : options_.mediums;
@@ -463,6 +465,15 @@ class FileShareApp {
 
 int main(int argc, char** argv) {
   std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      ::nearby::connections::config_package_nearby::
+          nearby_connections_feature::kEnableBleL2cap,
+      true);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      ::nearby::connections::config_package_nearby::
+          nearby_connections_feature::kEnableBleV2,
+      true);
 
   Options options;
   bool mediums_override = false;

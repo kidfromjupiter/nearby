@@ -186,6 +186,10 @@ ErrorOr<bool> BleV2::StartAdvertising(const std::string& service_id,
   if (it != l2cap_server_sockets_.end()) {
     psm = it->second.GetPSM();
   }
+  LOG(INFO) << "BLE V2 advertising service_id=" << service_id
+            << " psm=" << psm
+            << " (default="
+            << (psm == mediums::BleAdvertisementHeader::kDefaultPsmValue) << ")";
   mediums::BleAdvertisement medium_advertisement = {
       mediums::BleAdvertisement::Version::kV2,
       mediums::BleAdvertisement::SocketVersion::kV2,
