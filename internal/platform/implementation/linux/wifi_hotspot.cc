@@ -270,18 +270,14 @@ bool NetworkManagerWifiHotspotMedium::StopWifiHotspot() {
 }
 
 bool NetworkManagerWifiHotspotMedium::ConnectWifiHotspot(
-    HotspotCredentials *hotspot_credentials) {
-  if (hotspot_credentials == nullptr) {
-    LOG(ERROR) << __func__ << ": hotspot_credentials cannot be null";
-    return false;
-  }
+    const HotspotCredentials& hotspot_credentials) {
 
-  auto ssid = hotspot_credentials->GetSSID();
-  auto password = hotspot_credentials->GetPassword();
+  auto ssid = hotspot_credentials.GetSSID();
+  auto password = hotspot_credentials.GetPassword();
 
   return wireless_device_->ConnectToNetwork(ssid, password,
-                                            api::WifiAuthType::kWpaPsk) ==
-         api::WifiConnectionStatus::kConnected;
+                                            NetworkManagerWifiMedium::WifiAuthType::kWpaPsk) ==
+         NetworkManagerWifiMedium::WifiConnectionStatus::kConnected;
 }
 
 bool NetworkManagerWifiHotspotMedium::DisconnectWifiHotspot() {

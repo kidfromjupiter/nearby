@@ -49,7 +49,7 @@
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/feature_flags.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex.h"
@@ -63,9 +63,9 @@ namespace connections {
 
 namespace {
 using ::location::nearby::proto::connections::OperationResultCode;
-using ::nearby::api::ble_v2::BleAdvertisementData;
-using ::nearby::api::ble_v2::GattCharacteristic;
-using ::nearby::api::ble_v2::TxPowerLevel;
+using ::nearby::api::ble::BleAdvertisementData;
+using ::nearby::api::ble::GattCharacteristic;
+using ::nearby::api::ble::TxPowerLevel;
 
 constexpr int kMaxAdvertisementLength = 512;
 constexpr int kDummyServiceIdLength = 128;
@@ -329,11 +329,11 @@ ErrorOr<bool> BleV2::StartLegacyAdvertising(
     return {Error(OperationResultCode::CLIENT_BLE_DUPLICATE_ADVERTISING)};
   }
 
-  std::unique_ptr<api::ble_v2::BleMedium::AdvertisingSession>
+  std::unique_ptr<api::ble::BleMedium::AdvertisingSession>
       legacy_device_advertizing_session = medium_.StartAdvertising(
           CreateAdvertisingDataForLegacyDevice(),
           {.tx_power_level = TxPowerLevel::kMedium, .is_connectable = true},
-          api::ble_v2::BleMedium::AdvertisingCallback{
+          api::ble::BleMedium::AdvertisingCallback{
               .start_advertising_result =
                   [this, &service_id](absl::Status status) mutable {
                     AssumeHeld(mutex_);
@@ -1154,7 +1154,7 @@ ByteArray BleV2::CreateAdvertisementHeader(
       advertisement_hash, psm));
 }
 
-api::ble_v2::BleAdvertisementData
+api::ble::BleAdvertisementData
 BleV2::CreateAdvertisingDataForLegacyDevice() {
   BleAdvertisementData advertising_data;
   advertising_data.is_extended_advertisement = false;
@@ -1381,7 +1381,7 @@ bool BleV2::StartAsyncScanningLocked(absl::string_view service_id,
   auto scanning_session = medium_.StartScanning(
       mediums::bleutils::kCopresenceServiceUuid,
       PowerLevelToTxPowerLevel(power_level),
-      api::ble_v2::BleMedium::ScanningCallback{
+      api::ble::BleMedium::ScanningCallback{
           .start_scanning_result =
               [this, &service_id](absl::Status status) mutable {
                 // The `mutex_` is already held here. Use
@@ -1404,7 +1404,7 @@ bool BleV2::StartAsyncScanningLocked(absl::string_view service_id,
                 }
               },
           .advertisement_found_cb =
-              [this](api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+              [this](api::ble::BlePeripheral::UniqueId peripheral_id,
                      BleAdvertisementData advertisement_data) {
                 AssumeHeld(mutex_);
                 BleV2Peripheral proxy(medium_, peripheral_id);
@@ -1431,7 +1431,7 @@ bool BleV2::StartAsyncScanningLocked(absl::string_view service_id,
                 });
               },
           .advertisement_lost_cb =
-              [](api::ble_v2::BlePeripheral::UniqueId peripheral_id) {
+              [](api::ble::BlePeripheral::UniqueId peripheral_id) {
                 // TODO(b/345514862): Implement.
               },
       });

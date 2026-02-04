@@ -51,7 +51,7 @@ Exception InputStream::Close() {
   return {};
 }
 
-Exception OutputStream::Write(const ByteArray &data) {
+Exception OutputStream::Write(absl::string_view data) {
   if (!fd_.isValid()) return Exception{Exception::kIo};
 
   size_t written = 0;

@@ -23,7 +23,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_server.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/gatt_characteristic_server.h"
@@ -46,7 +46,7 @@ class GattServiceServer final
 
   GattServiceServer(
       sdbus::IConnection &system_bus, size_t num, const Uuid &service_uuid,
-      std::shared_ptr<api::ble_v2::ServerGattConnectionCallback> server_cb,
+      std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb,
       std::shared_ptr<BluetoothDevices> devices)
       : AdaptorInterfaces(system_bus, bluez::gatt_service_path(num)),
         devices_(std::move(devices)),
@@ -80,8 +80,8 @@ class GattServiceServer final
 
   bool AddCharacteristic(const Uuid &service_uuid,
                          const Uuid &characteristic_uuid,
-                         api::ble_v2::GattCharacteristic::Permission permission,
-                         api::ble_v2::GattCharacteristic::Property property)
+                         api::ble::GattCharacteristic::Permission permission,
+                         api::ble::GattCharacteristic::Property property)
       ABSL_LOCKS_EXCLUDED(characterstics_mutex_);
   std::shared_ptr<GattCharacteristicServer> GetCharacteristic(const Uuid &uuid)
       ABSL_LOCKS_EXCLUDED(characterstics_mutex_);
@@ -98,7 +98,7 @@ class GattServiceServer final
       characteristics_ ABSL_GUARDED_BY(characterstics_mutex_);
 
   std::shared_ptr<BluetoothDevices> devices_;
-  std::shared_ptr<api::ble_v2::ServerGattConnectionCallback> server_cb_;
+  std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb_;
 
   const std::string uuid_;
   const bool primary_;

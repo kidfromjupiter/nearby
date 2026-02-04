@@ -541,7 +541,7 @@ std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
   }
 
   LOG(INFO) << __func__ << ": Connecting to L2CAP PSM " << psm
-            << " on device " << device->GetMacAddress();
+            << " on device " << device->GetMacAddress().ToString();
 
 
   int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
@@ -575,7 +575,7 @@ std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
     LOG(WARNING) << __func__ << ": Failed to set BT_RCVMTU: "
                  << std::strerror(errno);
   }
-  std::string mac_addr = device->GetMacAddress();
+  std::string mac_addr = device->GetMacAddress().ToString();
   if (str2ba(mac_addr.c_str(), &addr.l2_bdaddr) < 0) {
     LOG(ERROR) << __func__ << ": Invalid Bluetooth address: " << mac_addr;
     close(fd);

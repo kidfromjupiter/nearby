@@ -216,7 +216,7 @@ Exception BluetoothInputStream::Close() {
   return {Exception::kSuccess};
 }
 
-Exception BluetoothOutputStream::Write(const ByteArray &data) {
+Exception BluetoothOutputStream::Write(absl::string_view data) {
   int fd = fd_raw_.load();
   if (fd < 0) return Exception{Exception::kIo};
 

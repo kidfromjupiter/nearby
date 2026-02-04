@@ -114,14 +114,14 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
   auto address = remote_device.GetMacAddress();
   auto device = devices_->get_device_by_address(address);
   if (device == nullptr) {
-    LOG(ERROR) << __func__ << ": Device " << address
+    LOG(ERROR) << __func__ << ": Device " << address.ToString()
                        << " is no longer known";
     return nullptr;
   }
   if (!device -> Bonded())
   {
 
-    LOG(ERROR) << __func__ << ": Device " << address
+    LOG(ERROR) << __func__ << ": Device " << address.ToString()
                        << " is not Bonded";
   }
   // Mark as pending BEFORE calling ConnectToProfile to win the race
@@ -137,7 +137,7 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
   if (!fd.has_value()) {
     LOG(WARNING) << __func__
                          << ": Failed to get a new connection for profile "
-                         << service_uuid << " for device " << address;
+                         << service_uuid << " for device " << address.ToString();
     return nullptr;
   }
 
@@ -166,7 +166,7 @@ BluetoothClassicMedium::ListenForService(const std::string &service_name,
 api::BluetoothDevice *BluetoothClassicMedium::GetRemoteDevice(
 MacAddress mac_address) {
   // When BLE is discovering, it looks for remote devices to connect to using BT classic. If only
-  auto device = devices_->get_device_by_address(mac_address.ToString());
+  auto device = devices_->get_device_by_address(mac_address);
   if (device == nullptr) return nullptr;
 
   return device.get();

@@ -17,6 +17,8 @@
 
 #include "internal/platform/implementation/system_clock.h"
 
+#include "absl/time/clock.h"
+
 namespace nearby {
 
 // Initialize global system state.

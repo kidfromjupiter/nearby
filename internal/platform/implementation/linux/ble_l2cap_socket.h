@@ -45,7 +45,7 @@ class BleL2capOutputStream final : public OutputStream {
   explicit BleL2capOutputStream(int fd);
   ~BleL2capOutputStream() override;
 
-  Exception Write(const ByteArray& data) override;
+  Exception Write(absl::string_view data) override;
   Exception Flush() override { return {Exception::kSuccess}; }
   Exception Close() override;
 
@@ -54,9 +54,9 @@ class BleL2capOutputStream final : public OutputStream {
   std::atomic<int> fd_{-1};
 };
 
-class BleL2capSocket final : public api::ble_v2::BleL2capSocket {
+class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
-  BleL2capSocket(int fd, api::ble_v2::BlePeripheral::UniqueId peripheral_id);
+  BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id);
   ~BleL2capSocket() override;
 
   InputStream& GetInputStream() override { return *input_stream_; }
@@ -64,7 +64,7 @@ class BleL2capSocket final : public api::ble_v2::BleL2capSocket {
   Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
   void SetCloseNotifier(absl::AnyInvocable<void()> notifier) override
       ABSL_LOCKS_EXCLUDED(mutex_);
-  api::ble_v2::BlePeripheral::UniqueId GetRemotePeripheralId() override {
+  api::ble::BlePeripheral::UniqueId GetRemotePeripheralId() override {
     return peripheral_id_;
   }
 
@@ -77,7 +77,7 @@ class BleL2capSocket final : public api::ble_v2::BleL2capSocket {
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
   std::unique_ptr<BleL2capInputStream> input_stream_;
   std::unique_ptr<BleL2capOutputStream> output_stream_;
-  api::ble_v2::BlePeripheral::UniqueId peripheral_id_;
+  api::ble::BlePeripheral::UniqueId peripheral_id_;
   absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
 };
 

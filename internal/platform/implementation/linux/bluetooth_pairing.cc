@@ -36,7 +36,7 @@ void BluetoothPairing::pairing_reply_handler(const sdbus::Error *error) {
                        << "Got error '" << error->getName()
                        << "' with message '" << error->getMessage()
                        << "' while pairing with device "
-                       << device_->GetMacAddress();
+                       << device_->GetMacAddress().ToString();
 
     if (name == "org.bluez.Error.AuthenticationCanceled") {
       err = api::BluetoothPairingCallback::PairingError::kAuthCanceled;

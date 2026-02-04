@@ -21,7 +21,7 @@
 #include <sdbus-c++/StandardInterfaces.h>
 #include <sdbus-c++/Types.h>
 
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/le_advertisement_manager_client.h"
@@ -41,13 +41,13 @@ class LEAdvertisement final
   LEAdvertisement& operator=(LEAdvertisement&&) = delete;
 
   LEAdvertisement(sdbus::IConnection& system_bus, sdbus::ObjectPath path,
-                  const api::ble_v2::BleAdvertisementData& advertising_data,
-                  api::ble_v2::AdvertiseParameters advertise_set_parameters);
+                  const api::ble::BleAdvertisementData& advertising_data,
+                  api::ble::AdvertiseParameters advertise_set_parameters);
 
   static std::unique_ptr<LEAdvertisement> CreateLEAdvertisement(
       sdbus::IConnection& system_bus,
-      const api::ble_v2::BleAdvertisementData& advertising_data,
-      api::ble_v2::AdvertiseParameters advertising_parameters) {
+      const api::ble::BleAdvertisementData& advertising_data,
+      api::ble::AdvertiseParameters advertising_parameters) {
     static std::atomic<size_t> adv_count = 0;
     auto object_path = bluez::ble_advertisement_path(adv_count++);
     return std::make_unique<LEAdvertisement>(
@@ -92,7 +92,7 @@ class LEAdvertisement final
   bool is_extended_advertisement_;
   std::vector<std::string> service_uuids_;
   std::map<std::string, sdbus::Variant> service_data_;
-  api::ble_v2::AdvertiseParameters advertise_set_parameters_;
+  api::ble::AdvertiseParameters advertise_set_parameters_;
 };
 
 class LEAdvertisementManager final

@@ -23,7 +23,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/cancellation_flag.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_client.h"
 #include "internal/platform/implementation/linux/bluez_gatt_service_client.h"
@@ -106,7 +106,7 @@ class BluezGattDiscovery final : public bluez::BluezObjectManager {
 // https://developer.android.com/reference/android/bluetooth/BluetoothGatt
 //
 // Representation of a client GATT connection to a remote GATT server.
-class GattClient : public api::ble_v2::GattClient {
+class GattClient : public api::ble::GattClient {
  public:
   GattClient(const GattClient &) = delete;
   GattClient(GattClient &&) = delete;
@@ -153,7 +153,7 @@ class GattClient : public api::ble_v2::GattClient {
   // It is okay for duplicate services to exist, as long as the specified
   // characteristic UUID is unique among all services of the same UUID.
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  absl::optional<api::ble_v2::GattCharacteristic> GetCharacteristic(
+  absl::optional<api::ble::GattCharacteristic> GetCharacteristic(
       const Uuid &service_uuid, const Uuid &characteristic_uuid) override
       ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
 
@@ -161,7 +161,7 @@ class GattClient : public api::ble_v2::GattClient {
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#getValue()
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
   absl::optional<std::string> ReadCharacteristic(
-      const api::ble_v2::GattCharacteristic &characteristic) override
+      const api::ble::GattCharacteristic &characteristic) override
       ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#setValue(byte[])
@@ -170,7 +170,7 @@ class GattClient : public api::ble_v2::GattClient {
   // Sends a remote characteristic write request to the server and returns
   // whether or not it was successful.
   bool WriteCharacteristic(
-      const api::ble_v2::GattCharacteristic &characteristic,
+      const api::ble::GattCharacteristic &characteristic,
       absl::string_view value, WriteType type) override
       ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
 
@@ -178,7 +178,7 @@ class GattClient : public api::ble_v2::GattClient {
   //
   // Enable or disable notifications/indications for a given characteristic.
   bool SetCharacteristicSubscription(
-      const api::ble_v2::GattCharacteristic &characteristic, bool enable,
+      const api::ble::GattCharacteristic &characteristic, bool enable,
       absl::AnyInvocable<void(absl::string_view value)>
           on_characteristic_changed_cb) override
       ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
@@ -200,7 +200,7 @@ class GattClient : public api::ble_v2::GattClient {
       std::variant<std::unique_ptr<bluez::GattCharacteristicClient>,
                    std::unique_ptr<bluez::SubscribedGattCharacteristicClient>>;
   absl::Mutex characteristics_mutex_;
-  absl::flat_hash_map<api::ble_v2::GattCharacteristic, CharacteristicProxy>
+  absl::flat_hash_map<api::ble::GattCharacteristic, CharacteristicProxy>
       characteristics_ ABSL_GUARDED_BY(characteristics_mutex_);
 };
 

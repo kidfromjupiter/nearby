@@ -93,11 +93,11 @@ class Profile final
   std::atomic_bool released_;
 
   absl::Mutex connections_lock_;
-  std::map<std::string, std::vector<std::pair<sdbus::UnixFd, FDProperties>>>
+  std::map<MacAddress, std::vector<std::pair<sdbus::UnixFd, FDProperties>>>
       connections_ ABSL_GUARDED_BY(connections_lock_);
 
   // Track pending outgoing connection attempts to avoid race with incoming
-  std::set<std::string> pending_outgoing_ ABSL_GUARDED_BY(connections_lock_);
+  std::set<MacAddress> pending_outgoing_ ABSL_GUARDED_BY(connections_lock_);
 
   BluetoothDevices &devices_;
 };
@@ -137,10 +137,10 @@ class ProfileManager final
                      CancellationFlag *cancellation_flag)
       ABSL_LOCKS_EXCLUDED(registered_service_uuids_mutex_);
   void MarkPendingOutgoing(absl::string_view service_uuid,
-                                  const std::string& mac_address)
+                                  const MacAddress& mac_address)
              ABSL_LOCKS_EXCLUDED(registered_service_uuids_mutex_);
   void ClearPendingOutgoing(absl::string_view service_uuid,
-                            const std::string& mac_address)
+                            const MacAddress& mac_address)
       ABSL_LOCKS_EXCLUDED(registered_service_uuids_mutex_);
  private:
   BluetoothDevices &devices_;

@@ -3,7 +3,7 @@
 #include <regex>
 
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/dbus.h"
 #include "internal/platform/implementation/linux/utils.h"
 #include "internal/platform/uuid.h"
@@ -12,21 +12,21 @@ namespace linux {
 namespace bluez {
 AdvertisementMonitor::AdvertisementMonitor(
     sdbus::IConnection &system_bus, Uuid service_uuid,
-    api::ble_v2::TxPowerLevel tx_power_level, absl::string_view type,
+    api::ble::TxPowerLevel tx_power_level, absl::string_view type,
     std::shared_ptr<BluetoothDevices> devices,
-    api::ble_v2::BleMedium::ScanCallback scan_callback)
+    api::ble::BleMedium::ScanCallback scan_callback)
     : AdvertisementMonitor(
           system_bus, service_uuid, tx_power_level, type, std::move(devices),
-          api::ble_v2::BleMedium::ScanningCallback{
+          api::ble::BleMedium::ScanningCallback{
               .start_scanning_result = nullptr,
               .advertisement_found_cb =
                   std::move(scan_callback.advertisement_found_cb)}) {}
 
 AdvertisementMonitor::AdvertisementMonitor(
     sdbus::IConnection &system_bus, Uuid service_uuid,
-    api::ble_v2::TxPowerLevel tx_power_level, absl::string_view type,
+    api::ble::TxPowerLevel tx_power_level, absl::string_view type,
     std::shared_ptr<BluetoothDevices> devices,
-    api::ble_v2::BleMedium::ScanningCallback scan_callback)
+    api::ble::BleMedium::ScanningCallback scan_callback)
     : AdaptorInterfaces(system_bus, bluez::advertisement_monitor_path(
                                         std::string{service_uuid})),
       devices_(std::move(devices)),
@@ -45,7 +45,7 @@ void AdvertisementMonitor::DeviceFound(const sdbus::ObjectPath &device) {
   auto service_data = peripheral->ServiceData();
   if (!service_data.has_value()) return;
 
-  struct api::ble_v2::BleAdvertisementData adv_data;
+  struct api::ble::BleAdvertisementData adv_data;
   for (const auto &[uuid_str, data] : *service_data) {
     auto uuid = UuidFromString(uuid_str);
     if (!uuid.has_value()) {
@@ -60,7 +60,7 @@ void AdvertisementMonitor::DeviceFound(const sdbus::ObjectPath &device) {
     adv_data.service_data.emplace(*uuid,
                                   std::string(bytes.begin(), bytes.end()));
   }
-  auto id = std::stoull(std::regex_replace(peripheral->GetMacAddress(),
+  auto id = std::stoull(std::regex_replace(peripheral->GetMacAddress().ToString(),
       std::regex("[:\\-]"), ""), nullptr, 16);
   scan_callback_.advertisement_found_cb(id, adv_data);
 }

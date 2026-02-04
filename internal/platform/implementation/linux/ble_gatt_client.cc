@@ -22,7 +22,7 @@
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/cancellation_flag_listener.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_gatt_client.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_client.h"
 #include "internal/platform/implementation/linux/bluez_gatt_service_client.h"
@@ -41,17 +41,17 @@ bool GattClient::DiscoverServiceAndCharacteristics(
       discovery_cancel_);
 }
 
-absl::optional<api::ble_v2::GattCharacteristic> GattClient::GetCharacteristic(
+absl::optional<api::ble::GattCharacteristic> GattClient::GetCharacteristic(
     const Uuid &service_uuid, const Uuid &characteristic_uuid) {
   auto chr_proxy = gatt_discovery_->GetCharacteristic(
       peripheral_object_path_, service_uuid, characteristic_uuid);
   if (chr_proxy == nullptr) return std::nullopt;
 
-  api::ble_v2::GattCharacteristic chr;
+  api::ble::GattCharacteristic chr;
   chr.service_uuid = service_uuid;
   chr.uuid = characteristic_uuid;
-  chr.property = api::ble_v2::GattCharacteristic::Property::kNone;
-  chr.permission = api::ble_v2::GattCharacteristic::Permission::kNone;
+  chr.property = api::ble::GattCharacteristic::Property::kNone;
+  chr.permission = api::ble::GattCharacteristic::Permission::kNone;
 
   std::vector<std::string> flags;
   try {
@@ -63,15 +63,15 @@ absl::optional<api::ble_v2::GattCharacteristic> GattClient::GetCharacteristic(
 
   for (const auto &flag : flags) {
     if (flag == "read") {
-      chr.property |= api::ble_v2::GattCharacteristic::Property::kRead;
-      chr.permission |= api::ble_v2::GattCharacteristic::Permission::kRead;
+      chr.property |= api::ble::GattCharacteristic::Property::kRead;
+      chr.permission |= api::ble::GattCharacteristic::Permission::kRead;
     } else if (flag == "write") {
-      chr.property |= api::ble_v2::GattCharacteristic::Property::kWrite;
-      chr.permission |= api::ble_v2::GattCharacteristic::Permission::kWrite;
+      chr.property |= api::ble::GattCharacteristic::Property::kWrite;
+      chr.permission |= api::ble::GattCharacteristic::Permission::kWrite;
     } else if (flag == "notify") {
-      chr.property |= api::ble_v2::GattCharacteristic::Property::kNotify;
+      chr.property |= api::ble::GattCharacteristic::Property::kNotify;
     } else if (flag == "indicate") {
-      chr.property |= api::ble_v2::GattCharacteristic::Property::kIndicate;
+      chr.property |= api::ble::GattCharacteristic::Property::kIndicate;
     }
   }
 
@@ -82,7 +82,7 @@ absl::optional<api::ble_v2::GattCharacteristic> GattClient::GetCharacteristic(
 }
 
 absl::optional<std::string> GattClient::ReadCharacteristic(
-    const api::ble_v2::GattCharacteristic &characteristic) {
+    const api::ble::GattCharacteristic &characteristic) {
   absl::ReaderMutexLock lock(&characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
@@ -105,7 +105,7 @@ absl::optional<std::string> GattClient::ReadCharacteristic(
 }
 
 bool GattClient::WriteCharacteristic(
-    const api::ble_v2::GattCharacteristic &characteristic,
+    const api::ble::GattCharacteristic &characteristic,
     absl::string_view value, WriteType type) {
   absl::ReaderMutexLock lock(&characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
@@ -121,7 +121,7 @@ bool GattClient::WriteCharacteristic(
           chr->WriteValue(
               value_bytes,
               {{"type",
-                type == api::ble_v2::GattClient::WriteType::kWithResponse
+                type == api::ble::GattClient::WriteType::kWithResponse
                     ? "request"
                     : "command"}});
           return true;
@@ -134,7 +134,7 @@ bool GattClient::WriteCharacteristic(
 }
 
 bool GattClient::SetCharacteristicSubscription(
-    const api::ble_v2::GattCharacteristic &characteristic, bool enable,
+    const api::ble::GattCharacteristic &characteristic, bool enable,
     absl::AnyInvocable<void(absl::string_view value)>
         on_characteristic_changed_cb) {
   absl::MutexLock lock(&characteristics_mutex_);

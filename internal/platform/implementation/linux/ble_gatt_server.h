@@ -27,7 +27,7 @@
 #include "absl/types/optional.h"
 #include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
 #include "internal/platform/implementation/linux/bluez_gatt_service_server.h"
@@ -35,15 +35,15 @@
 
 namespace nearby {
 namespace linux {
-class LocalBlePeripheral : public api::ble_v2::BlePeripheral {
+class LocalBlePeripheral : public api::ble::BlePeripheral {
  public:
   explicit LocalBlePeripheral(BluetoothAdapter& adapter) : adapter_(adapter) {
     // temp fix till everything transitions to GGetAddress()
-    unique_id_ = std::stoull(std::regex_replace(adapter_.GetMacAddress(),
+    unique_id_ = std::stoull(std::regex_replace(adapter_.GetMacAddress().ToString(),
       std::regex("[:\\-]"), ""), nullptr, 16);
   }
 
-  std::string GetAddress() const override { return adapter_.GetMacAddress(); }
+  std::string GetAddress() const override { return adapter_.GetMacAddress().ToString(); }
   UniqueId GetUniqueId() const override { return unique_id_; }
 
  private:
@@ -51,7 +51,7 @@ class LocalBlePeripheral : public api::ble_v2::BlePeripheral {
   UniqueId unique_id_;
 };
 
-class GattServer : public api::ble_v2::GattServer {
+class GattServer : public api::ble::GattServer {
  public:
   GattServer(const GattServer&) = delete;
   GattServer(GattServer&&) = delete;
@@ -60,26 +60,26 @@ class GattServer : public api::ble_v2::GattServer {
 
   explicit GattServer(sdbus::IConnection& system_bus, BluetoothAdapter& adapter,
                       std::shared_ptr<BluetoothDevices> devices,
-                      api::ble_v2::ServerGattConnectionCallback server_cb)
+                      api::ble::ServerGattConnectionCallback server_cb)
       : system_bus_(system_bus),
         devices_(std::move(devices)),
         adapter_(adapter),
         local_peripheral_(adapter_),
         gatt_service_root_object_manager(std::make_unique<RootObjectManager>(system_bus_, "/com/google/nearby/medium/ble/gatt")),
         gatt_manager_(std::make_unique<bluez::GattManager>(system_bus_, adapter_.GetObjectPath())),
-        server_cb_(std::make_shared<api::ble_v2::ServerGattConnectionCallback>(
+        server_cb_(std::make_shared<api::ble::ServerGattConnectionCallback>(
             std::move(server_cb))) {}
   ~GattServer() override = default;
 
-  absl::optional<api::ble_v2::GattCharacteristic> CreateCharacteristic(
+  absl::optional<api::ble::GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
-      api::ble_v2::GattCharacteristic::Permission permission,
-      api::ble_v2::GattCharacteristic::Property property) override;
+      api::ble::GattCharacteristic::Permission permission,
+      api::ble::GattCharacteristic::Property property) override;
   bool UpdateCharacteristic(
-      const api::ble_v2::GattCharacteristic& characteristic,
+      const api::ble::GattCharacteristic& characteristic,
       const nearby::ByteArray& value) override;
   absl::Status NotifyCharacteristicChanged(
-      const api::ble_v2::GattCharacteristic& characteristic, bool confirm,
+      const api::ble::GattCharacteristic& characteristic, bool confirm,
       const ByteArray& new_value) override;
   void Stop() override;
 
@@ -94,7 +94,7 @@ class GattServer : public api::ble_v2::GattServer {
   absl::flat_hash_map<Uuid, std::unique_ptr<bluez::GattProfile>> gatt_profiles_;
     ABSL_GUARDED_BY(profiles_mutex_)
   std::unique_ptr<bluez::GattManager> gatt_manager_;
-  std::shared_ptr<api::ble_v2::ServerGattConnectionCallback> server_cb_;
+  std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb_;
   absl::Mutex services_mutex_;
   absl::flat_hash_map<Uuid, std::unique_ptr<bluez::GattServiceServer>> services_
       ABSL_GUARDED_BY(services_mutex_);

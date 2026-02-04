@@ -108,9 +108,11 @@ bool BluetoothAdapter::SetName(absl::string_view name) {
   }
 }
 
-std::string BluetoothAdapter::GetMacAddress() const {
+MacAddress BluetoothAdapter::GetMacAddress() const {
   try {
-    return bluez_adapter_->Address();
+    MacAddress addr;
+    MacAddress::FromString(bluez_adapter_ -> Address(), addr);
+    return addr;
   } catch (const sdbus::Error &e) {
     DBUS_LOG_PROPERTY_GET_ERROR(bluez_adapter_, "Address", e);
     return {};

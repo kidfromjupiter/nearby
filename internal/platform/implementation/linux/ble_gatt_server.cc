@@ -14,7 +14,7 @@
 
 #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "absl/strings/substitute.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_server.h"
 #include "internal/platform/implementation/linux/bluez_gatt_manager.h"
 #include "internal/platform/implementation/linux/bluez_gatt_service_server.h"
@@ -24,16 +24,16 @@
 
 namespace nearby {
 namespace linux {
-absl::optional<api::ble_v2::GattCharacteristic>
+absl::optional<api::ble::GattCharacteristic>
 GattServer::CreateCharacteristic(
     const Uuid& service_uuid, const Uuid& characteristic_uuid,
-    api::ble_v2::GattCharacteristic::Permission permission,
-    api::ble_v2::GattCharacteristic::Property property) {
+    api::ble::GattCharacteristic::Permission permission,
+    api::ble::GattCharacteristic::Property property) {
   absl::MutexLock lock(&services_mutex_);
   if (services_.count(service_uuid) == 1) {
     if (services_[service_uuid]->AddCharacteristic(
             service_uuid, characteristic_uuid, permission, property)) {
-      api::ble_v2::GattCharacteristic characteristic{
+      api::ble::GattCharacteristic characteristic{
           characteristic_uuid, service_uuid, permission, property};
       return characteristic;
     }
@@ -78,7 +78,7 @@ GattServer::CreateCharacteristic(
     services_.insert({service_uuid, std::move(service)});
 
 
-    api::ble_v2::GattCharacteristic characteristic{
+    api::ble::GattCharacteristic characteristic{
         characteristic_uuid, service_uuid, permission, property};
     return characteristic;
   }
@@ -87,7 +87,7 @@ GattServer::CreateCharacteristic(
 }
 
 bool GattServer::UpdateCharacteristic(
-    const api::ble_v2::GattCharacteristic& characteristic,
+    const api::ble::GattCharacteristic& characteristic,
     const nearby::ByteArray& value) {
   std::shared_ptr<bluez::GattCharacteristicServer> chr = nullptr;
   {
@@ -114,7 +114,7 @@ bool GattServer::UpdateCharacteristic(
 }
 
 absl::Status GattServer::NotifyCharacteristicChanged(
-    const api::ble_v2::GattCharacteristic& characteristic, bool confirm,
+    const api::ble::GattCharacteristic& characteristic, bool confirm,
     const ByteArray& new_value) {
   std::shared_ptr<bluez::GattCharacteristicServer> chr = nullptr;
   {

@@ -14,7 +14,7 @@
 
 #include <vector>
 
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/bluez_le_advertisement.h"
 #include "internal/platform/logging.h"
@@ -33,8 +33,8 @@ namespace bluez {
   }
 LEAdvertisement::LEAdvertisement(
     sdbus::IConnection& system_bus, sdbus::ObjectPath path,
-    const api::ble_v2::BleAdvertisementData& advertising_data,
-    api::ble_v2::AdvertiseParameters advertise_set_parameters)
+    const api::ble::BleAdvertisementData& advertising_data,
+    api::ble::AdvertiseParameters advertise_set_parameters)
     : AdaptorInterfaces(system_bus, std::move(path)),
       is_extended_advertisement_(advertising_data.is_extended_advertisement),
       advertise_set_parameters_(advertise_set_parameters) {

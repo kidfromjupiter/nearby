@@ -40,7 +40,7 @@ class OutputStream : public nearby::OutputStream {
  public:
   explicit OutputStream(sdbus::UnixFd fd) : fd_(std::move(fd)){};
 
-  Exception Write(const ByteArray &data) override;
+  Exception Write(absl::string_view data) override;
   Exception Flush() override;
   Exception Close() override;
 

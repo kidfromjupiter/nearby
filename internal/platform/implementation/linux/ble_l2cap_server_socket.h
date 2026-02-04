@@ -22,13 +22,13 @@
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_l2cap_socket.h"
 #include "absl/container/flat_hash_map.h"
 namespace nearby {
 namespace linux {
 
-class BleL2capServerSocket final : public api::ble_v2::BleL2capServerSocket {
+class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
  public:
   BleL2capServerSocket();
   explicit BleL2capServerSocket(int psm);
@@ -37,7 +37,7 @@ class BleL2capServerSocket final : public api::ble_v2::BleL2capServerSocket {
   int GetPSM() const override { return psm_; }
   void SetPSM(int psm);
 
-  std::unique_ptr<api::ble_v2::BleL2capSocket> Accept() override
+  std::unique_ptr<api::ble::BleL2capSocket> Accept() override
       ABSL_LOCKS_EXCLUDED(mutex_);
   Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
 
@@ -56,7 +56,7 @@ class BleL2capServerSocket final : public api::ble_v2::BleL2capServerSocket {
 
   CancellationFlag stopped_;
   // <server_fd, <client_fd, peripheral_id>>
-  absl::flat_hash_map<int, std::pair<int,api::ble_v2::BlePeripheral::UniqueId>> accepted_fds_ ABSL_GUARDED_BY(mutex_);
+  absl::flat_hash_map<int, std::pair<int,api::ble::BlePeripheral::UniqueId>> accepted_fds_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace linux

@@ -83,7 +83,7 @@ class BluetoothOutputStream : public nearby::OutputStream {
   explicit BluetoothOutputStream(sdbus::UnixFd fd)
       : fd_(std::move(fd)), fd_raw_(fd_.get()) {}
 
-  Exception Write(const ByteArray &data) override;
+  Exception Write(absl::string_view data) override;
   Exception Flush() override { return {Exception::kSuccess}; }
   Exception Close() override;
 

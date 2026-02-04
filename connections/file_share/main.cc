@@ -396,7 +396,7 @@ class FileShareApp {
       LOG(ERROR) << "Invalid file name: " << path;
       return std::nullopt;
     }
-    nearby::InputFile input_file(path, static_cast<std::int64_t>(size));
+    nearby::InputFile input_file(path);
     return nearby::connections::Payload("", file_name, std::move(input_file));
   }
 
@@ -469,10 +469,6 @@ int main(int argc, char** argv) {
   nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
       ::nearby::connections::config_package_nearby::
           nearby_connections_feature::kEnableBleL2cap,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::
-          nearby_connections_feature::kEnableBleV2,
       true);
 
   Options options;

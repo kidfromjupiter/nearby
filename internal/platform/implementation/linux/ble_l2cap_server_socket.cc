@@ -37,7 +37,7 @@ BleL2capServerSocket::~BleL2capServerSocket() { Close(); }
 
 void BleL2capServerSocket::SetPSM(int psm) { psm_ = psm; }
 
-std::unique_ptr<api::ble_v2::BleL2capSocket> BleL2capServerSocket::Accept() {
+std::unique_ptr<api::ble::BleL2capSocket> BleL2capServerSocket::Accept() {
   if (stopped_.Cancelled()) {
     LOG(ERROR) << __func__ << ": server socket has been stopped";
     return nullptr;
@@ -144,7 +144,7 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleL2capServerSocket::Accept() {
 
   LOG(INFO) << __func__ << ": Connected to client_fd: " << client_fd;
   // Create a unique ID from the MAC address
-  api::ble_v2::BlePeripheral::UniqueId peripheral_id = 0;
+  api::ble::BlePeripheral::UniqueId peripheral_id = 0;
   for (int i = 0; i < 6; i++) {
     peripheral_id = (peripheral_id << 8) | client_addr.l2_bdaddr.b[i];
   }

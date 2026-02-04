@@ -61,7 +61,7 @@ class BleV2Socket : public api::ble::BleSocket {
   // GATT integration: Set callback for output stream writes
   // Callback should write to TX characteristic (notify remote)
   void SetWriteCallback(
-      absl::AnyInvocable<bool(const ByteArray& data)> callback) {
+      absl::AnyInvocable<bool(absl::string_view data)> callback) {
     output_stream_.SetWriteCallback(std::move(callback));
   }
 

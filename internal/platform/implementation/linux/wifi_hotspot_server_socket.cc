@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <cstring>
 
 #include "internal/platform/implementation/linux/wifi_hotspot_server_socket.h"
 #include "internal/platform/implementation/linux/wifi_hotspot_socket.h"
 #include "internal/platform/implementation/linux/wifi_medium.h"
+#include "internal/platform/service_address.h"
+#include "internal/platform/wifi_credential.h"
 
 namespace nearby {
 namespace linux {
@@ -109,6 +113,51 @@ Exception NetworkManagerWifiHotspotServerSocket::Close() {
   }
 
   return {Exception::kSuccess};
+}
+
+void NetworkManagerWifiHotspotServerSocket::PopulateHotspotCredentials(
+    HotspotCredentials& hotspot_credentials) {
+  // Get IPv4 addresses from the active hotspot connection
+  auto ip4addresses = active_conn_->GetIP4Addresses();
+  if (ip4addresses.empty()) {
+    LOG(ERROR) << __func__
+               << ": Could not find any IPv4 addresses for active connection "
+               << active_conn_->getObjectPath();
+    return;
+  }
+
+  // Get the server socket port
+  uint16_t port = GetPort();
+  if (port == 0) {
+    LOG(ERROR) << __func__ << ": Invalid port number";
+    return;
+  }
+
+  std::vector<ServiceAddress> service_addresses;
+
+  // Convert each IP address to binary format and create ServiceAddress
+  for (const auto& ip_str : ip4addresses) {
+    struct in_addr addr;
+    if (inet_pton(AF_INET, ip_str.c_str(), &addr) != 1) {
+      LOG(ERROR) << __func__ << ": Invalid IPv4 address: " << ip_str;
+      continue;
+    }
+
+    // Convert to vector of chars in network byte order
+    std::vector<char> addr_bytes(4);
+    std::memcpy(addr_bytes.data(), &addr.s_addr, 4);
+
+    service_addresses.push_back(
+        ServiceAddress{.address = std::move(addr_bytes), .port = port});
+  }
+
+  if (service_addresses.empty()) {
+    LOG(ERROR) << __func__ << ": No valid IPv4 addresses found";
+    return;
+  }
+
+  // Set the address candidates in the credentials
+  hotspot_credentials.SetAddressCandidates(std::move(service_addresses));
 }
 }  // namespace linux
 }  // namespace nearby

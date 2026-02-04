@@ -21,7 +21,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_v2_socket.h"
 #include "internal/platform/uuid.h"
 
@@ -36,15 +36,15 @@ class BleV2SocketAdapter {
   ~BleV2SocketAdapter() = default;
 
   // Create GATT server callbacks that will route data to/from sockets
-  api::ble_v2::ServerGattConnectionCallback CreateServerCallbacks();
+  api::ble::ServerGattConnectionCallback CreateServerCallbacks();
 
   // Register a socket for a specific remote device
   // When GATT writes come from this device, data is routed to this socket
-  void RegisterSocket(api::ble_v2::BlePeripheral::UniqueId device_id,
+  void RegisterSocket(api::ble::BlePeripheral::UniqueId device_id,
                      BleV2Socket* socket) ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Unregister a socket
-  void UnregisterSocket(api::ble_v2::BlePeripheral::UniqueId device_id)
+  void UnregisterSocket(api::ble::BlePeripheral::UniqueId device_id)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Get the RX characteristic UUID (for receiving data from remote)
@@ -56,7 +56,7 @@ class BleV2SocketAdapter {
  private:
   absl::Mutex mutex_;
   // Map of device ID to socket for routing incoming GATT writes
-  absl::flat_hash_map<api::ble_v2::BlePeripheral::UniqueId, BleV2Socket*>
+  absl::flat_hash_map<api::ble::BlePeripheral::UniqueId, BleV2Socket*>
       device_sockets_ ABSL_GUARDED_BY(mutex_);
 };
 

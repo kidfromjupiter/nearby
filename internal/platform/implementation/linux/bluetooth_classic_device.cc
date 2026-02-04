@@ -63,11 +63,13 @@ std::string BluetoothDevice::GetName() const {
   }
 }
 
-std::string BluetoothDevice::GetMacAddress() const {
+MacAddress BluetoothDevice::GetMacAddress() const {
   auto device = device_;
   if (device == nullptr) {
     absl::ReaderMutexLock l(&properties_mutex_);
-    return last_known_name_;
+    MacAddress addr;
+    MacAddress::FromString("00:00:00:00:00:00", addr);
+    return addr;
   }
 
   try {
@@ -76,10 +78,12 @@ std::string BluetoothDevice::GetMacAddress() const {
       absl::MutexLock l(&properties_mutex_);
       MacAddress::FromString(addr, last_known_address_);
     }
-    return addr;
+    return last_known_address_;
   } catch (const sdbus::Error &e) {
     DBUS_LOG_PROPERTY_GET_ERROR(device, "Address", e);
-    return std::string();
+    MacAddress addr;
+    MacAddress::FromString("00:00:00:00:00:00", addr);
+    return addr;
   }
 }
 

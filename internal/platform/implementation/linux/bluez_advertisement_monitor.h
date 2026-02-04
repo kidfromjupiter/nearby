@@ -19,7 +19,7 @@
 #include <sdbus-c++/StandardInterfaces.h>
 
 #include "absl/strings/string_view.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/advertisement_monitor_server.h"
@@ -38,15 +38,15 @@ class AdvertisementMonitor final
   AdvertisementMonitor& operator=(AdvertisementMonitor&&) = delete;
 
   AdvertisementMonitor(sdbus::IConnection& system_bus, Uuid service_uuid,
-                       api::ble_v2::TxPowerLevel tx_power_level,
+                       api::ble::TxPowerLevel tx_power_level,
                        absl::string_view type,
                        std::shared_ptr<BluetoothDevices> devices,
-                       api::ble_v2::BleMedium::ScanCallback scan_callback);
+                       api::ble::BleMedium::ScanCallback scan_callback);
   AdvertisementMonitor(sdbus::IConnection& system_bus, Uuid service_uuid,
-                       api::ble_v2::TxPowerLevel tx_power_level,
+                       api::ble::TxPowerLevel tx_power_level,
                        absl::string_view type,
                        std::shared_ptr<BluetoothDevices> devices,
-                       api::ble_v2::BleMedium::ScanningCallback scan_callback);
+                       api::ble::BleMedium::ScanningCallback scan_callback);
   ~AdvertisementMonitor() { unregisterAdaptor(); }
 
  private:
@@ -83,12 +83,12 @@ class AdvertisementMonitor final
   };
 
   std::shared_ptr<BluetoothDevices> devices_;
-  api::ble_v2::BleMedium::ScanCallback scan_callback_;
+  api::ble::BleMedium::ScanCallback scan_callback_;
   absl::AnyInvocable<void(absl::Status)> start_scanning_result_callback_;
 
   std::string type_;
   Uuid service_uuid_;
-  api::ble_v2::TxPowerLevel tx_power_level_;
+  api::ble::TxPowerLevel tx_power_level_;
 };
 }  // namespace bluez
 }  // namespace linux

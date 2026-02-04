@@ -190,13 +190,13 @@ BleL2capOutputStream::BleL2capOutputStream(int fd) : fd_(fd) {}
 
 BleL2capOutputStream::~BleL2capOutputStream() { Close(); }
 
-Exception BleL2capOutputStream::Write(const ByteArray& data) {
+Exception BleL2capOutputStream::Write(absl::string_view data) {
   int fd = fd_.load();
   if (fd < 0) return Exception{Exception::kIo};
 
   auto poller = Poller::CreateOutputPoller(fd);
 
-  if (data.Empty()) {
+  if (data.empty()) {
     return {Exception::kSuccess};
   }
 

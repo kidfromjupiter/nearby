@@ -65,17 +65,17 @@ sdbus::ObjectPath advertisement_monitor_path(absl::string_view uuid) {
       absl::StrReplaceAll(uuid, {{"-", "_"}}));
 }
 
-int16_t TxPowerLevelDbm(api::ble_v2::TxPowerLevel level) {
+int16_t TxPowerLevelDbm(api::ble::TxPowerLevel level) {
   switch (level) {
-    case api::ble_v2::TxPowerLevel::kUnknown:
+    case api::ble::TxPowerLevel::kUnknown:
       return 0;
-    case api::ble_v2::TxPowerLevel::kUltraLow:
+    case api::ble::TxPowerLevel::kUltraLow:
       return -3;
-    case api::ble_v2::TxPowerLevel::kLow:
+    case api::ble::TxPowerLevel::kLow:
       return 0;
-    case api::ble_v2::TxPowerLevel::kMedium:
+    case api::ble::TxPowerLevel::kMedium:
       return 5;
-    case api::ble_v2::TxPowerLevel::kHigh:
+    case api::ble::TxPowerLevel::kHigh:
       return 10;  // Increased from 6 to 10 dBm (maximum for most adapters)
   }
 }

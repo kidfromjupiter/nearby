@@ -184,7 +184,7 @@ void BleV2Socket::SetGattServer(
         
         // Notify remote device via TX characteristic
         absl::Status status = gatt_server_->NotifyCharacteristicChanged(
-            tx_char_, /*confirm=*/false, data);
+            tx_char_, /*confirm=*/false, ByteArray::FromStringView(data));
         
         if (!status.ok()) {
           LOG(WARNING) << "Failed to notify TX characteristic: "

@@ -56,7 +56,7 @@
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/payload_id.h"
 #include "scheduled_executor.h"
-#include "wifi_direct.h"
+// #include "wifi_direct.h"
 #include "wifi_hotspot.h"
 
 namespace nearby {
@@ -158,15 +158,21 @@ ImplementationPlatform::CreateConditionVariable(api::Mutex *mutex) {
   return std::make_unique<linux::ConditionVariable>(mutex);
 }
 
+std::unique_ptr<AppLifecycleMonitor>
+ImplementationPlatform::CreateAppLifecycleMonitor(
+    std::function<void(AppLifecycleMonitor::AppLifecycleState)>
+        state_updated_callback) {
+  return nullptr;
+}
 std::unique_ptr<api::InputFile> ImplementationPlatform::CreateInputFile(
-    PayloadId id, std::int64_t total_size) {
+    PayloadId id) {
   auto path = GetDownloadPath(std::to_string(id));
-  return nearby::shared::IOFile::CreateInputFile(path, total_size);
+  return nearby::shared::IOFile::CreateInputFile(path);
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    const std::string &file_path, size_t size) {
-  return nearby::shared::IOFile::CreateInputFile(file_path, size);
+    const std::string &file_path) {
+  return nearby::shared::IOFile::CreateInputFile(file_path);
 }
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
@@ -240,15 +246,8 @@ ImplementationPlatform::CreateBluetoothClassicMedium(
       dynamic_cast<linux::BluetoothAdapter &>(adapter));
 }
 
-std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(
+std::unique_ptr<api::ble::BleMedium> ImplementationPlatform::CreateBleMedium(
     BluetoothAdapter &adapter) {
-  return nullptr;
-}
-
-std::unique_ptr<api::ble_v2::BleMedium>
-ImplementationPlatform::CreateBleV2Medium(api::BluetoothAdapter &adapter) {
-  // return nullptr;
-  // TODO: Enable BLEv2 once BlueZ support is added.
   return std::make_unique<linux::BleV2Medium>(
       dynamic_cast<linux::BluetoothAdapter &>(adapter));
 }
@@ -329,17 +328,17 @@ ImplementationPlatform::CreateWifiHotspotMedium() {
 std::unique_ptr<api::WifiDirectMedium>
 ImplementationPlatform::CreateWifiDirectMedium() {
   return nullptr;
-  auto nm =
-      std::make_shared<linux::networkmanager::NetworkManager>(linux::getSystemBusConnection());
-  auto wifiMedium = createWifiMedium(nm);
-
-  if (wifiMedium == nullptr) {
-    LOG(ERROR) << __func__ << ": Could not create a WiFi medium";
-    return nullptr;
-  }
-
-  return std::make_unique<linux::NetworkManagerWifiDirectMedium>(
-      nm, std::move(wifiMedium));
+  // auto nm =
+  //     std::make_shared<linux::networkmanager::NetworkManager>(linux::getSystemBusConnection());
+  // auto wifiMedium = createWifiMedium(nm);
+  //
+  // if (wifiMedium == nullptr) {
+  //   LOG(ERROR) << __func__ << ": Could not create a WiFi medium";
+  //   return nullptr;
+  // }
+  //
+  // return std::make_unique<linux::NetworkManagerWifiDirectMedium>(
+  //     nm, std::move(wifiMedium));
 }
 
 std::unique_ptr<api::Timer> ImplementationPlatform::CreateTimer() {

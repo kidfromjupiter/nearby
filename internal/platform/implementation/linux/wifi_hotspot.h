@@ -40,16 +40,23 @@ class NetworkManagerWifiHotspotMedium : public api::WifiHotspotMedium {
         network_manager_(std::move(network_manager)) {}
   
   bool IsInterfaceValid() const override { return true; }
-  std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
+    virtual std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
+        const ServiceAddress& service_address,
+        CancellationFlag* cancellation_flag) {
+    return ConnectToService(
+      std::string(service_address.address.begin(), service_address.address.end())
+    , service_address.port, cancellation_flag) ;
+  };
+    std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
       absl::string_view ip_address, int port,
-      CancellationFlag *cancellation_flag) override;
+      CancellationFlag *cancellation_flag);
   std::unique_ptr<api::WifiHotspotServerSocket> ListenForService(
       int port) override;
 
   bool StartWifiHotspot(HotspotCredentials *hotspot_credentials) override;
   bool StopWifiHotspot() override;
 
-  bool ConnectWifiHotspot(HotspotCredentials *hotspot_credentials) override;
+  bool ConnectWifiHotspot(const HotspotCredentials& hotspot_credentials) override;
   bool DisconnectWifiHotspot() override;
 
   absl::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange()

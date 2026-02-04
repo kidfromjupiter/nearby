@@ -14,7 +14,7 @@
 
 #include "internal/platform/implementation/linux/bluez_gatt_service_server.h"
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_server.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/gatt_characteristic_server.h"
 #include "internal/platform/uuid.h"
@@ -24,10 +24,10 @@ namespace linux {
 namespace bluez {
 bool GattServiceServer::AddCharacteristic(
     const Uuid &service_uuid, const Uuid &characteristic_uuid,
-    api::ble_v2::GattCharacteristic::Permission permission,
-    api::ble_v2::GattCharacteristic::Property property) {
+    api::ble::GattCharacteristic::Permission permission,
+    api::ble::GattCharacteristic::Property property) {
   absl::MutexLock lock(&characterstics_mutex_);
-  api::ble_v2::GattCharacteristic characteristic{
+  api::ble::GattCharacteristic characteristic{
       characteristic_uuid, service_uuid, permission, property};
   auto count = characteristics_.size();
   std::shared_ptr<GattCharacteristicServer> chr =

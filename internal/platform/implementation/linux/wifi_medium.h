@@ -42,8 +42,30 @@ class NetworkManagerWifiMedium
       public sdbus::ProxyInterfaces<
           org::freedesktop::NetworkManager::Device::Wireless_proxy,
           sdbus::Properties_proxy> {
+
  public:
-  NetworkManagerWifiMedium(const NetworkManagerWifiMedium &) = delete;
+
+    // Possible authentication types for a WiFi network.
+    enum class WifiAuthType {
+        // WiFi Authentication type; either none (non-secured a.k.a. open) link, or
+        // WPA PSK (WiFi Protected Access PreShared Key), or
+        //   see https://en.wikipedia.org/wiki/Wi-Fi_Protected_Access
+        // WEP (Wired Equivalent Privacy);
+        //   see https://en.wikipedia.org/wiki/Wired_Equivalent_Privacy
+        kUnknown = 0,
+        kOpen = 1,
+        kWpaPsk = 2,
+        kWep = 3,
+      };
+
+    // Possible statuses of a device's connection to a WiFi network.
+    enum class WifiConnectionStatus {
+        kUnknown = 0,
+        kConnected = 1,
+        kConnectionFailure = 2,
+        kAuthFailure = 3,
+      };
+    NetworkManagerWifiMedium(const NetworkManagerWifiMedium &) = delete;
   NetworkManagerWifiMedium(NetworkManagerWifiMedium &&) = delete;
   NetworkManagerWifiMedium &operator=(const NetworkManagerWifiMedium &) =
       delete;
@@ -62,30 +84,18 @@ class NetworkManagerWifiMedium
 
   ~NetworkManagerWifiMedium() override { unregisterProxy(); }
 
-  class ScanResultCallback : public api::WifiMedium::ScanResultCallback {
-   public:
-    void OnScanResults(
-        const std::vector<api::WifiScanResult> &scan_results) override {
-      // TODO: Add implementation at some point
-    }
-  };
 
   bool IsInterfaceValid() const override { return true; };
   api::WifiCapability &GetCapability() override;
   api::WifiInformation &GetInformation() override;
-  bool Scan(
-      const api::WifiMedium::ScanResultCallback &scan_result_callback) override;
 
   std::shared_ptr<NetworkManagerAccessPoint> SearchBySSID(
       absl::string_view ssid, absl::Duration scan_timeout = absl::Seconds(15))
       ABSL_LOCKS_EXCLUDED(known_access_points_lock_);
 
-  api::WifiConnectionStatus ConnectToNetwork(
+  WifiConnectionStatus ConnectToNetwork(
       absl::string_view ssid, absl::string_view password,
-      api::WifiAuthType auth_type) override;
-
-  bool VerifyInternetConnectivity() override;
-  std::string GetIpAddress() override;
+      WifiAuthType auth_type);
 
   std::unique_ptr<networkmanager::ActiveConnection> GetActiveConnection();
 
@@ -125,10 +135,6 @@ class NetworkManagerWifiMedium
                       std::shared_ptr<NetworkManagerAccessPoint>>
       known_access_points_ ABSL_GUARDED_BY(known_access_points_lock_);
 
-  absl::Mutex scan_result_callback_lock_;
-  std::optional<
-      std::reference_wrapper<const api::WifiMedium::ScanResultCallback>>
-      scan_result_callback_ ABSL_GUARDED_BY(scan_result_callback_lock_);
 
   absl::Mutex last_scan_lock_;
   std::int64_t last_scan_ ABSL_GUARDED_BY(last_scan_lock_);

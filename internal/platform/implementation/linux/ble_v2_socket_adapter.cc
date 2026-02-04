@@ -17,7 +17,7 @@
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_v2_socket.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/uuid.h"
@@ -43,42 +43,42 @@ Uuid BleV2SocketAdapter::GetTxCharacteristicUuid() {
 }
 
 void BleV2SocketAdapter::RegisterSocket(
-    api::ble_v2::BlePeripheral::UniqueId device_id, BleV2Socket* socket) {
+    api::ble::BlePeripheral::UniqueId device_id, BleV2Socket* socket) {
   absl::MutexLock lock(&mutex_);
   device_sockets_[device_id] = socket;
   LOG(INFO) << "Registered socket for device " << device_id;
 }
 
 void BleV2SocketAdapter::UnregisterSocket(
-    api::ble_v2::BlePeripheral::UniqueId device_id) {
+    api::ble::BlePeripheral::UniqueId device_id) {
   absl::MutexLock lock(&mutex_);
   device_sockets_.erase(device_id);
   LOG(INFO) << "Unregistered socket for device " << device_id;
 }
 
-api::ble_v2::ServerGattConnectionCallback
+api::ble::ServerGattConnectionCallback
 BleV2SocketAdapter::CreateServerCallbacks() {
-  api::ble_v2::ServerGattConnectionCallback callbacks;
+  api::ble::ServerGattConnectionCallback callbacks;
 
   // Handle subscription to TX characteristic (remote wants to receive data)
   callbacks.characteristic_subscription_cb =
-      [](const api::ble_v2::GattCharacteristic& characteristic) {
+      [](const api::ble::GattCharacteristic& characteristic) {
         LOG(INFO) << "Remote subscribed to characteristic: "
                           << std::string(characteristic.uuid);
       };
 
   // Handle unsubscription
   callbacks.characteristic_unsubscription_cb =
-      [](const api::ble_v2::GattCharacteristic& characteristic) {
+      [](const api::ble::GattCharacteristic& characteristic) {
         LOG(INFO) << "Remote unsubscribed from characteristic: "
                           << std::string(characteristic.uuid);
       };
 
   // Handle read requests (not typically used for socket data transfer)
   callbacks.on_characteristic_read_cb =
-      [](api::ble_v2::BlePeripheral::UniqueId remote_device_id,
-         const api::ble_v2::GattCharacteristic& characteristic, int offset,
-         api::ble_v2::ServerGattConnectionCallback::ReadValueCallback
+      [](api::ble::BlePeripheral::UniqueId remote_device_id,
+         const api::ble::GattCharacteristic& characteristic, int offset,
+         api::ble::ServerGattConnectionCallback::ReadValueCallback
              callback) {
         LOG(INFO) << "Read request from device " << remote_device_id
                           << " on characteristic "
@@ -89,10 +89,10 @@ BleV2SocketAdapter::CreateServerCallbacks() {
 
   // Handle write requests - THIS IS WHERE DATA COMES IN
   callbacks.on_characteristic_write_cb =
-      [this](api::ble_v2::BlePeripheral::UniqueId remote_device_id,
-             const api::ble_v2::GattCharacteristic& characteristic, int offset,
+      [this](api::ble::BlePeripheral::UniqueId remote_device_id,
+             const api::ble::GattCharacteristic& characteristic, int offset,
              absl::string_view data,
-             api::ble_v2::ServerGattConnectionCallback::WriteValueCallback
+             api::ble::ServerGattConnectionCallback::WriteValueCallback
                  callback) {
         LOG(INFO) << "Write request from device " << remote_device_id
                           << " on characteristic "

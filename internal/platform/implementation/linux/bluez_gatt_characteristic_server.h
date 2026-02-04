@@ -29,7 +29,7 @@
 
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/gatt_characteristic_server.h"
@@ -52,8 +52,8 @@ class GattCharacteristicServer final
   GattCharacteristicServer(
       sdbus::IConnection &system_bus,
       const sdbus::ObjectPath &service_object_path, size_t num,
-      const api::ble_v2::GattCharacteristic &characteristic,
-      std::shared_ptr<api::ble_v2::ServerGattConnectionCallback> server_cb,
+      const api::ble::GattCharacteristic &characteristic,
+      std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb,
       std::shared_ptr<BluetoothDevices> devices)
       : AdaptorInterfaces(system_bus, bluez::gatt_characteristic_path(
                                           service_object_path, num)),
@@ -103,8 +103,8 @@ class GattCharacteristicServer final
   }
 
   std::shared_ptr<BluetoothDevices> devices_;
-  std::shared_ptr<api::ble_v2::ServerGattConnectionCallback> server_cb_;
-  api::ble_v2::GattCharacteristic characteristic_;
+  std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb_;
+  api::ble::GattCharacteristic characteristic_;
 
   // Set by `GattServer::UpdateCharacteristic()`
   absl::Mutex static_value_mutex_;

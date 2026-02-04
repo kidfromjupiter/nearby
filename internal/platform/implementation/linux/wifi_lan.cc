@@ -264,9 +264,87 @@ std::unique_ptr<api::WifiLanServerSocket> WifiLanMedium::ListenForService(
                                                network_manager_);
 }
 
-absl::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange() {
-  return absl::nullopt;
+namespace {
+
+bool IsIPv4LinkLocal(const std::string& ip_address) {
+  struct in_addr addr;
+  if (inet_pton(AF_INET, ip_address.c_str(), &addr) != 1) {
+    return false;
+  }
+  // Link-local range: 169.254.0.0/16
+  uint32_t ip = ntohl(addr.s_addr);
+  return (ip & 0xFFFF0000) == 0xA9FE0000;
 }
 
+}  // namespace
+
+api::UpgradeAddressInfo WifiLanMedium::GetUpgradeAddressCandidates(
+    const api::WifiLanServerSocket& server_socket) {
+  api::UpgradeAddressInfo result;
+  uint16_t port = server_socket.GetPort();
+  std::vector<ServiceAddress> ipv4_addresses;
+
+  std::vector<sdbus::ObjectPath> connection_paths;
+  try {
+    connection_paths = network_manager_->ActiveConnections();
+  } catch (const sdbus::Error& e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(network_manager_, "ActiveConnections", e);
+    return result;
+  }
+
+  for (auto& path : connection_paths) {
+    auto active_connection =
+        std::make_unique<networkmanager::ActiveConnection>(system_bus_, path);
+    std::string conn_type;
+    try {
+      conn_type = active_connection->Type();
+    } catch (const sdbus::Error& e) {
+      DBUS_LOG_PROPERTY_GET_ERROR(active_connection, "Type", e);
+      continue;
+    }
+
+    // Only use WiFi and Ethernet interfaces for upgrade
+    if (conn_type != "802-11-wireless" && conn_type != "802-3-ethernet") {
+      continue;
+    }
+
+    bool has_ipv4_address = false;
+    // TODO: Add IPv6 support when IP6Config interface is available
+
+    // Get IPv4 addresses
+    auto ip4addresses = active_connection->GetIP4Addresses();
+    for (const auto& ip_str : ip4addresses) {
+      // Filter out link-local addresses
+      if (IsIPv4LinkLocal(ip_str)) {
+        continue;
+      }
+
+      struct in_addr addr;
+      if (inet_pton(AF_INET, ip_str.c_str(), &addr) != 1) {
+        LOG(ERROR) << __func__ << ": Invalid IPv4 address: " << ip_str;
+        continue;
+      }
+
+      // Convert to vector of chars in network byte order
+      std::vector<char> addr_bytes(4);
+      std::memcpy(addr_bytes.data(), &addr.s_addr, 4);
+      
+      ipv4_addresses.push_back(
+          ServiceAddress{.address = std::move(addr_bytes), .port = port});
+      has_ipv4_address = true;
+    }
+
+    if (has_ipv4_address) {
+      result.num_interfaces++;
+    }
+  }
+
+  // Append IPv4 addresses to the result
+  result.address_candidates.insert(result.address_candidates.end(),
+                                   ipv4_addresses.begin(),
+                                   ipv4_addresses.end());
+
+  return result;
+};
 }  // namespace linux
 }  // namespace nearby

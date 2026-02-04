@@ -49,9 +49,16 @@ class WifiLanMedium : public api::WifiLanMedium {
     return ConnectToService(remote_service_info.GetIPAddress(),
                             remote_service_info.GetPort(), cancellation_flag);
   };
-  std::unique_ptr<api::WifiLanSocket> ConnectToService(
+    std::unique_ptr<api::WifiLanSocket> ConnectToService(
+        const ServiceAddress &sa,
+        CancellationFlag *cancellation_flag) override {
+        return ConnectToService(std::string(sa.address.begin(), sa.address.end()),
+                                sa.port, cancellation_flag);
+    };
+    std::unique_ptr<api::WifiLanSocket> ConnectToService(
       const std::string &ip_address, int port,
-      CancellationFlag *cancellation_flag) override;
+      CancellationFlag *cancellation_flag);
+
   std::unique_ptr<api::WifiLanServerSocket> ListenForService(
       int port = 0) override;
   absl::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange()
@@ -59,7 +66,13 @@ class WifiLanMedium : public api::WifiLanMedium {
     return std::nullopt;
   }
 
- private:
+    // Returns the list of ip address candidates that can be used to connect to
+    // this device for bandwidth upgrade.
+    // `server_socket` is the socket that is currently listening for service
+    // requests.
+    api::UpgradeAddressInfo GetUpgradeAddressCandidates(
+        const api::WifiLanServerSocket& server_socket) override;
+private:
   std::shared_ptr<sdbus::IConnection> system_bus_;  
   std::shared_ptr<networkmanager::NetworkManager> network_manager_;
 
@@ -73,6 +86,7 @@ class WifiLanMedium : public api::WifiLanMedium {
   absl::Mutex service_browsers_mutex_;
   absl::flat_hash_map<std::string, std::unique_ptr<avahi::ServiceBrowser>>
       service_browsers_ ABSL_GUARDED_BY(service_browsers_mutex_);
+
 };
 }  // namespace linux
 }  // namespace nearby

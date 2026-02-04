@@ -55,7 +55,7 @@ class BluetoothAdapter : public api::BluetoothAdapter {
 
   bool SetName(absl::string_view name) override;
   bool SetName(absl::string_view name, bool persist) override;
-  std::string GetMacAddress() const override;
+  MacAddress GetMacAddress() const override;
 
   bool RemoveDeviceByObjectPath(const sdbus::ObjectPath &device_object_path) {
     try {

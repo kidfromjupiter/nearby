@@ -36,10 +36,13 @@ class NetworkManagerWifiHotspotServerSocket
         network_manager_(std::move(network_manager)),
         closed_(false) {}
 
-  std::string GetIPAddress() const override;
+  std::string GetIPAddress() const;
   int GetPort() const override;
   std::unique_ptr<api::WifiHotspotSocket> Accept() override;
   Exception Close() override;
+
+  void PopulateHotspotCredentials(
+      HotspotCredentials& hotspot_credentials) override;
 
  private:
   sdbus::UnixFd fd_;

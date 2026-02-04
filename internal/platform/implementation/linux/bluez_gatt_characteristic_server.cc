@@ -17,7 +17,7 @@
 #include <sdbus-c++/Types.h>
 
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_server.h"
 #include "internal/platform/logging.h"
 
@@ -173,8 +173,8 @@ void GattCharacteristicServer::WriteValue(
 
 void GattCharacteristicServer::StartNotify() {
   if ((characteristic_.property |
-       api::ble_v2::GattCharacteristic::Property::kNotify) ==
-      api::ble_v2::GattCharacteristic::Property::kNotify) {
+       api::ble::GattCharacteristic::Property::kNotify) ==
+      api::ble::GattCharacteristic::Property::kNotify) {
     if (notify_sessions_.fetch_add(1) == 0) {
       if (server_cb_->characteristic_subscription_cb != nullptr) {
         server_cb_->characteristic_subscription_cb(characteristic_);
@@ -188,8 +188,8 @@ void GattCharacteristicServer::StartNotify() {
 
 void GattCharacteristicServer::StopNotify() {
   if ((characteristic_.property |
-       api::ble_v2::GattCharacteristic::Property::kNotify) ==
-      api::ble_v2::GattCharacteristic::Property::kNotify) {
+       api::ble::GattCharacteristic::Property::kNotify) ==
+      api::ble::GattCharacteristic::Property::kNotify) {
     if (notify_sessions_.fetch_sub(0) == 1) {
       if (server_cb_->characteristic_unsubscription_cb != nullptr) {
         server_cb_->characteristic_unsubscription_cb(characteristic_);
@@ -206,31 +206,31 @@ std::vector<std::string> GattCharacteristicServer::Flags() {
   std::vector<std::string> flags;
 
   if ((characteristic.permission &
-       api::ble_v2::GattCharacteristic::Permission::kRead) ==
-          api::ble_v2::GattCharacteristic::Permission::kRead ||
+       api::ble::GattCharacteristic::Permission::kRead) ==
+          api::ble::GattCharacteristic::Permission::kRead ||
       (characteristic.property &
-       api::ble_v2::GattCharacteristic::Property::kRead) ==
-          api::ble_v2::GattCharacteristic::Property::kRead)
+       api::ble::GattCharacteristic::Property::kRead) ==
+          api::ble::GattCharacteristic::Property::kRead)
     flags.push_back("read");
 
   if ((characteristic.permission &
-       api::ble_v2::GattCharacteristic::Permission::kWrite) ==
-          api::ble_v2::GattCharacteristic::Permission::kWrite ||
+       api::ble::GattCharacteristic::Permission::kWrite) ==
+          api::ble::GattCharacteristic::Permission::kWrite ||
       (characteristic.property &
-       api::ble_v2::GattCharacteristic::Property::kWrite) ==
-          api::ble_v2::GattCharacteristic::Property::kWrite) {
+       api::ble::GattCharacteristic::Property::kWrite) ==
+          api::ble::GattCharacteristic::Property::kWrite) {
     flags.push_back("write");
     flags.push_back("write-without-response");
   }
 
   if ((characteristic.property &
-       api::ble_v2::GattCharacteristic::Property::kIndicate) ==
-      api::ble_v2::GattCharacteristic::Property::kIndicate)
+       api::ble::GattCharacteristic::Property::kIndicate) ==
+      api::ble::GattCharacteristic::Property::kIndicate)
     flags.push_back("indicate");
 
   if ((characteristic.property &
-       api::ble_v2::GattCharacteristic::Property::kNotify) ==
-      api::ble_v2::GattCharacteristic::Property::kNotify)
+       api::ble::GattCharacteristic::Property::kNotify) ==
+      api::ble::GattCharacteristic::Property::kNotify)
     flags.push_back("notify");
 
   return flags;

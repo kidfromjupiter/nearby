@@ -49,9 +49,9 @@ class BluetoothDevices final {
 
   std::shared_ptr<BluetoothDevice> get_device_by_path(const sdbus::ObjectPath &)
       ABSL_LOCKS_EXCLUDED(devices_by_path_lock_);
-  std::shared_ptr<BluetoothDevice> get_device_by_address(const std::string &);
+  std::shared_ptr<BluetoothDevice> get_device_by_address(const MacAddress &);
   std::shared_ptr<BluetoothDevice> get_device_by_unique_id(
-      api::ble_v2::BlePeripheral::UniqueId id);
+      api::ble::BlePeripheral::UniqueId id);
 
   std::shared_ptr<MonitoredBluetoothDevice> add_new_device(sdbus::ObjectPath)
       ABSL_LOCKS_EXCLUDED(devices_by_path_lock_);

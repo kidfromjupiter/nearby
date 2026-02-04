@@ -80,24 +80,6 @@ api::WifiInformation &NetworkManagerWifiMedium::GetInformation() {
     networkmanager::ObjectManager manager(system_bus_);
     auto ip4config = manager.GetIp4Config(active_access_point->getObjectPath());
 
-    if (ip4config != nullptr) {
-      auto address_data = ip4config->AddressData();
-      if (!address_data.empty()) {
-        std::string address = address_data[0]["address"];
-        information_.ip_address_dot_decimal = address;
-
-        struct in_addr addr {};
-        inet_aton(address.c_str(), &addr);
-
-        char addr_bytes[4];
-        memcpy(addr_bytes, &addr.s_addr, sizeof(addr_bytes));
-        information_.ip_address_4_bytes = std::string(addr_bytes, 4);
-      }
-    } else {
-      LOG(ERROR) << __func__ << ": " << getObjectPath()
-                         << ": Could not find the Ip4Config object for "
-                         << active_access_point->getObjectPath();
-    }
   } catch (const sdbus::Error &e) {
     LOG(ERROR)
         << __func__ << ": " << getObjectPath() << ": Got error '" << e.getName()
@@ -124,20 +106,6 @@ void NetworkManagerWifiMedium::onPropertiesChanged(
   }
 }
 
-bool NetworkManagerWifiMedium::Scan(
-    const api::WifiMedium::ScanResultCallback &scan_result_callback) {
-  // absl::MutexLock l(&scan_result_callback_lock_);
-  // scan_result_callback_ = scan_result_callback;
-
-  try {
-    RequestScan({});
-  } catch (const sdbus::Error &e) {
-    scan_result_callback_ = std::nullopt;
-    DBUS_LOG_METHOD_CALL_ERROR(&getProxy(), "RequestScan", e);
-    return false;
-  }
-  return false;
-}
 
 std::shared_ptr<NetworkManagerAccessPoint>
 NetworkManagerWifiMedium::SearchBySSIDNoScan(
@@ -208,32 +176,32 @@ NetworkManagerWifiMedium::SearchBySSID(absl::string_view ssid,
 }
 
 static inline std::pair<std::optional<std::string>, std::string>
-AuthAlgAndKeyMgmt(api::WifiAuthType auth_type) {
+AuthAlgAndKeyMgmt(NetworkManagerWifiMedium::WifiAuthType auth_type) {
   switch (auth_type) {
-    case api::WifiAuthType::kUnknown:
-    case api::WifiAuthType::kOpen:
+    case NetworkManagerWifiMedium::WifiAuthType::kUnknown:
+    case NetworkManagerWifiMedium::WifiAuthType::kOpen:
       return {"open", "none"};
-    case api::WifiAuthType::kWpaPsk:
+    case NetworkManagerWifiMedium::WifiAuthType::kWpaPsk:
       return {std::nullopt, "wpa-psk"};
-    case api::WifiAuthType::kWep:
+    case NetworkManagerWifiMedium::WifiAuthType::kWep:
       return {"none", "wep"};
   }
 }
 
-api::WifiConnectionStatus NetworkManagerWifiMedium::ConnectToNetwork(
+NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::ConnectToNetwork(
     absl::string_view ssid, absl::string_view password,
-    api::WifiAuthType auth_type) {
+    NetworkManagerWifiMedium::WifiAuthType auth_type) {
   auto ap = SearchBySSID(ssid);
   if (ap == nullptr) {
     LOG(ERROR) << __func__ << ": " << getObjectPath()
                        << ": Couldn't find SSID " << ssid;
-    return api::WifiConnectionStatus::kConnectionFailure;
+    return NetworkManagerWifiMedium::WifiConnectionStatus::kConnectionFailure;
   }
 
   auto connection_id = NewUuidStr();
   if (!connection_id.has_value()) {
     LOG(ERROR) << __func__ << ": could not generate a connection UUID";
-    return api::WifiConnectionStatus::kUnknown;
+    return NetworkManagerWifiMedium::WifiConnectionStatus::kUnknown;
   }
 
   auto [auth_alg, key_mgmt] = AuthAlgAndKeyMgmt(auth_type);
@@ -273,7 +241,7 @@ api::WifiConnectionStatus NetworkManagerWifiMedium::ConnectToNetwork(
     active_conn_path = std::move(acp);
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(this, "AddAndActivateConnection2", e);
-    return api::WifiConnectionStatus::kUnknown;
+    return NetworkManagerWifiMedium::WifiConnectionStatus::kUnknown;
   }
 
   LOG(INFO) << __func__ << ": " << getObjectPath()
@@ -287,7 +255,7 @@ api::WifiConnectionStatus NetworkManagerWifiMedium::ConnectToNetwork(
         << ": timed out while waiting for connection " << active_conn_path
         << " to be activated, last NMActiveConnectionStateReason: "
         << reason->ToString();
-    return api::WifiConnectionStatus::kUnknown;
+    return NetworkManagerWifiMedium::WifiConnectionStatus::kUnknown;
   }
 
   if (reason.has_value()) {
@@ -301,27 +269,13 @@ api::WifiConnectionStatus NetworkManagerWifiMedium::ConnectToNetwork(
         reason->value ==
             networkmanager::ActiveConnection::ActiveConnectionStateReason::
                 kStateReasonLoginFailed)
-      return api::WifiConnectionStatus::kAuthFailure;
+      return NetworkManagerWifiMedium::WifiConnectionStatus::kAuthFailure;
   }
 
   LOG(INFO) << __func__ << ": Activated connection " << connection_path;
-  return api::WifiConnectionStatus::kConnected;
+  return NetworkManagerWifiMedium::WifiConnectionStatus::kConnected;
 }
 
-bool NetworkManagerWifiMedium::VerifyInternetConnectivity() {
-  try {
-    std::uint32_t connectivity = network_manager_->CheckConnectivity();
-    return connectivity == 4;  // NM_CONNECTIVITY_FULL
-  } catch (const sdbus::Error &e) {
-    DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "CheckConnectivity", e);
-    return false;
-  }
-}
-
-std::string NetworkManagerWifiMedium::GetIpAddress() {
-  GetInformation();
-  return information_.ip_address_dot_decimal;
-}
 
 std::unique_ptr<networkmanager::ActiveConnection>
 NetworkManagerWifiMedium::GetActiveConnection() {

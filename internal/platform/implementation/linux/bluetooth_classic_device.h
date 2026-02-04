@@ -29,7 +29,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/base/observer_list.h"
-// #include "internal/platform/implementation/ble_v2.h"
+// #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/linux/bluez_device.h"
 #include "internal/platform/implementation/linux/dbus.h"
@@ -51,10 +51,10 @@ class BluetoothDevice : public api::BluetoothDevice {
   explicit BluetoothDevice(std::shared_ptr<bluez::Device> device);
 
   std::string GetName() const override;
-  std::string GetMacAddress() const override;
+  MacAddress GetMacAddress() const override;
   std::string GetAddressType() const;
 
-  MacAddress GetAddress() const override { return last_known_address_; }
+  MacAddress GetAddress() const { return last_known_address_; }
 
   std::optional<std::map<std::string, sdbus::Variant>> ServiceData() {
     auto device = device_;
