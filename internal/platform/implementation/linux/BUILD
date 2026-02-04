@@ -12,26 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+#load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
 licenses(["notice"])
 
-refresh_compile_commands(
-    name = "refresh_compile_commands",
-
-    # Specify the targets of interest.
-    # For example, specify a dict of targets and any flags required to build.
-    targets = {
-        ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
-        "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
-        "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
-    },
-    # No need to add flags already in .bazelrc. They're automatically picked up.
-    # If you don't need flags, a list of targets is also okay, as is a single target string.
-    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
-    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
-    # And if you're working on a header-only library, specify a test or binary target that compiles it.
-)
+#refresh_compile_commands(
+#    name = "refresh_compile_commands",
+#
+#    # Specify the targets of interest.
+#    # For example, specify a dict of targets and any flags required to build.
+#    targets = {
+#        ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#        "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#        "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#    },
+#    # No need to add flags already in .bazelrc. They're automatically picked up.
+#    # If you don't need flags, a list of targets is also okay, as is a single target string.
+#    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
+#    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
+#    # And if you're working on a header-only library, specify a test or binary target that compiles it.
+#)
 
 cc_library(
     name = "types",
@@ -108,9 +108,9 @@ cc_library(
         "network_manager_access_point.h",
         "stream.h",
         "tcp_server_socket.h",
-        "wifi_direct.h",
-        "wifi_direct_server_socket.h",
-        "wifi_direct_socket.h",
+        #        "wifi_direct.h",
+        #        "wifi_direct_server_socket.h",
+        #        "wifi_direct_socket.h",
         "wifi_hotspot.h",
         "wifi_hotspot_server_socket.h",
         "wifi_hotspot_socket.h",
@@ -200,8 +200,8 @@ cc_library(
         "system_clock.cc",
         "thread_pool.cc",
         "utils.cc",
-        "wifi_direct.cc",
-        "wifi_direct_server_socket.cc",
+        #        "wifi_direct.cc",
+        #        "wifi_direct_server_socket.cc",
         "wifi_hotspot.cc",
         "wifi_hotspot_server_socket.cc",
         "wifi_lan.cc",
