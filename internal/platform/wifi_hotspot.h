@@ -18,12 +18,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/platform.h"
@@ -110,16 +108,10 @@ class WifiHotspotServerSocket final {
       std::unique_ptr<api::WifiHotspotServerSocket> socket)
       : impl_(std::move(socket)) {}
 
-  // Returns ip address.
-  std::string GetIPAddress() const {
-    CHECK(impl_);
-    return impl_->GetIPAddress();
-  }
-
-  // Returns port.
-  int GetPort() const {
-    CHECK(impl_);
-    return impl_->GetPort();
+  // Populates the hotspot credentials with the server socket's service
+  // addresses and ports.
+  void PopulateHotspotCredentials(HotspotCredentials& hotspot_credentials) {
+    impl_->PopulateHotspotCredentials(hotspot_credentials);
   }
 
   // Blocks until either:
@@ -164,13 +156,13 @@ class WifiHotspotMedium {
 
   // Returns a new WifiHotspotSocket by ip address and port.
   // On Success, WifiHotspotSocket::IsValid()returns true.
-  WifiHotspotSocket ConnectToService(absl::string_view ip_address, int port,
+  WifiHotspotSocket ConnectToService(const ServiceAddress& service_address,
                                      CancellationFlag* cancellation_flag);
 
   // Returns a new WifiHotspotServerSocket.
   // On Success, WifiHotspotServerSocket::IsValid() returns true.
-  WifiHotspotServerSocket ListenForService(int port = 0) {
-    return WifiHotspotServerSocket(impl_->ListenForService(port));
+  WifiHotspotServerSocket ListenForService() {
+    return WifiHotspotServerSocket(impl_->ListenForService(/*port=*/0));
   }
 
   // Returns the port range as a pair of min and max port.
@@ -187,8 +179,9 @@ class WifiHotspotMedium {
   bool ConnectWifiHotspot(const HotspotCredentials& hotspot_credentials) {
     MutexLock lock(&mutex_);
     hotspot_credentials_ = hotspot_credentials;
-    return impl_->ConnectWifiHotspot(&hotspot_credentials_);
+    return impl_->ConnectWifiHotspot(hotspot_credentials);
   }
+
   bool DisconnectWifiHotspot() { return impl_->DisconnectWifiHotspot(); }
 
   HotspotCredentials* GetCredential() { return &hotspot_credentials_; }

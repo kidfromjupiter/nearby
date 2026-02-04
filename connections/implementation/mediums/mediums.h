@@ -17,7 +17,6 @@
 
 #include "connections/implementation/mediums/awdl.h"
 #include "connections/implementation/mediums/ble.h"
-#include "connections/implementation/mediums/ble_v2.h"
 #include "connections/implementation/mediums/bluetooth_classic.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
 #ifdef NO_WEBRTC
@@ -26,8 +25,8 @@
 #include "connections/implementation/mediums/webrtc.h"
 #endif
 #include "connections/implementation/mediums/wifi.h"
-#include "connections/implementation/mediums/wifi_hotspot.h"
 #include "connections/implementation/mediums/wifi_direct.h"
+#include "connections/implementation/mediums/wifi_hotspot.h"
 #include "connections/implementation/mediums/wifi_lan.h"
 
 namespace nearby {
@@ -47,9 +46,6 @@ class Mediums {
 
   // Returns a handle to the Ble medium.
   Ble& GetBle();
-
-  // Returns a handle to the Ble medium.
-  BleV2& GetBleV2();
 
   // Returns a handle to the Wifi medium.
   Wifi& GetWifi();
@@ -81,7 +77,6 @@ class Mediums {
   BluetoothRadio bluetooth_radio_;
   BluetoothClassic bluetooth_classic_{bluetooth_radio_};
   Ble ble_{bluetooth_radio_};
-  BleV2 ble_v2_{bluetooth_radio_};
   Wifi wifi_;
   WifiLan wifi_lan_;
   WifiHotspot wifi_hotspot_;

@@ -53,6 +53,10 @@ constexpr auto kWifiHotspotConnectionIntervalMillis =
 constexpr auto kWifiHotspotConnectionTimeoutMillis =
     flags::Flag<int64_t>(kConfigPackage, "45415888", 10000);
 
+// Enable/Disable use of address candidates for hotspot upgrade in Windows.
+constexpr auto kEnableHotspotAddressCandidates =
+    flags::Flag<bool>(kConfigPackage, "45739567", false);
+
 // Enable/Disable Intel PIe SDK to query/set WIFI feature.
 constexpr auto kEnableIntelPieSdk =
     flags::Flag<bool>(kConfigPackage, "45428547", false);
@@ -61,9 +65,9 @@ constexpr auto kEnableIntelPieSdk =
 constexpr auto kEnableNewBluetoothRefactor =
     flags::Flag<bool>(kConfigPackage, "45615156", false);
 
-// Enable/Disable Wi-Fi hotspot scan in native
-constexpr auto kEnableWifiHotspotNativeScan =
-    flags::Flag<bool>(kConfigPackage, "45670001", false);
+// Enable/Disable use of address candidates for WifiLan upgrade in Windows.
+constexpr auto kEnableWifiLanAddressCandidates =
+    flags::Flag<bool>(kConfigPackage, "45739995", false);
 
 // The send buffer size of blocking socket
 constexpr auto kSocketSendBufferSize =
@@ -72,9 +76,6 @@ constexpr auto kSocketSendBufferSize =
 // Run scheduled executor callback on executor thread.
 constexpr auto kRunScheduledExecutorCallbackOnExecutorThread =
     flags::Flag<bool>(kConfigPackage, "45686494", false);
-
-constexpr auto kEnableIpAddressesNative =
-    flags::Flag<bool>(kConfigPackage, "45722101", false);
 
 }  // namespace nearby_platform_feature
 }  // namespace config_package_nearby

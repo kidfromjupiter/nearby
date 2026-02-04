@@ -36,7 +36,7 @@
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/flags/nearby_platform_feature_flags.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/logging.h"
@@ -79,9 +79,9 @@ using ::winrt::Windows::Foundation::Collections::IVectorView;
 using ::winrt::Windows::Storage::Streams::Buffer;
 using ::winrt::Windows::Storage::Streams::DataReader;
 using ::winrt::Windows::Storage::Streams::IBuffer;
-using Property = api::ble_v2::GattCharacteristic::Property;
-using Permission = api::ble_v2::GattCharacteristic::Permission;
-using WriteType = api::ble_v2::GattClient::WriteType;
+using Property = api::ble::GattCharacteristic::Property;
+using Permission = api::ble::GattCharacteristic::Permission;
+using WriteType = api::ble::GattClient::WriteType;
 
 constexpr int kGattTimeoutInSeconds = 5;
 
@@ -120,7 +120,7 @@ BleGattClient::~BleGattClient() {
 
 bool BleGattClient::DiscoverServiceAndCharacteristics(
     const Uuid& service_uuid, const std::vector<Uuid>& characteristic_uuids) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   BluetoothAdapter bluetooth_adapter;
   if (!bluetooth_adapter.IsCentralRoleSupported()) {
@@ -269,10 +269,9 @@ bool BleGattClient::DiscoverServiceAndCharacteristics(
   return false;
 }
 
-absl::optional<api::ble_v2::GattCharacteristic>
-BleGattClient::GetCharacteristic(const Uuid& service_uuid,
-                                 const Uuid& characteristic_uuid) {
-  absl::MutexLock lock(&mutex_);
+absl::optional<api::ble::GattCharacteristic> BleGattClient::GetCharacteristic(
+    const Uuid& service_uuid, const Uuid& characteristic_uuid) {
+  absl::MutexLock lock(mutex_);
   VLOG(1) << __func__ << ": Stared to get characteristic UUID="
           << std::string(characteristic_uuid)
           << " in service UUID=" << std::string(service_uuid);
@@ -285,12 +284,12 @@ BleGattClient::GetCharacteristic(const Uuid& service_uuid,
       return absl::nullopt;
     }
 
-    api::ble_v2::GattCharacteristic result;
+    api::ble::GattCharacteristic result;
     result.service_uuid = service_uuid;
     result.uuid = characteristic_uuid;
 
     // Note: Windows has protection level on GattCharacteristic. cannot
-    // find a way to map it to api::ble_v2::GattCharacteristic.
+    // find a way to map it to api::ble::GattCharacteristic.
     GattCharacteristicProperties properties =
         gatt_characteristic->CharacteristicProperties();
     result.permission = Permission::kNone;
@@ -336,8 +335,8 @@ BleGattClient::GetCharacteristic(const Uuid& service_uuid,
 }
 
 absl::optional<std::string> BleGattClient::ReadCharacteristic(
-    const api::ble_v2::GattCharacteristic& characteristic) {
-  absl::MutexLock lock(&mutex_);
+    const api::ble::GattCharacteristic& characteristic) {
+  absl::MutexLock lock(mutex_);
   VLOG(1) << __func__
           << ": Read characteristic=" << std::string(characteristic.uuid);
   try {
@@ -390,9 +389,9 @@ absl::optional<std::string> BleGattClient::ReadCharacteristic(
 }
 
 bool BleGattClient::WriteCharacteristic(
-    const api::ble_v2::GattCharacteristic& characteristic,
-    absl::string_view value, api::ble_v2::GattClient::WriteType write_type) {
-  absl::MutexLock lock(&mutex_);
+    const api::ble::GattCharacteristic& characteristic, absl::string_view value,
+    api::ble::GattClient::WriteType write_type) {
+  absl::MutexLock lock(mutex_);
   VLOG(1) << __func__
           << ": write characteristic: " << std::string(characteristic.uuid);
   try {
@@ -441,10 +440,10 @@ bool BleGattClient::WriteCharacteristic(
 }
 
 bool BleGattClient::SetCharacteristicSubscription(
-    const api::ble_v2::GattCharacteristic& characteristic, bool enable,
+    const api::ble::GattCharacteristic& characteristic, bool enable,
     absl::AnyInvocable<void(absl::string_view value)>
         on_characteristic_changed_cb) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   VLOG(1) << __func__ << ": Started to set Characteristic Subscription.";
   GattClientCharacteristicConfigurationDescriptorValue gcccd_value =
       GattClientCharacteristicConfigurationDescriptorValue::None;
@@ -515,7 +514,7 @@ bool BleGattClient::SetCharacteristicSubscription(
 }
 
 void BleGattClient::Disconnect() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   try {
     VLOG(1) << __func__ << ": Disconnect is called.";
     if (ble_device_ != nullptr) {
@@ -629,7 +628,7 @@ bool BleGattClient::WriteCharacteristicConfigurationDescriptor(
 }
 
 void BleGattClient::OnCharacteristicValueChanged(
-    const api::ble_v2::GattCharacteristic& characteristic,
+    const api::ble::GattCharacteristic& characteristic,
     GattValueChangedEventArgs args) {
   VLOG(1) << __func__ << ": Gatt Characteristic value changed.";
   IBuffer buffer = args.CharacteristicValue();
@@ -645,7 +644,7 @@ void BleGattClient::OnCharacteristicValueChanged(
   absl::AnyInvocable<void(absl::string_view value)>
       on_characteristic_changed_cb;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (!native_characteristic_map_.contains(characteristic) ||
         !native_characteristic_map_[characteristic]
              .on_characteristic_changed_cb) {
@@ -660,7 +659,7 @@ void BleGattClient::OnCharacteristicValueChanged(
   on_characteristic_changed_cb(std::move(data));
 
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     native_characteristic_map_[characteristic].on_characteristic_changed_cb =
         std::move(on_characteristic_changed_cb);
   }

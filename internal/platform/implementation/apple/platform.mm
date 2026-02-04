@@ -16,19 +16,21 @@
 
 #import <Foundation/Foundation.h>
 
-#include <string>
+#include <functional>
 #include <memory>
+#include <string>
 
 #include "absl/strings/string_view.h"
 #include "internal/base/files.h"
-#include "internal/platform/implementation/apple/awdl.h"
+#import "internal/platform/implementation/apple/Log/GNCLogger.h"
+#include "internal/platform/implementation/apple/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/apple/atomic_boolean.h"
 #include "internal/platform/implementation/apple/atomic_uint32.h"
+#include "internal/platform/implementation/apple/awdl.h"
 #include "internal/platform/implementation/apple/ble.h"
 #include "internal/platform/implementation/apple/condition_variable.h"
 #include "internal/platform/implementation/apple/count_down_latch.h"
 #include "internal/platform/implementation/apple/device_info.h"
-#import "internal/platform/implementation/apple/Log/GNCLogger.h"
 #import "internal/platform/implementation/apple/multi_thread_executor.h"
 #include "internal/platform/implementation/apple/mutex.h"
 #include "internal/platform/implementation/apple/preferences_manager.h"
@@ -42,6 +44,10 @@
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/payload_id.h"
+
+#ifndef NO_WEBRTC
+#import "internal/platform/implementation/apple/webrtc.h"
+#endif
 
 namespace nearby {
 namespace api {
@@ -120,14 +126,12 @@ std::unique_ptr<ConditionVariable> ImplementationPlatform::CreateConditionVariab
 }
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
-std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(PayloadId payload_id,
-                                                                   std::int64_t total_size) {
+std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(PayloadId payload_id) {
   return nullptr;
 }
 
-std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(const std::string& file_path,
-                                                                   size_t size) {
-  return shared::IOFile::CreateInputFile(file_path, size);
+std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(const std::string& file_path) {
+  return shared::IOFile::CreateInputFile(file_path);
 }
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
@@ -172,17 +176,9 @@ std::unique_ptr<BluetoothClassicMedium> ImplementationPlatform::CreateBluetoothC
   return nullptr;
 }
 
-std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(api::BluetoothAdapter& adapter) {
-  return nullptr;
-}
-
-std::unique_ptr<ble_v2::BleMedium> ImplementationPlatform::CreateBleV2Medium(
+std::unique_ptr<ble::BleMedium> ImplementationPlatform::CreateBleMedium(
     api::BluetoothAdapter& adapter) {
   return std::make_unique<apple::BleMedium>();
-}
-
-std::unique_ptr<ServerSyncMedium> ImplementationPlatform::CreateServerSyncMedium() {
-  return nullptr;
 }
 
 std::unique_ptr<WifiMedium> ImplementationPlatform::CreateWifiMedium() {
@@ -210,8 +206,19 @@ std::unique_ptr<WifiDirectMedium> ImplementationPlatform::CreateWifiDirectMedium
 }
 
 #ifndef NO_WEBRTC
-std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() { return nullptr; }
+std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
+  return std::make_unique<apple::WebRtcMedium>();
+}
 #endif
+
+std::unique_ptr<AppLifecycleMonitor> ImplementationPlatform::CreateAppLifecycleMonitor(
+    std::function<void(AppLifecycleMonitor::AppLifecycleState)> state_updated_callback) {
+#if TARGET_OS_IPHONE
+  return std::make_unique<apple::AppLifecycleMonitor>(std::move(state_updated_callback));
+#else
+  return nullptr;
+#endif
+}
 
 absl::StatusOr<WebResponse> ImplementationPlatform::SendRequest(const WebRequest& requestInfo) {
   NSURL* url = [NSURL URLWithString:@(requestInfo.url.c_str())];
@@ -260,7 +267,7 @@ absl::StatusOr<WebResponse> ImplementationPlatform::SendRequest(const WebRequest
   }
   if (blockData != nil) {
     // Body is not a UTF-8 encoded string and is just using `std::string` as a container for data.
-    webResponse.body = std::string((char *)blockData.bytes, blockData.length);
+    webResponse.body = std::string((char*)blockData.bytes, blockData.length);
   }
   return webResponse;
 }

@@ -45,10 +45,6 @@ P2pStarPcpHandler::GetConnectionMediumsByPriority() {
     mediums.push_back(location::nearby::proto::connections::WIFI_LAN);
   }
   if (mediums_->GetWifi().IsAvailable() &&
-      mediums_->GetWifiDirect().IsGCAvailable()) {
-    mediums.push_back(location::nearby::proto::connections::WIFI_DIRECT);
-  }
-  if (mediums_->GetWifi().IsAvailable() &&
       mediums_->GetWifiHotspot().IsClientAvailable()) {
     mediums.push_back(location::nearby::proto::connections::WIFI_HOTSPOT);
   }
@@ -58,15 +54,8 @@ P2pStarPcpHandler::GetConnectionMediumsByPriority() {
   if (mediums_->GetBluetoothClassic().IsAvailable()) {
     mediums.push_back(location::nearby::proto::connections::BLUETOOTH);
   }
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::kEnableBleV2)) {
-    if (mediums_->GetBleV2().IsAvailable()) {
-      mediums.push_back(location::nearby::proto::connections::BLE);
-    }
-  } else {
-    if (mediums_->GetBle().IsAvailable()) {
-      mediums.push_back(location::nearby::proto::connections::BLE);
-    }
+  if (mediums_->GetBle().IsAvailable()) {
+    mediums.push_back(location::nearby::proto::connections::BLE);
   }
   return mediums;
 }

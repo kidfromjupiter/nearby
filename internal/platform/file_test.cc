@@ -46,11 +46,11 @@ TEST_F(FileTest, ConstructorDestructorWorks) {
   // Create an output file and write to it.
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  output_file.Write(ByteArray(data));
+  output_file.Write(data);
   output_file.Close();
 
   // Create an input file and read from it.
-  InputFile input_file(file_path.ToString(), data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_bytes = input_file.Read(data.size());
   ASSERT_TRUE(read_bytes.ok());
   EXPECT_EQ(read_bytes.result(), ByteArray(data));
@@ -64,11 +64,11 @@ TEST_F(FileTest, SimpleWriteRead) {
   // Write to file.
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(data)).Ok());
+  EXPECT_TRUE(output_file.Write(data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
   // Read from file.
-  InputFile input_file(file_path.ToString(), data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data = input_file.Read(data.size());
   EXPECT_TRUE(read_data.ok());
   EXPECT_EQ(std::string(read_data.result()), data);
@@ -82,11 +82,11 @@ TEST_F(FileTest, WriteThenCloseThenRead) {
   // Write and close.
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(data)).Ok());
+  EXPECT_TRUE(output_file.Write(data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
   // Re-open and read.
-  InputFile input_file(file_path.ToString(), data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data = input_file.Read(data.size());
   EXPECT_TRUE(read_data.ok());
   EXPECT_EQ(std::string(read_data.result()), data);
@@ -102,7 +102,7 @@ TEST_F(FileTest, ReadEmptyFile) {
   EXPECT_TRUE(output_file.Close().Ok());
 
   // Read from empty file.
-  InputFile input_file(file_path.ToString(), 0);
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data = input_file.Read(1024);
   EXPECT_TRUE(read_data.ok());
   EXPECT_TRUE(read_data.result().Empty());
@@ -115,10 +115,10 @@ TEST_F(FileTest, ReadExactly) {
 
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(data)).Ok());
+  EXPECT_TRUE(output_file.Write(data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data =
       input_file.GetInputStream().ReadExactly(data.size());
   EXPECT_TRUE(read_data.ok());
@@ -132,10 +132,10 @@ TEST_F(FileTest, ReadTooMuch) {
 
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(data)).Ok());
+  EXPECT_TRUE(output_file.Write(data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data = input_file.Read(data.size() * 2);
   EXPECT_TRUE(read_data.ok());
   EXPECT_EQ(std::string(read_data.result()), data);
@@ -150,10 +150,10 @@ TEST_F(FileTest, Skip) {
 
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(full_data)).Ok());
+  EXPECT_TRUE(output_file.Write(full_data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), full_data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<size_t> skipped_bytes = input_file.Skip(data_to_skip.size());
   EXPECT_TRUE(skipped_bytes.ok());
   EXPECT_EQ(skipped_bytes.result(), data_to_skip.size());
@@ -172,11 +172,11 @@ TEST_F(FileTest, MultipleWrites) {
 
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(data1)).Ok());
-  EXPECT_TRUE(output_file.Write(ByteArray(data2)).Ok());
+  EXPECT_TRUE(output_file.Write(data1).Ok());
+  EXPECT_TRUE(output_file.Write(data2).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), full_data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data = input_file.Read(full_data.size());
   EXPECT_TRUE(read_data.ok());
   EXPECT_EQ(std::string(read_data.result()), full_data);
@@ -190,7 +190,7 @@ TEST_F(FileTest, CloseTwice) {
   EXPECT_TRUE(output_file.Close().Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), 0);
+  InputFile input_file(file_path.ToString());
   EXPECT_TRUE(input_file.Close().Ok());
   EXPECT_TRUE(input_file.Close().Ok());
 }
@@ -205,10 +205,10 @@ TEST_F(FileTest, WriteLargeFile) {
 
   OutputFile output_file(file_path.ToString());
   ASSERT_TRUE(output_file.IsValid());
-  EXPECT_TRUE(output_file.Write(ByteArray(large_data)).Ok());
+  EXPECT_TRUE(output_file.Write(large_data).Ok());
   EXPECT_TRUE(output_file.Close().Ok());
 
-  InputFile input_file(file_path.ToString(), large_data.size());
+  InputFile input_file(file_path.ToString());
   ExceptionOr<ByteArray> read_data =
       input_file.GetInputStream().ReadExactly(large_data.size());
   EXPECT_TRUE(read_data.ok());

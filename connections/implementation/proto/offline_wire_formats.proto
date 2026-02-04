@@ -217,6 +217,16 @@ message PayloadTransferFrame {
   optional ControlMessage control_message = 4;
 }
 
+// Represents the network tuple a service can be reached at.
+message ServiceAddress {
+  // This can be either IPv4 or IPv6 address.
+  // IPv4 address are 4 bytes long, and IPv6 addresses are 16 bytes long.
+  // Field with anything other than 4 or 16 bytes is invalid.
+  // Addresses are represented in MSB-first order.
+  optional bytes ip_address = 1;
+  optional int32 port = 2;
+}
+
 message BandwidthUpgradeNegotiationFrame {
   enum EventType {
     UNKNOWN_EVENT_TYPE = 0;
@@ -260,12 +270,34 @@ message BandwidthUpgradeNegotiationFrame {
       optional string gateway = 4 [default = "0.0.0.0"];
       // This field can be a band or frequency
       optional int32 frequency = 5 [default = -1];
+      // This replaces gateway and port fields for new clients.
+      // The addresses list is ordered and should contain IPv6 addresses
+      // followed by IPv4 addresses.
+      // Link local addresses are acceptable here.  Receivers should scope these
+      // addresses to the network interface used to connect to the hotspot.
+      // Senders should continue to set gateway and port fields to the same
+      // value as the last item in the list.
+      // Receivers should ignore gateway and port fields if this field is set.
+      // Receivers should attempt to connect to each of the address candidates
+      // in order until a connection can be established.
+      repeated ServiceAddress address_candidates = 6;
     }
 
     // Accompanies Medium.WIFI_LAN.
     message WifiLanSocket {
       optional bytes ip_address = 1;
       optional int32 wifi_port = 2;
+      // This replaces ip_address and wifi_port fields for new clients.
+      // The addresses list is ordered and should contain IPv6 addresses
+      // followed by IPv4 addresses.
+      // Link local addresses cannot be used here.
+      // Senders should continue to set ip_address and wifi_port fields to the
+      // same value as the last item in the list.
+      // Receivers should ignore ip_address and wifi_port fields if this field
+      // is set.
+      // Receivers should attempt to connect to each of the address candidates
+      // in order until a connection can be established.
+      repeated ServiceAddress address_candidates = 3;
     }
 
     // Accompanies Medium.BLUETOOTH.
@@ -294,6 +326,21 @@ message BandwidthUpgradeNegotiationFrame {
       // The GO should listen on both IPv4 and IPv6 addresses.
       // https://en.wikipedia.org/wiki/Link-local_address#IPv6
       optional bytes ip_v6_address = 6;
+      // Windows only supports WifiDirect with Service Discovey. Its
+      // credentials is the service_name/pin.
+      optional string service_name = 7;
+      // WifiDirect spec requires that pin is exactly 8 digits. The first 7
+      // digits are the PIN. The last 1 digit is a checksum calculated using a
+      // specific algorithm (CRC-8). However, the Windows WinRT
+      // WiFiDirectServiceAdvertiser::ConnectAsync() that we use does NOT
+      // enforce the CRC-8 checksum for a WPS PIN because: 1. The ConnectAsync
+      // PIN is NOT necessarily a WPS PIN. 2. WPS PIN validation is performed by
+      // the Wi-Fi driver/firmware. 3. WFDS connections often bypass or replace
+      // WPS PIN authentication
+      // pin is exchanged in the connection handshake stage, but we create and
+      // save it before starting GO, so we can send it to GC side for
+      // authentication.
+      optional string pin = 8;
     }
 
     // Accompanies Medium.WEB_RTC
@@ -457,6 +504,20 @@ message AutoReconnectFrame {
 }
 
 message MediumMetadata {
+  // Should always match
+  // cs/symbol:location.nearby.proto.connections.WifiDirectAuthType
+  // LINT.IfChange
+  enum WifiDirectAuthType {
+    WIFI_DIRECT_TYPE_UNKNOWN = 0;
+    // WifiDirect type that uses ssid/password for authentication. Android
+    // supports this type, but Windows does not.
+    WIFI_DIRECT_WITH_PASSWORD = 1;
+    // WifiDirect type that uses service_name/pin for authentication. Android
+    // and Windows both support this type.
+    WIFI_DIRECT_WITH_PIN = 2;
+  }
+  // LINT.ThenChange(//depot/google3/third_party/nearby/proto/connections_enums.proto)
+
   // True if local device supports 5GHz.
   optional bool supports_5_ghz = 1;
   // WiFi LAN BSSID, in the form of a six-byte MAC address: XX:XX:XX:XX:XX:XX
@@ -483,6 +544,9 @@ message MediumMetadata {
   optional WifiHotspotStaUsableChannels wifi_hotspot_sta_usable_channels = 11;
   // The supported medium roles.
   optional MediumRole medium_role = 12;
+  // The supported WifiDirect auth types.
+  repeated WifiDirectAuthType supported_wifi_direct_auth_types = 13
+      [packed = true];
 }
 
 // Available channels on the local device.

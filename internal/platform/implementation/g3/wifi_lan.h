@@ -23,11 +23,13 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/g3/socket_base.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/medium_environment.h"
 #include "internal/platform/nsd_service_info.h"
 #include "internal/platform/output_stream.h"
+#include "internal/platform/service_address.h"
 
 namespace nearby {
 namespace g3 {
@@ -187,7 +189,7 @@ class WifiLanMedium : public api::WifiLanMedium {
   // On success, returns a new WifiLanSocket.
   // On error, returns nullptr.
   std::unique_ptr<api::WifiLanSocket> ConnectToService(
-      const std::string& ip_address, int port,
+      const ServiceAddress& service_address,
       CancellationFlag* cancellation_flag) override ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Listens for incoming connection.
@@ -205,6 +207,9 @@ class WifiLanMedium : public api::WifiLanMedium {
       override {
     return std::nullopt;
   }
+
+  api::UpgradeAddressInfo GetUpgradeAddressCandidates(
+      const api::WifiLanServerSocket& server_socket) override;
 
  private:
   struct AdvertisingInfo {

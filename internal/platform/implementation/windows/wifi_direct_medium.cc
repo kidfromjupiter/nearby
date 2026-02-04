@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,609 +12,746 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancellation_flag.h"
-#include "internal/platform/implementation/wifi_direct.h"
-#include "internal/platform/implementation/wifi_utils.h"
-#include "internal/platform/implementation/windows/wifi_direct.h"
-
-// Nearby connections headers
 #include "internal/platform/cancellation_flag_listener.h"
+#include "internal/platform/feature_flags.h"
+#include "internal/platform/flags/nearby_platform_feature_flags.h"
+#include "internal/platform/implementation/wifi_direct.h"
+#include "internal/platform/implementation/windows/socket_address.h"
 #include "internal/platform/implementation/windows/utils.h"
+#include "internal/platform/implementation/windows/wifi_direct.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/prng.h"
+#include "internal/platform/wifi_credential.h"
 
 namespace nearby {
 namespace windows {
 namespace {
-
-// The maximum scanning times for GC to find WifiDirect GO.
-constexpr int kWifiDirectMaxScans = 2;
-
-// The maximum connection times to remote WifiDirect GO server socket.
-constexpr int kWifiDirectMaxConnectionRetries = 3;
-
-// The interval between 2 connectin attempts.
-constexpr absl::Duration kWifiDirectRetryIntervalMillis =
-    absl::Milliseconds(300);
-
-// The connection timeout to remote WifiDirect GO server socket.
-constexpr absl::Duration kWifiDirectClientSocketConnectTimeoutMillis =
-    absl::Milliseconds(10000);
-
-// The maximum times to check IP address.
-constexpr int kIpAddressMaxRetries = 3;
-
-// The time interval to check IP address.
-constexpr absl::Duration kIpAddressRetryIntervalMillis =
-    absl::Milliseconds(2000);
-
+constexpr int kWaitingForConnectionTimeoutSeconds = 90;  // seconds
 }  // namespace
 
+WifiDirectMedium::WifiDirectMedium() {
+  LOG(INFO) << "WifiDirectMedium::WifiDirectMedium";
+  // Create a DispatcherQueue for this thread.
+  controller_ = winrt::Windows::System::DispatcherQueueController::
+      CreateOnDedicatedThread();
+  dispatcher_queue_ = controller_.DispatcherQueue();
+  if (!dispatcher_queue_) {
+    LOG(WARNING) << "Failed to get DispatcherQueue for current thread. "
+                    "ConnectAsync might fail if not called from UI thread.";
+  }
+  is_interface_valid_ = IsWifiDirectServiceSupported();
+}
+
 WifiDirectMedium::~WifiDirectMedium() {
+  is_interface_valid_ = false;
+  listener_executor_.Shutdown();
   StopWifiDirect();
   DisconnectWifiDirect();
+  if (controller_) {
+    // Asynchronously shut down the dispatcher queue.
+    winrt::Windows::Foundation::IAsyncAction shutdown_async =
+        controller_.ShutdownQueueAsync();
+
+    // Block and wait for the shutdown to complete. This ensures that any
+    // in-progress event handlers on the dedicated thread are finished
+    // before this object is fully destroyed.
+    shutdown_async.get();
+  }
+}
+
+bool WifiDirectMedium::IsWifiDirectServiceSupported() {
+  if (!IsIntelWifiAdapter()) {
+    LOG(INFO) << "Intel Wifi adapter is not found, WifiDirectService is not "
+                 "supported.";
+    return false;
+  }
+
+  HANDLE wifi_direct_handle = nullptr;
+  DWORD negotiated_version = 0;
+  DWORD result = 0;
+
+  result =
+      WFDOpenHandle(WFD_API_VERSION, &negotiated_version, &wifi_direct_handle);
+  if (result != ERROR_SUCCESS) {
+    LOG(ERROR) << "WiFi can't support WifiDirect";
+    return false;
+  }
+  LOG(INFO) << "WiFi can support WifiDirect";
+  WFDCloseHandle(wifi_direct_handle);
+  return true;
 }
 
 bool WifiDirectMedium::IsInterfaceValid() const {
-  HANDLE wifi_direct_handle = nullptr;
-  DWORD negotiated_version = 0;
-  DWORD result =
-      WFDOpenHandle(WFD_API_VERSION, &negotiated_version, &wifi_direct_handle);
-  if (result == ERROR_SUCCESS) {
-    LOG(INFO) << "WiFi can support WifiDirect";
-    WFDCloseHandle(wifi_direct_handle);
-    return true;
-  }
-
-  LOG(ERROR) << "WiFi can't support WifiDirect";
-  return false;
+  return is_interface_valid_;
 }
 
+// Discoverer connects to server socket
 std::unique_ptr<api::WifiDirectSocket> WifiDirectMedium::ConnectToService(
     absl::string_view ip_address, int port,
     CancellationFlag* cancellation_flag) {
-  LOG(WARNING) << __func__ << " : Connect to remote service.";
-
-  if (ip_address.empty() || port == 0) {
-    LOG(ERROR) << "no valid service address and port to connect: "
-               << "ip_address = " << ip_address << ", port = " << port;
+  LOG(INFO) << "WifiDirectMedium::ConnectToService Server Socket";
+  // check current status
+  if (!IsConnecting()) {
+    LOG(WARNING) << "GC is not connecting to GO, skip.";
     return nullptr;
   }
 
-  std::string ipv4_address;
-  if (ip_address.length() == 4) {
-    ipv4_address = ipaddr_4bytes_to_dotdecimal_string(ip_address);
+  std::string remote_ip_address;
+  if (ip_address.empty()) {
+    remote_ip_address = ip_address_remote_;
   } else {
-    ipv4_address = std::string(ip_address);
+    remote_ip_address = std::string(ip_address);
+  }
+  // when this API is called, GC may not finish connecting to GO, so we need to
+  // wait the connection is finished and IP address is ready.
+  if (remote_ip_address.empty()) {
+    LOG(INFO) << "Waiting for IP address to be ready.";
+    absl::MutexLock lock(mutex_);
+    is_ip_address_ready_.WaitWithTimeout(
+        &mutex_, absl::Seconds(kWaitingForConnectionTimeoutSeconds));
+    if (ip_address_remote_.empty()) {
+      LOG(WARNING)
+          << "IP address is still empty, probably GC connecting to GO failed.";
+      return nullptr;
+    }
+    LOG(INFO) << "IP address is ready.";
+    remote_ip_address = ip_address_remote_;
   }
 
-  if (!WifiUtils::ValidateIPV4(ipv4_address)) {
-    LOG(ERROR) << "Invalid IP address parameter.";
+  if (remote_ip_address.empty() || port == 0) {
+    LOG(ERROR) << "no valid service address and port to connect: "
+               << "ip_address = " << remote_ip_address << ", port = " << port;
     return nullptr;
   }
 
-  HostName host_name{winrt::to_hstring(ipv4_address)};
-  winrt::hstring service_name{winrt::to_hstring(port)};
-
-  // Try connecting to the service up to kWifiDirectMaxConnectionRetries,
-  // because it may fail first time if DHCP procedure is not finished yet.
-  for (int i = 0; i < kWifiDirectMaxConnectionRetries; i++) {
-    try {
-      StreamSocket socket{};
-
-      std::unique_ptr<nearby::CancellationFlagListener>
-          connection_cancellation_listener = nullptr;
-
-      // setup cancel listener
-      if (cancellation_flag != nullptr) {
-        if (cancellation_flag->Cancelled()) {
-          LOG(INFO) << "connect has been cancelled to service " << ipv4_address
-                    << ":" << port;
-          return nullptr;
-        }
-
-        connection_cancellation_listener =
-            std::make_unique<nearby::CancellationFlagListener>(
-                cancellation_flag, [socket]() {
-                  LOG(WARNING) << "connect is closed due to it is cancelled.";
-                  socket.Close();
-                });
-      }
-
-      connection_timeout_ = scheduled_executor_.Schedule(
-          [socket]() {
-            LOG(WARNING) << "connect is closed due to timeout.";
-            socket.Close();
-          },
-          kWifiDirectClientSocketConnectTimeoutMillis);
-
-      socket.ConnectAsync(host_name, service_name).get();
-
-      if (connection_timeout_ != nullptr) {
-        connection_timeout_->Cancel();
-        connection_timeout_ = nullptr;
-      }
-
-      auto client_socket = std::make_unique<WifiDirectSocket>(socket);
-
-      LOG(INFO) << "connected to remote service " << ipv4_address << ":"
-                << port;
-      return client_socket;
-    } catch (...) {
-      LOG(ERROR) << "failed to connect remote service " << ipv4_address << ":"
-                 << port << " for the " << i + 1 << " time";
-    }
-
-    if (connection_timeout_ != nullptr) {
-      connection_timeout_->Cancel();
-      connection_timeout_ = nullptr;
-    }
-
-    Sleep(kWifiDirectRetryIntervalMillis / absl::Milliseconds(1));
+  SocketAddress server_address;
+  if (!server_address.FromString(server_address, remote_ip_address, port)) {
+    LOG(ERROR) << "no valid service address and port to connect.";
+    return nullptr;
   }
+  VLOG(1) << "ConnectToService server address: " << server_address.ToString();
+
+  // Try connecting to the service up to wifi_direct_max_connection_retries,
+  // because it may fail first time if DHCP procedure is not finished yet.
+  int64_t wifi_direct_max_connection_retries =
+      NearbyFlags::GetInstance().GetInt64Flag(
+          platform::config_package_nearby::nearby_platform_feature::
+              kWifiHotspotConnectionMaxRetries);
+  int64_t wifi_direct_retry_interval_millis =
+      NearbyFlags::GetInstance().GetInt64Flag(
+          platform::config_package_nearby::nearby_platform_feature::
+              kWifiHotspotConnectionIntervalMillis);
+  int64_t wifi_direct_client_socket_connect_timeout_millis =
+      NearbyFlags::GetInstance().GetInt64Flag(
+          platform::config_package_nearby::nearby_platform_feature::
+              kWifiHotspotConnectionTimeoutMillis);
+
+  VLOG(1) << "maximum connection retries=" << wifi_direct_max_connection_retries
+          << ", connection interval=" << wifi_direct_retry_interval_millis
+          << "ms, connection timeout="
+          << wifi_direct_client_socket_connect_timeout_millis << "ms";
+
+  LOG(INFO) << "Connect to service ";
+  for (int i = 0; i < wifi_direct_max_connection_retries; ++i) {
+    auto wifi_direct_socket = std::make_unique<WifiDirectSocket>();
+
+    // setup cancel listener
+    std::unique_ptr<CancellationFlagListener> connection_cancellation_listener =
+        nullptr;
+    if (cancellation_flag != nullptr) {
+      if (cancellation_flag->Cancelled()) {
+        LOG(INFO) << "connect has been cancelled to service ";
+        return nullptr;
+      }
+
+      connection_cancellation_listener =
+          std::make_unique<nearby::CancellationFlagListener>(
+              cancellation_flag, [socket = wifi_direct_socket.get()]() {
+                LOG(WARNING) << "connect is closed due to it is cancelled.";
+                socket->Close();
+              });
+    }
+
+    bool result = wifi_direct_socket->Connect(server_address);
+    if (!result) {
+      LOG(WARNING) << "reconnect to service at " << (i + 1) << "th times";
+      Sleep(wifi_direct_retry_interval_millis);
+      continue;
+    }
+
+    LOG(INFO) << "connected to remote service ";
+    return wifi_direct_socket;
+  }
+
+  LOG(ERROR) << "Failed to connect to service ";
   return nullptr;
 }
 
+// Advertiser starts to listen on server socket
 std::unique_ptr<api::WifiDirectServerSocket> WifiDirectMedium::ListenForService(
     int port) {
-  absl::MutexLock lock(&mutex_);
+  LOG(INFO) << __func__
+            << " :Start to listen connection from WiFiDirect client.";
 
+  absl::MutexLock lock(mutex_);
+  if (!IsGOStarted()) {
+    LOG(WARNING) << "WifiDirect GO is not started, skip.";
+    return nullptr;
+  }
   // check current status
   if (IsAccepting()) {
-    LOG(WARNING) << "accepting connections already started on port "
+    LOG(WARNING) << "Accepting connections already started on port "
                  << server_socket_ptr_->GetPort();
     return nullptr;
   }
 
-  auto server_socket = std::make_unique<WifiDirectServerSocket>(port);
+  auto server_socket = std::make_unique<WifiDirectServerSocket>();
   server_socket_ptr_ = server_socket.get();
 
-  if (server_socket->listen()) {
-    medium_status_ |= kMediumStatusAccepting;
-    server_socket->SetCloseNotifier([this]() {
-      absl::MutexLock lock(&mutex_);
-      LOG(INFO) << "server socket was closed on port "
+  // Start to listen on server socket in a separate thread. Before GC
+  // connects to GO, GO doesn't have IP address. BWU calls this API right away
+  // after it starts GO, we need to spin out the following logic to another
+  // thread to avoid blocking BWU sending out of band upgrade frame to GC.
+  listener_executor_.Execute([this, port]() mutable {
+    absl::MutexLock lock(mutex_);
+    if (ip_address_local_.empty()) {
+      if (server_socket_ptr_) {
+        LOG(INFO) << "Waiting for IP address is ready.";
+        is_ip_address_ready_.WaitWithTimeout(
+            &mutex_, absl::Seconds(kWaitingForConnectionTimeoutSeconds));
+        if (!server_socket_ptr_) {
+          LOG(WARNING)
+              << "Server socket was closed before IP address is ready.";
+          return;
+        }
+        if (ip_address_local_.empty()) {
+          LOG(WARNING) << "IP address is still empty, probably the GO doesn't "
+                          "receive GC's connection request.";
+          server_socket_ptr_->Close();
+          server_socket_ptr_ = nullptr;
+          return;
+        }
+        LOG(INFO) << "IP address is ready.";
+      }
+    }
+    server_socket_ptr_->SetIPAddress(ip_address_local_);
+    if (port == 0) {
+      port = FeatureFlags::GetInstance().GetFlags().wifi_direct_default_port;
+    }
+    if (server_socket_ptr_ &&
+        server_socket_ptr_->Listen(port)) {
+      medium_status_ |= kMediumStatusAccepting;
+
+      // Setup close notifier after listen started.
+      server_socket_ptr_->SetCloseNotifier([this]() {
+        absl::MutexLock lock(mutex_);
+        LOG(INFO) << "Server socket was closed.";
+        medium_status_ &= (~kMediumStatusAccepting);
+        server_socket_ptr_ = nullptr;
+      });
+      LOG(INFO) << "Started to listen serive on port "
                 << server_socket_ptr_->GetPort();
-      medium_status_ &= (~kMediumStatusAccepting);
-      server_socket_ptr_ = nullptr;
-    });
+    } else {
+      LOG(WARNING) << "server_socket_ptr_ is null or Listen failed.";
+      if (server_socket_ptr_) {
+        server_socket_ptr_->Close();
+        server_socket_ptr_ = nullptr;
+      }
+    }
+  });
 
-    LOG(INFO) << "started to listen serive on port "
-              << server_socket_ptr_->GetPort();
-    return server_socket;
-  }
+  LOG(INFO) << "Started to listen service on port " << port;
 
-  LOG(ERROR) << "Failed to listen service on port " << port;
-
-  return nullptr;
+  return server_socket;
 }
 
 bool WifiDirectMedium::StartWifiDirect(
     WifiDirectCredentials* wifi_direct_credentials) {
-  absl::MutexLock lock(&mutex_);
+  LOG(INFO) << "WifiDirectMedium::StartWifiDirect";
 
-  if (IsBeaconing()) {
-    LOG(WARNING) << "cannot create SoftAP again when it is running.";
+  absl::MutexLock lock(mutex_);
+  if (IsGOStarted()) {
+    LOG(WARNING) << "Already started WifiDirect GO, skip.";
     return true;
   }
 
+  credentials_go_ = wifi_direct_credentials;
+  Prng prng;
+  std::string pin = absl::StrFormat("%04x", prng.NextUint32());
+  credentials_go_->SetPin(pin);
+
+  std::string service_name = "NC-" + std::to_string(prng.NextUint32());
+  credentials_go_->SetServiceName(service_name);
+  LOG(INFO) << "service_name:pin " << service_name << ":" << pin;
+
+  // Create Advertiser object
+  advertiser_ = WiFiDirectServiceAdvertiser(winrt::to_hstring(service_name));
+  advertisement_status_changed_token_ = advertiser_.AdvertisementStatusChanged(
+      {this, &WifiDirectMedium::OnAdvertisementStatusChanged});
+  auto_accept_session_connected_token_ = advertiser_.AutoAcceptSessionConnected(
+      {this, &WifiDirectMedium::OnAutoAcceptSessionConnected});
+  session_requested_token_ = advertiser_.SessionRequested(
+      {this, &WifiDirectMedium::OnSessionRequested});
+
+  advertiser_.AutoAcceptSession(false);
+  advertiser_.PreferGroupOwnerMode(true);
+  advertiser_.ServiceStatus(WiFiDirectServiceStatus::Available);
+  // Config Methods
+  WiFiDirectServiceConfigurationMethod config_method;
+  if (pin.empty()) {
+    config_method = WiFiDirectServiceConfigurationMethod::Default;  // NOLINT
+  } else {
+    config_method = WiFiDirectServiceConfigurationMethod::PinDisplay;
+  }
+  advertiser_.PreferredConfigurationMethods().Clear();
+  advertiser_.PreferredConfigurationMethods().Append(config_method);
+
   try {
-    publisher_ = WiFiDirectAdvertisementPublisher();
-    publisher_status_changed_token_ =
-        publisher_.StatusChanged({this, &WifiDirectMedium::OnStatusChanged});
-    listener_ = WiFiDirectConnectionListener();
-    connection_requested_token_ = listener_.ConnectionRequested(
-        {this, &WifiDirectMedium::OnConnectionRequested});
-
-    // Normal mode: The device is highly discoverable so long as the app is in
-    // the foreground.
-    publisher_.Advertisement().ListenStateDiscoverability(
-        WiFiDirectAdvertisementListenStateDiscoverability::Normal);
-    // Enable Autonomous GO mode
-    publisher_.Advertisement().IsAutonomousGroupOwnerEnabled(true);
-
-    // Using WIFIDirect legacy mode to create a softAP. AP means "access point".
-    // Windows WinRT WifiDirect class follows a full P2P protocol to establish a
-    // P2P connection. However the current Phone Nearby Connection uses a
-    // simplified protocol for P2P connection, which is just like a legacy
-    // AP/STA SSID/password mode. To accommodate with this, Windows side give up
-    // the formal P2P connection code suite, instead it uses Hotspot and legacy
-    // STA to fake a P2P connection. By this way, when Phone act as Group
-    // Client(GC), it can keep the connection with Router(AP) at the same time.
-    // But if phone act as Group Owner(GO), Windows side still can't keep its AP
-    // connection when connecting to phone as a GC because it is in normal STA
-    // mode.
-    Prng prng;
-    publisher_.Advertisement().LegacySettings().IsEnabled(true);
-    std::string password = absl::StrFormat("%08x", prng.NextUint32());
-    wifi_direct_credentials->SetPassword(password);
-    PasswordCredential creds;
-    creds.Password(winrt::to_hstring(password));
-    publisher_.Advertisement().LegacySettings().Passphrase(creds);
-
-    std::string ssid = "DIRECT-" + std::to_string(prng.NextUint32());
-    wifi_direct_credentials->SetSSID(ssid);
-    publisher_.Advertisement().LegacySettings().Ssid(winrt::to_hstring(ssid));
-
-    publisher_.Start();
-    if (publisher_.Status() ==
-        WiFiDirectAdvertisementPublisherStatus::Started) {
-      LOG(INFO) << "Windows WiFiDirect GO(SoftAP) started";
-      medium_status_ |= kMediumStatusBeaconing;
+    advertiser_.Start();
+    LOG(INFO) << "Start WifiDirect GO Status: "
+              << (int)advertiser_.AdvertisementStatus();
+    if ((advertiser_.AdvertisementStatus() ==
+         WiFiDirectServiceAdvertisementStatus::Created) ||
+        (advertiser_.AdvertisementStatus() ==
+         WiFiDirectServiceAdvertisementStatus::Started)) {
+      medium_status_ |= kMediumStatusGOStarted;
       return true;
     }
-
-    // Clean up when fail
-    LOG(ERROR) << "Windows WiFiDirect GO(SoftAP) fails to start";
-    publisher_.StatusChanged(publisher_status_changed_token_);
-    listener_.ConnectionRequested(connection_requested_token_);
-    listener_ = nullptr;
-    publisher_ = nullptr;
+    LOG(ERROR) << "Start WifiDirect GO failed.";
     return false;
   } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Cannot start WiFiDirect GO. Exception: "
+    LOG(ERROR) << __func__ << ": Start WifiDirect GO failed. Exception: "
                << exception.what();
   } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__ << ": Cannot start WiFiDirect GO.  WinRT exception: "
+    LOG(ERROR) << __func__ << ": Start WifiDirect GO failed. WinRT exception: "
                << error.code() << ": " << winrt::to_string(error.message());
   } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
   }
+  advertiser_.AdvertisementStatusChanged(advertisement_status_changed_token_);
+  advertiser_.AutoAcceptSessionConnected(auto_accept_session_connected_token_);
+  advertiser_.SessionRequested(session_requested_token_);
+  advertiser_.PreferredConfigurationMethods().Clear();
+  advertiser_ = nullptr;
   return false;
 }
 
 bool WifiDirectMedium::StopWifiDirect() {
-  // Need to use Win32 API to deregister the Dnssd instance
-  absl::MutexLock lock(&mutex_);
-
-  if (!IsBeaconing()) {
-    LOG(WARNING)
-        << "Cannot stop WiFiDirect GO(SoftAP) because no GO was started.";
+  LOG(INFO) << "WifiDirectMedium::StopWifiDirect";
+  absl::MutexLock lock(mutex_);
+  if (!IsGOStarted()) {
+    LOG(WARNING) << "Cannot stop Service because no Service is started.";
     return true;
   }
 
   try {
-    if (publisher_) {
-      publisher_.Stop();
-      listener_.ConnectionRequested(connection_requested_token_);
-      publisher_.StatusChanged(publisher_status_changed_token_);
-      wifi_direct_device_ = nullptr;
-      listener_ = nullptr;
-      publisher_ = nullptr;
-      LOG(INFO) << "succeeded to stop WiFiDirect GO(SoftAP)";
+    if (advertiser_) {
+      advertiser_.Stop();
+      advertiser_.AdvertisementStatusChanged(
+          advertisement_status_changed_token_);
+      advertiser_.AutoAcceptSessionConnected(
+          auto_accept_session_connected_token_);
+      advertiser_.SessionRequested(session_requested_token_);
+      advertiser_ = nullptr;
+      device_info_ = nullptr;
+      session_ = nullptr;
     }
-
-    medium_status_ &= (~kMediumStatusBeaconing);
+    medium_status_ &= (~kMediumStatusGOStarted);
+    medium_status_ &= (~kMediumStatusConnected);
+    medium_status_ &= (~kMediumStatusAccepting);
+    server_socket_ptr_ = nullptr;
+    ip_address_local_.clear();
+    ip_address_remote_.clear();
     return true;
   } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Stop WiFiDirect GO failed. Exception: "
+    LOG(ERROR) << __func__ << ": Stop WifiDirect GO failed. Exception: "
                << exception.what();
   } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__ << ": Stop WiFiDirect GO failed. WinRT exception: "
+    LOG(ERROR) << __func__ << ": Stop WifiDirect GO failed. WinRT exception: "
                << error.code() << ": " << winrt::to_string(error.message());
   } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
   }
   return false;
 }
 
-fire_and_forget WifiDirectMedium::OnStatusChanged(
-    WiFiDirectAdvertisementPublisher sender,
-    WiFiDirectAdvertisementPublisherStatusChangedEventArgs event) {
-  if (event.Status() == WiFiDirectAdvertisementPublisherStatus::Started) {
-    if (sender.Advertisement().LegacySettings().IsEnabled()) {
-      LOG(INFO) << "WiFiDirect GO SSID: "
-                << winrt::to_string(
-                       publisher_.Advertisement().LegacySettings().Ssid());
-      LOG(INFO) << "WiFiDirect GO PW: "
-                << winrt::to_string(publisher_.Advertisement()
-                                        .LegacySettings()
-                                        .Passphrase()
-                                        .Password());
-    }
-    return winrt::fire_and_forget();
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Created) {
-    LOG(INFO) << "Receive WiFiDirect/SoftAP Created event.";
-    return winrt::fire_and_forget();
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Stopped) {
-    LOG(INFO) << "Receive WiFiDirect/SoftAP Stopped event.";
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Aborted) {
-    LOG(INFO) << "Receive WiFiDirect/SoftAP Aborted event.";
+std::string WifiDirectMedium::ConfigMethodToString(
+    WiFiDirectServiceConfigurationMethod config_method) {
+  switch (config_method) {
+    case WiFiDirectServiceConfigurationMethod::Default:
+      return "Default";
+    case WiFiDirectServiceConfigurationMethod::PinDisplay:
+      return "PinDisplay";
+    case WiFiDirectServiceConfigurationMethod::PinEntry:
+      return "PinEntry";
+    default:
+      return "Unknown";
   }
+}
 
-  // Publisher is stopped. Need to clean up the publisher.
-  {
-    absl::MutexLock lock(&mutex_);
-    if (publisher_ != nullptr) {
-      LOG(ERROR) << "Windows WiFiDirect GO(SoftAP) cleanup.";
-      listener_.ConnectionRequested(connection_requested_token_);
-      publisher_.StatusChanged(publisher_status_changed_token_);
-      wifi_direct_device_ = nullptr;
-      listener_ = nullptr;
-      publisher_ = nullptr;
-    }
+fire_and_forget WifiDirectMedium::OnAdvertisementStatusChanged(
+    WiFiDirectServiceAdvertiser sender, IInspectable const& event) {
+  LOG(INFO) << "WiFiDirectServiceAdvertiser status changed: "
+            << (int)sender.AdvertisementStatus();
+  auto status = sender.ServiceStatus();
+  switch (status) {
+    case WiFiDirectServiceStatus ::Available:
+      LOG(INFO) << "WifiDirectAdvertiser service status changed: "
+                   "status: Available";
+      break;
+    case WiFiDirectServiceStatus ::Busy:
+      LOG(INFO) << "WifiDirectAdvertiser service status changed: "
+                   "status: Busy";
+      break;
+    case WiFiDirectServiceStatus ::Custom:
+      LOG(INFO) << "WifiDirectAdvertiser service status changed: "
+                   "status: Custom";
+      break;
+    default:
+      LOG(INFO) << "WifiDirectAdvertiser service status changed: "
+                   "Code: "
+                << (int)status;
+      break;
   }
-
   return winrt::fire_and_forget();
 }
 
-fire_and_forget WifiDirectMedium::OnConnectionRequested(
-    WiFiDirectConnectionListener const& sender,
-    WiFiDirectConnectionRequestedEventArgs const& event) {
-  WiFiDirectConnectionRequest connection_request = event.GetConnectionRequest();
-  winrt::hstring device_name = connection_request.DeviceInformation().Name();
-  LOG(INFO) << "Receive connection request from: "
-            << winrt::to_string(device_name);
-
+fire_and_forget WifiDirectMedium::OnAutoAcceptSessionConnected(
+    WiFiDirectServiceAdvertiser sender,
+    WiFiDirectServiceAutoAcceptSessionConnectedEventArgs const& args) {
+  LOG(INFO) << "WifiDirectMedium::OnAutoAcceptSessionConnected";
   try {
-    // This is to solve b/236805122.
-    // Problem: [Microsoft-Windows-WLAN-AutoConfig] issues a disconnection to
-    // WifiDirect Client every 2 minutes and stopped WifiDirect GO eventually.
-    // Solution: Creating a WiFiDirectDevice for Client’s connection request can
-    // solve the problem. Guess when this object is created,
-    // [Microsoft-Windows-WLAN-AutoConfig] will recognise it as a valid device
-    // and won't kick it away.
-    wifi_direct_device_ = WiFiDirectDevice::FromIdAsync(
-                              connection_request.DeviceInformation().Id())
-                              .get();
-    LOG(INFO) << "Registered the device in WLAN-AutoConfig";
+    auto session = args.Session();
+    if (!session) {
+      LOG(ERROR) << "OnAutoAcceptSessionConnected returned null session";
+      co_return;
+    }
+    session_ = std::move(session);
+    LOG(INFO) << "Service Address: "
+              << winrt::to_string(session_.ServiceAddress())
+              << ", Service Name: " << winrt::to_string(session_.ServiceName())
+              << ", Advertisement ID: " << session_.AdvertisementId()
+              << ", Session Address: "
+              << winrt::to_string(session_.SessionAddress())
+              << ", Session ID: " << session_.SessionId();
+    // Subscribe to events to prevent early teardown
+    session_.SessionStatusChanged([](auto const& s, auto const& e) {
+      LOG(INFO) << "GO: Session status changed";
+    });
+    co_return;
+  } catch (std::exception exception) {
+    LOG(ERROR) << __func__
+               << ": Failed to get session. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__
+               << ": Failed to get session. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
   } catch (...) {
-    LOG(ERROR) << "Failed to registered the device in WLAN-AutoConfig";
-    wifi_direct_device_ = nullptr;
-    connection_request.Close();
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
   }
-  return winrt::fire_and_forget();
+}
+
+fire_and_forget WifiDirectMedium::OnSessionRequested(
+    WiFiDirectServiceAdvertiser const& sender,
+    WiFiDirectServiceSessionRequestedEventArgs const& args) {
+  try {
+    auto request = args.GetSessionRequest();
+    if (!request) {
+      LOG(ERROR) << "OnSessionRequested returned null session request";
+      co_return;
+    }
+    device_info_ = request.DeviceInformation();
+    LOG(INFO) << "GO: OnSessionRequested: "
+              << winrt::to_string(device_info_.Id())
+              << " Is GroupFormationNeeded: "
+              << request.ProvisioningInfo().IsGroupFormationNeeded()
+              << ", SelectedConfigurationMethod: "
+              << ConfigMethodToString(
+                     request.ProvisioningInfo().SelectedConfigurationMethod());
+
+    LOG(INFO) << "GO: Dispatch to UI thread to call ConnectAsync";
+    dispatcher_queue_.TryEnqueue([this]() {
+      LOG(INFO) << "GO: TryEnqueue: calling ConnectAsync";
+
+      absl::MutexLock lock(mutex_);
+      WiFiDirectServiceSession session = nullptr;
+      auto pin = credentials_go_->GetPin();
+      if (pin.empty()) {
+        session = advertiser_.ConnectAsync(device_info_).get();  // NOLINT
+      } else {
+        session = advertiser_.ConnectAsync(device_info_, winrt::to_hstring(pin))
+                      .get();
+      }
+      LOG(INFO) << "GO: TryEnqueue: Wait for ConnectAsync finish";
+      if (!session) {
+        LOG(ERROR) << "OnSessionRequested returned null session";
+        return;
+      }
+      LOG(INFO) << "GO: TryEnqueue: OnSessionRequested: ConnectAsync succeeded";
+      session_ = std::move(session);
+
+      auto endpoint_pairs = session_.GetConnectionEndpointPairs();
+      if (endpoint_pairs.Size() > 0) {
+        auto const& pair = endpoint_pairs.GetAt(0);
+        ip_address_local_ =
+            winrt::to_string(pair.LocalHostName().DisplayName());
+        ip_address_remote_ =
+            winrt::to_string(pair.RemoteHostName().DisplayName());
+        LOG(INFO) << "GO: Local IP: " << ip_address_local_
+                  << ", Remote IP: " << ip_address_remote_;
+        is_ip_address_ready_.SignalAll();
+      } else {
+        LOG(WARNING) << "GO: No connection endpoint pairs found.";
+      }
+      medium_status_ |= kMediumStatusConnected;
+
+      LOG(INFO) << "Service Address: "
+                << winrt::to_string(session_.ServiceAddress())
+                << ", Service Name: "
+                << winrt::to_string(session_.ServiceName())
+                << ", Advertisement ID: " << session_.AdvertisementId()
+                << ", Session Address: "
+                << winrt::to_string(session_.SessionAddress())
+                << ", Session ID: " << session_.SessionId();
+      // Subscribe to events to prevent early teardown
+      session_.SessionStatusChanged([](auto const& s, auto const& e) {
+        LOG(INFO) << "GO: TryEnqueue: Session status changed";
+      });
+    });
+    LOG(INFO) << "GO: Dispatch to UI thread to call ConnectAsync finish";
+  } catch (std::exception exception) {
+    LOG(ERROR) << __func__
+               << ": Failed to get session. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__
+               << ": Failed to get session. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
+  }
 }
 
 bool WifiDirectMedium::ConnectWifiDirect(
-    WifiDirectCredentials* wifi_direct_credentials) {
-  absl::MutexLock lock(&mutex_);
-
-  try {
-    if (IsConnected()) {
-      LOG(WARNING) << "Already connected to AP, disconnect first.";
-      InternalDisconnectWifiDirect();
-    }
-
-    auto access = WiFiAdapter::RequestAccessAsync().get();
-    if (access != WiFiAccessStatus::Allowed) {
-      LOG(WARNING) << "Access Denied with reason: " << static_cast<int>(access);
-      return false;
-    }
-
-    auto adapters = WiFiAdapter::FindAllAdaptersAsync().get();
-    if (adapters.Size() < 1) {
-      LOG(WARNING) << "No WiFi Adapter found.";
-      return false;
-    }
-    wifi_adapter_ = adapters.GetAt(0);
-
-    // Retrieve the current connected network's profile
-    ConnectionProfile profile =
-        wifi_adapter_.NetworkAdapter().GetConnectedProfileAsync().get();
-    std::string ssid;
-
-    if (profile != nullptr && profile.IsWlanConnectionProfile()) {
-      ssid = winrt::to_string(
-          profile.WlanConnectionProfileDetails().GetConnectedSsid());
-    }
-
-    // SoftAP is an abbreviation for "software enabled access point".
-    WiFiAvailableNetwork nearby_softap{nullptr};
-    LOG(INFO) << "Scanning for Nearby WifiDirect GO's SSID: "
-              << wifi_direct_credentials->GetSSID();
-
-    // First time scan may not find our target GO, try 2 more times can
-    // almost guarantee to find the GO
-    wifi_adapter_.ScanAsync().get();
-
-    wifi_connected_network_ = nullptr;
-    for (int i = 0; i < kWifiDirectMaxScans; i++) {
-      for (const auto& network :
-           wifi_adapter_.NetworkReport().AvailableNetworks()) {
-        if (!wifi_connected_network_ && !ssid.empty() &&
-            (winrt::to_string(network.Ssid()) == ssid)) {
-          wifi_connected_network_ = network;
-          LOG(INFO) << "Save the current connected network: " << ssid;
-        } else if (!nearby_softap && winrt::to_string(network.Ssid()) ==
-                                         wifi_direct_credentials->GetSSID()) {
-          LOG(INFO) << "Found Nearby SSID: "
-                    << winrt::to_string(network.Ssid());
-          nearby_softap = network;
-        }
-        if (nearby_softap && wifi_connected_network_) break;
-      }
-      if (nearby_softap) break;
-      LOG(INFO) << "Scan ... ";
-      wifi_adapter_.ScanAsync().get();
-    }
-
-    if (!nearby_softap) {
-      LOG(INFO) << "WifiDirect GO is not found";
-      return false;
-    }
-
-    PasswordCredential creds;
-    creds.Password(winrt::to_hstring(wifi_direct_credentials->GetPassword()));
-
-    auto connect_result =
-        wifi_adapter_
-            .ConnectAsync(nearby_softap, WiFiReconnectionKind::Manual, creds)
-            .get();
-
-    if (connect_result == nullptr ||
-        connect_result.ConnectionStatus() != WiFiConnectionStatus::Success) {
-      LOG(INFO) << "Connecting failed with reason: "
-                << static_cast<int>(connect_result.ConnectionStatus());
-      return false;
-    }
-
-    // Make sure IP address is ready.
-    std::string ip_address;
-    for (int i = 0; i < kIpAddressMaxRetries; i++) {
-      LOG(INFO) << "Check IP address at attempt " << i;
-      std::vector<std::string> ip_addresses = GetIpv4Addresses();
-      if (ip_addresses.empty()) {
-        Sleep(kIpAddressRetryIntervalMillis / absl::Milliseconds(1));
-        continue;
-      }
-      ip_address = ip_addresses[0];
-      break;
-    }
-
-    if (ip_address.empty()) {
-      LOG(INFO) << "Failed to get IP address from WifiDirect GO.";
-      return false;
-    }
-
-    LOG(INFO) << "Got IP: " << ip_address << " from WifiDirect GO.";
-
-    std::string last_ssid = wifi_direct_credentials->GetSSID();
-    medium_status_ |= kMediumStatusConnected;
-    LOG(INFO) << "Connected to WifiDirect GO: " << last_ssid;
-
-    return true;
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Cannot connet to WifiDirect GO. Exception: "
-               << exception.what();
-  } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__
-               << ": Cannot connet to WifiDirect GO.  WinRT exception: "
-               << error.code() << ": " << winrt::to_string(error.message());
-  } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
+    const WifiDirectCredentials& credentials) {
+  LOG(INFO) << "WifiDirectMedium::ConnectWifiDirect";
+  absl::MutexLock lock(mutex_);
+  if (IsConnecting()) {
+    LOG(WARNING) << "Service discovery already running";
+    return false;
   }
-  return false;
-}
 
-void WifiDirectMedium::RestoreWifiConnection() {
-  if (!wifi_connected_network_ && wifi_adapter_) {
-    wifi_adapter_.Disconnect();
-    return;
-  }
-  if (wifi_adapter_) {
-    ConnectionProfile profile =
-        wifi_adapter_.NetworkAdapter().GetConnectedProfileAsync().get();
-    std::string ssid;
-
-    if (profile != nullptr && profile.IsWlanConnectionProfile()) {
-      ssid = winrt::to_string(
-          profile.WlanConnectionProfileDetails().GetConnectedSsid());
-      if (!ssid.empty() &&
-          (winrt::to_string(wifi_connected_network_.Ssid()) == ssid)) {
-        LOG(INFO) << "Already conneted to the previous WIFI network " << ssid
-                  << "! Skip restoration.";
-        return;
-      }
-    }
-
-    // Disconnect to the WiFi connection through the WiFi adapter.
-    wifi_adapter_.Disconnect();
-    LOG(INFO) << "Disconnected to current network.";
-
-    auto connect_result = wifi_adapter_
-                              .ConnectAsync(wifi_connected_network_,
-                                            WiFiReconnectionKind::Automatic)
-                              .get();
-
-    if (connect_result == nullptr ||
-        connect_result.ConnectionStatus() != WiFiConnectionStatus::Success) {
-      LOG(INFO) << "Connecting to previous network failed with reason: "
-                << static_cast<int>(connect_result.ConnectionStatus());
-    } else {
-      LOG(INFO) << "Restored the previous WIFI connection: "
-                << winrt::to_string(wifi_connected_network_.Ssid());
-    }
-    wifi_connected_network_ = nullptr;
-  }
-}
-
-bool WifiDirectMedium::DisconnectWifiDirect() {
-  absl::MutexLock lock(&mutex_);
-  try {
-    return InternalDisconnectWifiDirect();
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Disconnect WifiDirect GO failed. Exception: "
-               << exception.what();
-  } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__
-               << ": Disconnect WifiDirect GO failed. WinRT exception: "
-               << error.code() << ": " << winrt::to_string(error.message());
-  } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
-  }
-  return false;
-}
-
-bool WifiDirectMedium::InternalDisconnectWifiDirect() {
-  if (!IsConnected()) {
+  if (device_watcher_) {
     LOG(WARNING)
-        << "Cannot disconnect WifiDirect GO because it is not connected.";
-    return true;
+        << "Device Watcher has already been set, please investigate! Skip";
+    return false;
   }
 
-  if (wifi_adapter_) {
-    // Gets connected WiFi profile.
-    auto profile =
-        wifi_adapter_.NetworkAdapter().GetConnectedProfileAsync().get();
-
-    // Disconnect to the WiFi connection through the WiFi adapter.
-    RestoreWifiConnection();
-    wifi_adapter_ = nullptr;
-
-    // Try to remove the WiFi profile
-    if (profile != nullptr && profile.CanDelete() &&
-        profile.IsWlanConnectionProfile()) {
-      std::string ssid = winrt::to_string(
-          profile.WlanConnectionProfileDetails().GetConnectedSsid());
-
-      auto profile_delete_status = profile.TryDeleteAsync().get();
-      switch (profile_delete_status) {
-        case ConnectionProfileDeleteStatus::Success:
-          LOG(INFO) << "WiFi profile with SSID:" << ssid << " is deleted.";
-          break;
-        case ConnectionProfileDeleteStatus::DeniedBySystem:
-          LOG(ERROR) << "Failed to delete WiFi profile with SSID:" << ssid
-                     << " due to denied by system.";
-          break;
-        case ConnectionProfileDeleteStatus::DeniedByUser:
-          LOG(ERROR) << "Failed to delete WiFi profile with SSID:" << ssid
-                     << " due to denied by user.";
-          break;
-        case ConnectionProfileDeleteStatus::UnknownError:
-          LOG(ERROR) << "Failed to delete WiFi profile with SSID:" << ssid
-                     << " due to unknonw error.";
-          break;
-        default:
-          break;
-      }
-    }
+  credentials_gc_ = credentials;
+  if (credentials_gc_.GetServiceName().empty()) {
+    LOG(ERROR) << "GC: Service name is empty, return false";
+    return false;
   }
-
-  medium_status_ &= (~kMediumStatusConnected);
+  winrt::hstring device_selector = WiFiDirectService::GetSelector(
+      winrt::to_hstring(credentials_gc_.GetServiceName()));
+  const winrt::param::iterable<winrt::hstring> requested_properties =
+      winrt::single_threaded_vector<winrt::hstring>({
+          winrt::to_hstring("System.Devices.WiFiDirectServices.ServiceAddress"),
+          winrt::to_hstring("System.Devices.WiFiDirectServices.ServiceName"),
+          winrt::to_hstring(
+              "System.Devices.WiFiDirectServices.ServiceInformation"),
+          winrt::to_hstring(
+              "System.Devices.WiFiDirectServices.AdvertisementId"),
+          winrt::to_hstring(
+              "System.Devices.WiFiDirectServices.ServiceConfigMethods"),
+      });
+  LOG(INFO) << "Create device watcher";
+  device_watcher_ =
+      DeviceInformation::CreateWatcher(device_selector, requested_properties);
+  device_watcher_added_event_token_ =
+      device_watcher_.Added({this, &WifiDirectMedium::Watcher_DeviceAdded});
+  device_watcher_updated_event_token_ =
+      device_watcher_.Updated({this, &WifiDirectMedium::Watcher_DeviceUpdated});
+  device_watcher_removed_event_token_ =
+      device_watcher_.Removed({this, &WifiDirectMedium::Watcher_DeviceRemoved});
+  device_watcher_enumeration_completed_event_token_ =
+      device_watcher_.EnumerationCompleted(
+          {this, &WifiDirectMedium::Watcher_DeviceEnumerationCompleted});
+  device_watcher_stopped_event_token_ =
+      device_watcher_.Stopped({this, &WifiDirectMedium::Watcher_DeviceStopped});
+  device_watcher_.Start();
+  medium_status_ |= kMediumStatusConnecting;
+  LOG(INFO) << "Started to discover WifiDirect service and connect.";
   return true;
 }
 
-std::string WifiDirectMedium::GetErrorMessage(std::exception_ptr eptr) {
-  try {
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    } else {
-      return "";
-    }
-  } catch (const std::exception& e) {
-    return e.what();
+fire_and_forget WifiDirectMedium::Watcher_DeviceAdded(
+    DeviceWatcher sender, DeviceInformation device_info) {
+  LOG(INFO) << "Device Service founded for device ID "
+            << winrt::to_string(device_info.Id())
+            << ";   device name: " << winrt::to_string(device_info.Name());
+
+  auto props = device_info.Properties();
+  if (props.HasKey(L"System.Devices.WiFiDirectServices.ServiceName")) {
+    winrt::hstring svc_name = winrt::unbox_value<winrt::hstring>(
+        props.Lookup(L"System.Devices.WiFiDirectServices.ServiceName"));
+    LOG(INFO) << "Discovered service: " << winrt::to_string(svc_name);
   }
+  try {
+    service_ = co_await WiFiDirectService::FromIdAsync(device_info.Id());
+    if (!service_) {
+      LOG(ERROR) << "FromIdAsync returned null service";
+      co_return;
+    }
+    LOG(INFO) << "GC: ConnectAsync in Watcher_DeviceAdded";
+    service_.PreferGroupOwnerMode(false);
+
+    WiFiDirectServiceSession session = nullptr;
+    auto pin = credentials_gc_.GetPin();
+    if (pin.empty()) {
+      session = service_.ConnectAsync().get();  // NOLINT
+    } else {
+      auto prov_info = co_await service_.GetProvisioningInfoAsync(
+          WiFiDirectServiceConfigurationMethod::PinEntry);
+
+      if (prov_info.IsGroupFormationNeeded()) {
+        LOG(INFO) << "GC: Group formation needed";
+      } else {
+        LOG(INFO) << "GC: Group formation not needed";
+      }
+      LOG(INFO) << "GC: SelectedConfigurationMethod: "
+                << ConfigMethodToString(
+                       prov_info.SelectedConfigurationMethod());
+
+      session = service_.ConnectAsync(winrt::to_hstring(pin)).get();
+    }
+
+    if (!session) {
+      LOG(ERROR) << "GC: ConnectAsync returned null session";
+      co_return;
+    }
+    LOG(INFO) << "GC: ConnectAsync succeeded";
+    session_ = std::move(session);
+
+    auto endpoint_pairs = session_.GetConnectionEndpointPairs();
+    if (endpoint_pairs.Size() > 0) {
+      auto const& pair = endpoint_pairs.GetAt(0);
+      ip_address_local_ = winrt::to_string(pair.LocalHostName().DisplayName());
+      ip_address_remote_ =
+          winrt::to_string(pair.RemoteHostName().DisplayName());
+      LOG(INFO) << "GC: Local IP: " << ip_address_local_
+                << ", Remote IP: " << ip_address_remote_;
+    } else {
+      LOG(WARNING) << "GC: No connection endpoint pairs found.";
+    }
+
+    LOG(INFO) << "Service Address: "
+              << winrt::to_string(session_.ServiceAddress())
+              << ", Service Name: " << winrt::to_string(session_.ServiceName())
+              << ", Advertisement ID: " << session_.AdvertisementId()
+              << ", Session Address: "
+              << winrt::to_string(session_.SessionAddress())
+              << ", Session ID: " << session_.SessionId();
+    {
+      absl::MutexLock lock(mutex_);
+      is_ip_address_ready_.SignalAll();
+    }
+    medium_status_ |= kMediumStatusConnected;
+
+    // Subscribe to events to prevent early teardown
+    session_.SessionStatusChanged([](auto const& s, auto const& e) {
+      LOG(INFO) << "GC: TryEnqueue: Session status changed";
+    });
+  } catch (std::exception exception) {
+    LOG(ERROR) << __func__
+               << ": Failed to resolve WiFiDirectService from Id. Exception: "
+               << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR)
+        << __func__
+        << ": Failed to resolve WiFiDirectService from Id. WinRT exception: "
+        << error.code() << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
+  }
+}
+
+fire_and_forget WifiDirectMedium::Watcher_DeviceUpdated(
+    DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate) {
+  VLOG(1) << "WifiDirectMedium::Watcher_DeviceUpdated";
+  return fire_and_forget();
+}
+
+fire_and_forget WifiDirectMedium::Watcher_DeviceRemoved(
+    DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate) {
+  LOG(INFO) << "WifiDirectMedium::Watcher_DeviceRemoved";
+  return fire_and_forget();
+}
+
+fire_and_forget WifiDirectMedium::Watcher_DeviceEnumerationCompleted(
+    DeviceWatcher sender, IInspectable inspectable) {
+  LOG(INFO) << "WifiDirectMedium::Watcher_DeviceEnumerationCompleted";
+  return fire_and_forget();
+}
+
+fire_and_forget WifiDirectMedium::Watcher_DeviceStopped(
+    DeviceWatcher sender, IInspectable inspectable) {
+  medium_status_ &= (~kMediumStatusConnecting);
+  return fire_and_forget();
+}
+
+bool WifiDirectMedium::DisconnectWifiDirect() {
+  LOG(WARNING) << "Stop connecting.";
+  absl::MutexLock lock(mutex_);
+  if (!IsConnecting()) {
+    LOG(WARNING) << "no discovering service to stop.";
+    return false;
+  }
+  try {
+    device_watcher_.Stop();
+    device_watcher_.Added(device_watcher_added_event_token_);
+    device_watcher_.Updated(device_watcher_updated_event_token_);
+    device_watcher_.EnumerationCompleted(
+        device_watcher_enumeration_completed_event_token_);
+    device_watcher_.Removed(device_watcher_removed_event_token_);
+    device_watcher_.Stopped(device_watcher_stopped_event_token_);
+    medium_status_ &= (~kMediumStatusConnecting);
+    medium_status_ &= (~kMediumStatusConnected);
+    device_watcher_ = nullptr;
+    service_ = nullptr;
+    session_ = nullptr;
+    ip_address_local_.clear();
+    ip_address_remote_.clear();
+    return true;
+  } catch (std::exception exception) {
+    LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. Exception: "
+               << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. WinRT exception: "
+               << error.code() << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exeption.";
+  }
+  return false;
+}
+
+std::vector<WifiDirectMedium::WifiDirectAuthType>
+WifiDirectMedium::GetSupportedWifiDirectAuthTypes() const {
+  // Windows only supports WifiDirect with Service Discovery, which uses a PIN.
+  return {WifiDirectAuthType::WIFI_DIRECT_WITH_PIN};
 }
 
 }  // namespace windows

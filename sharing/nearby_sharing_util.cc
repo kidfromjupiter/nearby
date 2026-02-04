@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "absl/hash/hash.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "internal/base/file_path.h"
@@ -33,33 +34,8 @@
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/internal/base/encode.h"
 #include "sharing/internal/public/logging.h"
-#include "sharing/nearby_sharing_service.h"
 
 namespace nearby::sharing {
-
-std::string ReceiveSurfaceStateToString(
-    NearbySharingService::ReceiveSurfaceState state) {
-  switch (state) {
-    case NearbySharingService::ReceiveSurfaceState::kForeground:
-      return "FOREGROUND";
-    case NearbySharingService::ReceiveSurfaceState::kBackground:
-      return "BACKGROUND";
-    case NearbySharingService::ReceiveSurfaceState::kUnknown:
-      return "UNKNOWN";
-  }
-}
-
-std::string SendSurfaceStateToString(
-    NearbySharingService::SendSurfaceState state) {
-  switch (state) {
-    case NearbySharingService::SendSurfaceState::kForeground:
-      return "FOREGROUND";
-    case NearbySharingService::SendSurfaceState::kBackground:
-      return "BACKGROUND";
-    case NearbySharingService::SendSurfaceState::kUnknown:
-      return "UNKNOWN";
-  }
-}
 
 std::string PowerLevelToString(PowerLevel level) {
   switch (level) {
@@ -131,7 +107,9 @@ std::string GetDeviceId(
   }
 
   if (!certificate->id().empty()) {
-    return std::string(certificate->id().begin(), certificate->id().end());
+    return absl::BytesToHexString(absl::string_view(
+        reinterpret_cast<const char*>(certificate->id().data()),
+        certificate->id().size()));
   }
 
   return std::string(endpoint_id);

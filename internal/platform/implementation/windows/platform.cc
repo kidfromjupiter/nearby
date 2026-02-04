@@ -28,21 +28,22 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #undef StrCat  // Remove the Windows macro definition
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "internal/base/files.h"
 #include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/platform/implementation/atomic_boolean.h"
 #include "internal/platform/implementation/atomic_reference.h"
 #include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/condition_variable.h"
@@ -53,15 +54,14 @@
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/output_file.h"
 #include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/implementation/server_sync.h"
 #include "internal/platform/implementation/shared/count_down_latch.h"
 #include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/wifi.h"
 #include "internal/platform/implementation/wifi_lan.h"
+#include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/windows/atomic_boolean.h"
 #include "internal/platform/implementation/windows/atomic_reference.h"
-#include "internal/platform/implementation/windows/ble_medium.h"
-#include "internal/platform/implementation/windows/ble_v2.h"
+#include "internal/platform/implementation/windows/ble.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/bluetooth_classic_medium.h"
 #include "internal/platform/implementation/windows/condition_variable.h"
@@ -72,12 +72,11 @@
 #include "internal/platform/implementation/windows/mutex.h"
 #include "internal/platform/implementation/windows/preferences_manager.h"
 #include "internal/platform/implementation/windows/scheduled_executor.h"
-#include "internal/platform/implementation/windows/server_sync.h"
 #include "internal/platform/implementation/windows/string_utils.h"
 #include "internal/platform/implementation/windows/submittable_executor.h"
 #include "internal/platform/implementation/windows/timer.h"
-#include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/implementation/windows/wifi.h"
+#include "internal/platform/implementation/windows/wifi_direct.h"
 #include "internal/platform/implementation/windows/wifi_hotspot.h"
 #include "internal/platform/implementation/windows/wifi_lan.h"
 #include "internal/platform/logging.h"
@@ -160,8 +159,7 @@ std::string ImplementationPlatform::GetAppDataPath(
   std::string app_data_path_utf8 =
       windows::string_utils::WideStringToString(app_data_path);
   std::replace(app_data_path_utf8.begin(), app_data_path_utf8.end(), '\\', '/');
-  return absl::StrCat(app_data_path_utf8, "/", kNCRelativePath, "/",
-                        file_name);
+  return absl::StrCat(app_data_path_utf8, "/", kNCRelativePath, "/", file_name);
 }
 
 OSName ImplementationPlatform::GetCurrentOS() { return OSName::kWindows; }
@@ -195,15 +193,14 @@ ImplementationPlatform::CreateConditionVariable(Mutex* mutex) {
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    PayloadId payload_id, std::int64_t total_size) {
+    PayloadId payload_id) {
   std::string file_name(std::to_string(payload_id));
-  return windows::IOFile::CreateInputFile(GetDownloadPath(file_name),
-                                          total_size);
+  return windows::IOFile::CreateInputFile(GetDownloadPath(file_name));
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    const std::string& file_path, size_t size) {
-  return windows::IOFile::CreateInputFile(file_path, size);
+    const std::string& file_path) {
+  return windows::IOFile::CreateInputFile(file_path);
 }
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
@@ -222,8 +219,7 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
   // Verifies that a path is a valid directory.
   if (!Files::DirectoryExists(folder_path)) {
     if (!Files::CreateDirectories(folder_path)) {
-      LOG(ERROR) << "Failed to create directory: "
-                 << folder_path.ToString();
+      LOG(ERROR) << "Failed to create directory: " << folder_path.ToString();
       return nullptr;
     }
   }
@@ -257,26 +253,15 @@ ImplementationPlatform::CreateBluetoothClassicMedium(
   return std::make_unique<windows::BluetoothClassicMedium>(adapter);
 }
 
-std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(
-    BluetoothAdapter& adapter) {
-  return std::make_unique<windows::BleMedium>(adapter);
-}
-
 // TODO(b/184975123): replace with real implementation.
-std::unique_ptr<api::ble_v2::BleMedium>
-ImplementationPlatform::CreateBleV2Medium(api::BluetoothAdapter& adapter) {
-  return std::make_unique<windows::BleV2Medium>(adapter);
+std::unique_ptr<api::ble::BleMedium> ImplementationPlatform::CreateBleMedium(
+    api::BluetoothAdapter& adapter) {
+  return std::make_unique<windows::BleMedium>(adapter);
 }
 
 std::unique_ptr<api::CredentialStorage>
 ImplementationPlatform::CreateCredentialStorage() {
   return nullptr;
-}
-
-// TODO(b/184975123): replace with real implementation.
-std::unique_ptr<ServerSyncMedium>
-ImplementationPlatform::CreateServerSyncMedium() {
-  return std::unique_ptr<windows::ServerSyncMedium>();
 }
 
 // TODO(b/184975123): replace with real implementation.
@@ -299,11 +284,18 @@ ImplementationPlatform::CreateWifiHotspotMedium() {
 
 std::unique_ptr<WifiDirectMedium>
 ImplementationPlatform::CreateWifiDirectMedium() {
-  return nullptr;
+  return std::make_unique<windows::WifiDirectMedium>();
 }
 
 // TODO(b/261663238) replace with real implementation.
 std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
+  return nullptr;
+}
+
+std::unique_ptr<AppLifecycleMonitor>
+ImplementationPlatform::CreateAppLifecycleMonitor(
+    std::function<void(AppLifecycleMonitor::AppLifecycleState)>
+        state_updated_callback) {
   return nullptr;
 }
 

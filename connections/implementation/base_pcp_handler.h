@@ -55,7 +55,7 @@
 #include "internal/interop/device.h"
 #include "internal/interop/device_provider.h"
 #include "internal/platform/atomic_boolean.h"
-#include "internal/platform/ble_v2.h"
+#include "internal/platform/ble.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
@@ -242,14 +242,6 @@ class BasePcpHandler : public PcpHandler,
           ble_peripheral(std::move(peripheral)) {}
 
     BlePeripheral ble_peripheral;
-  };
-
-  struct BleV2Endpoint : public BasePcpHandler::DiscoveredEndpoint {
-    BleV2Endpoint(DiscoveredEndpoint endpoint, BleV2Peripheral peripheral)
-        : DiscoveredEndpoint(std::move(endpoint)),
-          ble_peripheral(std::move(peripheral)) {}
-
-    BleV2Peripheral ble_peripheral;
   };
 
   struct AwdlEndpoint : public DiscoveredEndpoint {
@@ -569,8 +561,7 @@ class BasePcpHandler : public PcpHandler,
   // address is created and appended into discovered_endpoints_ with key
   // endpoint_id.
   bool AppendRemoteBluetoothMacAddressEndpoint(
-      const std::string& endpoint_id,
-      MacAddress remote_bluetooth_mac_address,
+      const std::string& endpoint_id, MacAddress remote_bluetooth_mac_address,
       const DiscoveryOptions& local_discovery_options)
       ABSL_LOCKS_EXCLUDED(discovered_endpoint_mutex_);
 
@@ -585,8 +576,8 @@ class BasePcpHandler : public PcpHandler,
 
   void ProcessPreConnectionInitiationFailure(
       ClientProxy* client, Medium medium, const std::string& endpoint_id,
-      EndpointChannel* channel, bool is_incoming, absl::Time start_time,
-      Status status,
+      EndpointChannel* channel, bool is_incoming, bool log_failure,
+      absl::Time start_time, Status status,
       location::nearby::proto::connections::OperationResultCode
           operation_result_code,
       Future<Status>* result);

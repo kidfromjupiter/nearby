@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef CORE_INTERNAL_BLE_ENDPOINT_CHANNEL_H_
-#define CORE_INTERNAL_BLE_ENDPOINT_CHANNEL_H_
+#ifndef CONNECTIONS_IMPLEMENTATION_BLE_ENDPOINT_CHANNEL_H_
+#define CONNECTIONS_IMPLEMENTATION_BLE_ENDPOINT_CHANNEL_H_
 
+#include <memory>
 #include <string>
 
 #include "connections/implementation/base_endpoint_channel.h"
+#include "connections/implementation/mediums/ble/ble_socket.h"
 #include "internal/platform/ble.h"
+#include "internal/platform/byte_array.h"
+#include "internal/platform/exception.h"
 
 namespace nearby {
 namespace connections {
@@ -29,9 +33,17 @@ class BleEndpointChannel final : public BaseEndpointChannel {
   BleEndpointChannel(const std::string& service_id,
                      const std::string& channel_name, BleSocket socket);
 
+  // A refactor version of the above constructor.
+  BleEndpointChannel(const std::string& service_id,
+                     const std::string& channel_name,
+                     std::unique_ptr<mediums::BleSocket> socket);
+
   location::nearby::proto::connections::Medium GetMedium() const override;
 
   int GetMaxTransmitPacketSize() const override;
+
+  ExceptionOr<ByteArray> DispatchPacket() override;
+  Exception WritePayloadLength(int payload_length) override;
 
  private:
   static constexpr int kDefaultBleMaxTransmitPacketSize = 512;  // 512 bytes
@@ -39,9 +51,10 @@ class BleEndpointChannel final : public BaseEndpointChannel {
   void CloseImpl() override;
 
   BleSocket ble_socket_;
+  std::unique_ptr<mediums::BleSocket> ble_socket_2_ = nullptr;
 };
 
 }  // namespace connections
 }  // namespace nearby
 
-#endif  // CORE_INTERNAL_BLE_ENDPOINT_CHANNEL_H_
+#endif  // CONNECTIONS_IMPLEMENTATION_BLE_ENDPOINT_CHANNEL_H_

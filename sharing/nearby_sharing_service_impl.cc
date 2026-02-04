@@ -63,7 +63,6 @@
 #include "sharing/common/nearby_share_prefs.h"
 #include "sharing/constants.h"
 #include "sharing/contacts/nearby_share_contact_manager.h"
-#include "sharing/contacts/nearby_share_contact_manager_impl.h"
 #include "sharing/fast_initiation/nearby_fast_initiation.h"
 #include "sharing/fast_initiation/nearby_fast_initiation_impl.h"
 #include "sharing/file_attachment.h"
@@ -72,6 +71,7 @@
 #include "sharing/incoming_share_session.h"
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/sharing_platform.h"
+#include "sharing/internal/api/sharing_rpc_client.h"
 #include "sharing/internal/base/encode.h"
 #include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/internal/public/context.h"
@@ -107,10 +107,12 @@ namespace nearby::sharing {
 namespace {
 
 using BlockedVendorId = ::nearby::sharing::Advertisement::BlockedVendorId;
+using ::absl::Milliseconds;
 using ::location::nearby::proto::sharing::OSType;
 using ::location::nearby::proto::sharing::ResponseToIntroduction;
 using ::location::nearby::proto::sharing::SessionStatus;
 using ::nearby::sharing::api::SharingPlatform;
+using ::nearby::sharing::api::SharingRpcClientFactory;
 using ::nearby::sharing::proto::DataUsage;
 using ::nearby::sharing::proto::DeviceVisibility;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
@@ -126,10 +128,6 @@ constexpr absl::Duration kInvalidateSurfaceStateDelayAfterTransferDone =
 constexpr absl::Duration kProcessShutdownPendingTimerDelay =  // NOLINT
     absl::Seconds(15);
 constexpr absl::Duration kProcessNetworkChangeTimerDelay = absl::Seconds(1);
-
-// Cooldown period after a successful incoming share before we allow the "Device
-// nearby is sharing" notification to appear again.
-constexpr absl::Duration kFastInitiationScannerCooldown = absl::Seconds(8);
 
 // The maximum number of certificate downloads that can be performed during a
 // discovery session.
@@ -206,12 +204,38 @@ std::string GenerateDeviceId() {
   return id;
 }
 
+std::string ReceiveSurfaceStateToString(
+    NearbySharingService::ReceiveSurfaceState state) {
+  switch (state) {
+    case NearbySharingService::ReceiveSurfaceState::kForeground:
+      return "FOREGROUND";
+    case NearbySharingService::ReceiveSurfaceState::kBackground:
+      return "BACKGROUND";
+    case NearbySharingService::ReceiveSurfaceState::kUnknown:
+      return "UNKNOWN";
+  }
+}
+
+std::string SendSurfaceStateToString(
+    NearbySharingService::SendSurfaceState state) {
+  switch (state) {
+    case NearbySharingService::SendSurfaceState::kForeground:
+      return "FOREGROUND";
+    case NearbySharingService::SendSurfaceState::kBackground:
+      return "BACKGROUND";
+    case NearbySharingService::SendSurfaceState::kUnknown:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace
 
 NearbySharingServiceImpl::NearbySharingServiceImpl(
     std::unique_ptr<TaskRunner> service_thread, Context* context,
     SharingPlatform& sharing_platform,
+    std::unique_ptr<SharingRpcClientFactory> nearby_share_client_factory,
     std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
+    std::unique_ptr<NearbyShareContactManager> contact_manager,
     analytics::AnalyticsRecorder* analytics_recorder)
     : service_thread_(std::move(service_thread)),
       context_(context),
@@ -220,14 +244,11 @@ NearbySharingServiceImpl::NearbySharingServiceImpl(
       account_manager_(sharing_platform.GetAccountManager()),
       analytics_recorder_(*analytics_recorder),
       nearby_connections_manager_(std::move(nearby_connections_manager)),
-      nearby_share_client_factory_(
-          sharing_platform.CreateSharingRpcClientFactory(context_->GetClock(),
-                                                         &analytics_recorder_)),
+      nearby_share_client_factory_(std::move(nearby_share_client_factory)),
       local_device_data_manager_(
           NearbyShareLocalDeviceDataManagerImpl::Factory::Create(
               preference_manager_, account_manager_, device_info_)),
-      contact_manager_(NearbyShareContactManagerImpl::Factory::Create(
-          context_, account_manager_, nearby_share_client_factory_.get())),
+      contact_manager_(std::move(contact_manager)),
       nearby_fast_initiation_(
           NearbyFastInitiationImpl::Factory::Create(context_)),
       settings_(std::make_unique<NearbyShareSettings>(
@@ -239,9 +260,13 @@ NearbySharingServiceImpl::NearbySharingServiceImpl(
       outgoing_targets_manager_(
           context->GetClock(), service_thread_.get(),
           nearby_connections_manager_.get(), &analytics_recorder_,
+          absl::bind_front(
+              &NearbySharingServiceImpl::NotifyShareTargetDiscovered, this),
           absl::bind_front(&NearbySharingServiceImpl::NotifyShareTargetUpdated,
                            this),
           absl::bind_front(&NearbySharingServiceImpl::NotifyShareTargetLost,
+                           this),
+          absl::bind_front(&NearbySharingServiceImpl::OnOutgoingTransferUpdate,
                            this)) {
   CHECK(nearby_connections_manager_);
   CHECK(analytics_recorder);
@@ -255,11 +280,8 @@ NearbySharingServiceImpl::NearbySharingServiceImpl(
       profile_path, nearby_share_client_factory_.get()),
 
   certificate_manager_->AddObserver(this);
-  context_->GetConnectivityManager()->RegisterConnectionListener(
-      kConnectionListenerName,
-      [this](nearby::ConnectivityManager::ConnectionType type,
-             bool is_lan_connected, bool is_internet_connected) {
-        OnNetworkChanged(type);
+  context_->GetConnectivityManager()->RegisterLanListener(
+      kConnectionListenerName, [this](bool is_lan_connected) {
         OnLanConnectedChanged(is_lan_connected);
       });
 
@@ -299,7 +321,6 @@ void NearbySharingServiceImpl::Shutdown(
         service_observers_.Clear();
 
         StopAdvertising();
-        StopFastInitiationScanning();
         StopFastInitiationAdvertising();
         StopScanning();
         nearby_connections_manager_->Shutdown();
@@ -308,7 +329,7 @@ void NearbySharingServiceImpl::Shutdown(
 
         certificate_manager_->RemoveObserver(this);
         account_manager_.RemoveObserver(this);
-        context_->GetConnectivityManager()->UnregisterConnectionListener(
+        context_->GetConnectivityManager()->UnregisterLanListener(
             kConnectionListenerName);
         context_->GetBluetoothAdapter().RemoveObserver(this);
         nearby_fast_initiation_->RemoveObserver(this);
@@ -482,7 +503,7 @@ void NearbySharingServiceImpl::RegisterSendSurface(
           // request comes from a surface with the blocked vendor ID.
           wrapped_callback.OnShareTargetDiscovered(share_target);
           transfer_callback->OnTransferUpdate(
-              share_target, attachment_container, transfer_metadata);
+              share_target, *attachment_container, transfer_metadata);
         }
 
         // Sync down data from Nearby server when the sending flow starts,
@@ -594,7 +615,7 @@ void NearbySharingServiceImpl::RegisterReceiveSurface(
           auto& [share_target, attachment_container, transfer_metadata] =
               *last_incoming_metadata_;
           transfer_callback->OnTransferUpdate(
-              share_target, attachment_container, transfer_metadata);
+              share_target, *attachment_container, transfer_metadata);
         }
 
         GetReceiveCallbacksMapFromState(state).insert(
@@ -716,7 +737,7 @@ void NearbySharingServiceImpl::SendAttachments(
             CreateEndpointInfo(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
                                local_device_data_manager_->GetDeviceName());
         if (!endpoint_info) {
-          LOG(WARNING)  << "Could not create local endpoint info.";
+          LOG(WARNING) << "Could not create local endpoint info.";
           std::move(status_codes_callback)(StatusCodes::kError);
           return;
         }
@@ -729,29 +750,28 @@ void NearbySharingServiceImpl::SendAttachments(
           return;
         }
 
-        session->InitiateSendAttachments(std::move(attachment_container));
-
         app_info_->SetActiveFlag();
 
-        OnTransferStarted(/*is_incoming=*/false);
-        is_connecting_ = true;
-        InvalidateSendSurfaceState();
-
-        // Send process initialized successfully, from now on status updated
-        // will be sent out via OnOutgoingTransferUpdate().
-        session->UpdateTransferMetadata(
-            TransferMetadataBuilder()
-                .set_status(TransferMetadata::Status::kConnecting)
-                .build());
-
-        CreatePayloads(
-            *session, [this, endpoint_info = std::move(*endpoint_info)](
-                          OutgoingShareSession& session, bool success) {
-              OnCreatePayloads(std::move(endpoint_info), session, success);
-            });
-
+        if (session->InitiateSendAttachments(
+                std::move(attachment_container))) {
+          OutgoingSessionConnect(*session, std::move(*endpoint_info));
+        }
         std::move(status_codes_callback)(StatusCodes::kOk);
       });
+}
+
+void NearbySharingServiceImpl::OutgoingSessionConnect(
+  OutgoingShareSession& session, std::vector<uint8_t> endpoint_info) {
+  OnTransferStarted(/*is_incoming=*/false);
+  is_connecting_ = true;
+  InvalidateSendSurfaceState();
+
+  int64_t share_target_id = session.share_target().id;
+  session.Connect(
+      std::move(endpoint_info), settings_->GetDataUsage(),
+      GetDisableWifiHotspotState(),
+      absl::bind_front(&NearbySharingServiceImpl::OnOutgoingConnection, this,
+                       share_target_id));
 }
 
 bool NearbySharingServiceImpl::OutgoingSessionAccept(
@@ -1040,15 +1060,23 @@ NearbySharingServiceImpl::InternalUnregisterSendSurface(
         *last_outgoing_metadata_;
     for (auto& background_transfer_callback : background_send_surface_map_) {
       background_transfer_callback.first->OnTransferUpdate(
-          share_target, attachment_container, transfer_metadata);
+          share_target, *attachment_container, transfer_metadata);
     }
   }
-  if (foreground_send_surface_map_.empty() &&
-      background_send_surface_map_.empty()) {
-    LOG(INFO) << __func__ << ": Last send surface has been unregistered";
-    // Clear outgoing_share_targets, outgoing_share_sessions and
-    // discovery_cache.
-    outgoing_targets_manager_.Cleanup();
+  if (foreground_send_surface_map_.empty()) {
+    if (background_send_surface_map_.empty()) {
+      LOG(INFO) << __func__ << ": Last send surface has been unregistered";
+      // Clear outgoing_share_targets, outgoing_share_sessions and
+      // discovery_cache.
+      outgoing_targets_manager_.Cleanup();
+    } else {
+      LOG(INFO) << __func__
+                << ": All foreground send surface has been unregistered";
+      outgoing_targets_manager_.AllTargetsLost(
+          Milliseconds(NearbyFlags::GetInstance().GetInt64Flag(
+              config_package_nearby::nearby_sharing_feature::
+                  kUnregisterTargetDiscoveryCacheLostExpiryMs)));
+    }
   }
 
   VLOG(1) << __func__ << ": A SendSurface has been unregistered: "
@@ -1098,7 +1126,7 @@ NearbySharingServiceImpl::InternalUnregisterReceiveSurface(
         *last_incoming_metadata_;
     for (auto& background_callback : background_receive_callbacks_map_) {
       background_callback.first->OnTransferUpdate(
-          share_target, attachment_container, transfer_metadata);
+          share_target, *attachment_container, transfer_metadata);
     }
   }
 
@@ -1162,12 +1190,11 @@ std::string NearbySharingServiceImpl::Dump() const {
                  preference_manager_,
                  PrefNames::kSchedulerDownloadPublicCertificates)
           << std::endl;
-  sstream
-      << " Upload local device certificates: "
-      << ConvertToReadableSchedule(
-             preference_manager_,
-             PrefNames::kSchedulerUploadLocalDeviceCertificates)
-      << std::endl;
+  sstream << " Upload local device certificates: "
+          << ConvertToReadableSchedule(
+                 preference_manager_,
+                 PrefNames::kSchedulerUploadLocalDeviceCertificates)
+          << std::endl;
   sstream << " Private certificates expiration: "
           << ConvertToReadableSchedule(
                  preference_manager_,
@@ -1328,26 +1355,30 @@ void NearbySharingServiceImpl::OnLockStateChanged(bool locked) {
 
 void NearbySharingServiceImpl::AdapterPresentChanged(
     sharing::api::BluetoothAdapter* adapter, bool present) {
-  RunOnNearbySharingServiceThread(
-      "bt_adapter_present_changed", [this, adapter, present]() {
-        VLOG(1) << "Bluetooth adapter present state changed. (" << present
-                << ")";
-        NearbySharingService::Observer::AdapterState state =
-            MapAdapterState(present, adapter->IsPowered());
-        service_observers_.NotifyBluetoothStatusChanged(state);
-        InvalidateSurfaceState();
-      });
+  RunOnNearbySharingServiceThread("bt_adapter_present_changed", [this, adapter,
+                                                                 present]() {
+    VLOG(1) << "Bluetooth adapter present state changed. (" << present << ")";
+    NearbySharingService::Observer::AdapterState state =
+        MapAdapterState(present, adapter->IsPowered());
+    service_observers_.NotifyBluetoothStatusChanged(state);
+  });
 }
 
 void NearbySharingServiceImpl::AdapterPoweredChanged(
     sharing::api::BluetoothAdapter* adapter, bool powered) {
-  RunOnNearbySharingServiceThread(
-      "bt_adapter_power_changed", [this, adapter, powered]() {
+  // When adpater is powered on, it takes some time for the RFCOMM service to
+  // be ready.  If we don't wait the RfCommServiceProvider::CreateAsync() call
+  // fails with a "device is not ready for use" error.
+  // Waiting 500ms seems to be enough to allow it to reliably work.
+  // Should investigate if there is a better events to listen to.
+  RunOnNearbySharingServiceThreadDelayed(
+      "bt_adapter_power_changed", absl::Milliseconds(500),
+      [this, adapter, powered]() {
         VLOG(1) << "Bluetooth adapter power state changed. (" << powered << ")";
         NearbySharingService::Observer::AdapterState state =
             MapAdapterState(adapter->IsPresent(), powered);
         service_observers_.NotifyBluetoothStatusChanged(state);
-        InvalidateSurfaceState();
+        StopAdvertisingAndInvalidateSurfaceState();
       });
 }
 
@@ -1608,10 +1639,11 @@ void NearbySharingServiceImpl::HandleEndpointLost(
 
   discovered_advertisements_to_retry_map_.erase(endpoint_id);
   discovered_advertisements_retried_set_.erase(endpoint_id);
-  outgoing_targets_manager_.MoveToDiscoveryCache(std::string(endpoint_id),
-                       NearbyFlags::GetInstance().GetInt64Flag(
-                           config_package_nearby::nearby_sharing_feature::
-                               kDiscoveryCacheLostExpiryMs));
+  outgoing_targets_manager_.OnShareTargetLost(
+      std::string(endpoint_id),
+      Milliseconds(NearbyFlags::GetInstance().GetInt64Flag(
+          config_package_nearby::nearby_sharing_feature::
+              kDiscoveryCacheLostExpiryMs)));
   FinishEndpointDiscoveryEvent();
 }
 
@@ -1703,53 +1735,8 @@ void NearbySharingServiceImpl::OnOutgoingDecryptedCertificate(
     return;
   }
   LogShareTargetDiscovered(*share_target);
-  if (outgoing_targets_manager_.FindDuplicateInOutgoingShareTargets(
-          endpoint_id, *share_target)) {
-    outgoing_targets_manager_.DeduplicateInOutgoingShareTarget(
-        *share_target, endpoint_id, std::move(certificate));
-    FinishEndpointDiscoveryEvent();
-    return;
-  }
-  bool in_discovery_cache =
-      outgoing_targets_manager_.FindDuplicateInDiscoveryCache(endpoint_id,
-                                                              *share_target);
-  VLOG(1) << __func__ << ": Adding (endpoint_id=" << endpoint_id
-          << ", share_target_id=" << share_target->id
-          << ") to outgoing share target map";
-  outgoing_targets_manager_.CreateOutgoingShareSession(
-      *share_target, endpoint_id, std::move(certificate),
-      absl::bind_front(&NearbySharingServiceImpl::OnOutgoingTransferUpdate,
-                       this));
-  if (in_discovery_cache) {
-    NotifyShareTargetUpdated(*share_target);
-
-    LOG(INFO)
-        << __func__
-        << ": [Dedupped] Reported NotifyShareTargetUpdated to all surfaces "
-           "for share_target: "
-        << share_target->ToString();
-    FinishEndpointDiscoveryEvent();
-    return;
-  }
-
-  // Update the endpoint id for the share target.
-  LOG(INFO) << __func__ << ": An endpoint: " << endpoint_id
-            << " has been discovered, with an advertisement "
-               "containing a valid share target with id: "
-            << share_target->id;
-
-  // Notifies the user that we discovered a device.
-  VLOG(1) << __func__ << ": There are "
-          << (foreground_send_surface_map_.size() +
-              background_send_surface_map_.size())
-          << " discovery callbacks be called.";
-
-  NotifyShareTargetDiscovered(*share_target);
-
-  VLOG(1) << __func__ << ": NotifyShareTargetDiscovered: share_target: "
-          << share_target->ToString() << " endpoint_id=" << endpoint_id
-          << " to all send surfaces.";
-
+  outgoing_targets_manager_.OnShareTargetDiscovered(*share_target, endpoint_id,
+                                                    std::move(certificate));
   FinishEndpointDiscoveryEvent();
 }
 
@@ -1807,14 +1794,9 @@ bool NearbySharingServiceImpl::HasAvailableConnectionMediums() {
   bool is_wifi_lan_enabled = NearbyFlags::GetInstance().GetBoolFlag(
       config_package_nearby::nearby_sharing_feature::kEnableMediumWifiLan);
 
-  ConnectivityManager::ConnectionType connection_type =
-      context_->GetConnectivityManager()->GetConnectionType();
-
-  bool hasNetworkConnection =
-      connection_type == ConnectivityManager::ConnectionType::kWifi ||
-      connection_type == ConnectivityManager::ConnectionType::kEthernet;
-
-  return IsBluetoothPowered() || (is_wifi_lan_enabled && hasNetworkConnection);
+  return IsBluetoothPowered() ||
+         (is_wifi_lan_enabled &&
+          context_->GetConnectivityManager()->IsLanConnected());
 }
 
 void NearbySharingServiceImpl::InvalidateSurfaceState() {
@@ -1905,7 +1887,6 @@ void NearbySharingServiceImpl::InvalidateFastInitiationAdvertising() {
 
 void NearbySharingServiceImpl::InvalidateReceiveSurfaceState() {
   InvalidateAdvertisingState();
-  InvalidateFastInitiationScanning();
 }
 
 void NearbySharingServiceImpl::InvalidateAdvertisingState() {
@@ -2006,8 +1987,7 @@ void NearbySharingServiceImpl::InvalidateAdvertisingState() {
       *endpoint_info,
       /*listener=*/this, power_level, data_usage,
       visibility == DeviceVisibility::DEVICE_VISIBILITY_EVERYONE,
-      force_new_endpoint_id_,
-      [this, visibility, data_usage](Status status) {
+      force_new_endpoint_id_, [this, visibility, data_usage](Status status) {
         // Log analytics event of advertising start.
         analytics_recorder_.NewAdvertiseDevicePresenceStart(
             advertising_session_id_, visibility,
@@ -2070,7 +2050,10 @@ void NearbySharingServiceImpl::StartScanning() {
   is_scanning_ = true;
   InvalidateReceiveSurfaceState();
 
-  outgoing_targets_manager_.DisableAllOutgoingShareTargets();
+  outgoing_targets_manager_.AllTargetsLost(
+      Milliseconds(NearbyFlags::GetInstance().GetInt64Flag(
+          config_package_nearby::nearby_sharing_feature::
+              kUnregisterTargetDiscoveryCacheLostExpiryMs)));
   discovered_advertisements_to_retry_map_.clear();
   discovered_advertisements_retried_set_.clear();
 
@@ -2129,102 +2112,6 @@ NearbySharingService::StatusCodes NearbySharingServiceImpl::StopScanning() {
 void NearbySharingServiceImpl::StopAdvertisingAndInvalidateSurfaceState() {
   if (advertising_power_level_ != PowerLevel::kUnknown) StopAdvertising();
   InvalidateSurfaceState();
-}
-
-void NearbySharingServiceImpl::InvalidateFastInitiationScanning() {
-  bool is_hardware_offloading_supported =
-      IsBluetoothPresent() && nearby_fast_initiation_->IsScanOffloadSupported();
-
-  // Hardware offloading support is computed when the bluetooth adapter becomes
-  // available. We set the hardware supported state on |settings_| to notify the
-  // UI of state changes. InvalidateFastInitiationScanning gets triggered on
-  // adapter change events.
-  settings_->SetIsFastInitiationHardwareSupported(
-      is_hardware_offloading_supported);
-
-  if (fast_initiation_scanner_cooldown_timer_ &&
-      fast_initiation_scanner_cooldown_timer_->IsRunning()) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning due to post-transfer "
-               "cooldown period";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  // Screen is off. Do no work.
-  if (is_screen_locked_) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning because the screen is locked.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  if (!IsBluetoothPowered()) {
-    VLOG(1)
-        << __func__
-        << ": Stopping background scanning because bluetooth is powered down.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  // We're scanning for other nearby devices. Don't background scan.
-  if (is_scanning_) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning because we're scanning "
-               "for other devices.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  if (is_transferring_) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning because we're currently "
-               "in the midst of a transfer.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  if (advertising_power_level_ == PowerLevel::kHighPower) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning because we're already "
-               "in high visibility mode.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  if (!is_hardware_offloading_supported) {
-    VLOG(1) << __func__
-            << ": Stopping background scanning because hardware "
-               "support is not available or not ready.";
-    StopFastInitiationScanning();
-    return;
-  }
-
-  StartFastInitiationScanning();
-}
-
-void NearbySharingServiceImpl::StartFastInitiationScanning() {
-  VLOG(1) << __func__ << ": Starting background scanning.";
-
-  if (nearby_fast_initiation_->IsScanning()) {
-    return;
-  }
-
-  nearby_fast_initiation_->StartScanning(
-      /*devices_discovered_callback=*/[]() {},
-      /*devices_not_discovered_callback=*/[]() {},
-      [this]() { StopFastInitiationScanning(); });
-}
-
-void NearbySharingServiceImpl::StopFastInitiationScanning() {
-  VLOG(1) << __func__ << ": Stop fast initiation scanning.";
-  if (!nearby_fast_initiation_->IsScanning()) {
-    return;
-  }
-
-  nearby_fast_initiation_->StopScanning(
-      []() { VLOG(1) << __func__ << ": Stopped fast initiation scanning."; });
-  VLOG(1) << __func__ << ": Stopped background scanning.";
 }
 
 void NearbySharingServiceImpl::ScheduleRotateBackgroundAdvertisementTimer() {
@@ -2308,70 +2195,6 @@ void NearbySharingServiceImpl::OnOutgoingConnection(
   }
 }
 
-void NearbySharingServiceImpl::CreatePayloads(
-    OutgoingShareSession& session,
-    std::function<void(OutgoingShareSession&, bool)> callback) {
-  int64_t share_target_id = session.share_target().id;
-  if (!session.file_payloads().empty() || !session.text_payloads().empty() ||
-      !session.wifi_credentials_payloads().empty()) {
-    // We may have already created the payloads in the case of retry, so we can
-    // skip this step.
-    std::move(callback)(session, /*success=*/false);
-    return;
-  }
-  session.CreateTextPayloads();
-  session.CreateWifiCredentialsPayloads();
-  file_handler_.OpenFiles(
-      session.GetFilePaths(),
-      [this, share_target_id, callback = std::move(callback)](
-          std::vector<NearbyFileHandler::FileInfo> file_infos) {
-        RunOnNearbySharingServiceThread(
-            "open_files",
-            [this, share_target_id, callback = std::move(callback),
-             file_infos = std::move(file_infos)]() {
-              OutgoingShareSession* session =
-                  outgoing_targets_manager_.GetOutgoingShareSession(
-                      share_target_id);
-              if (session == nullptr) {
-                return;
-              }
-              bool result = session->CreateFilePayloads(file_infos);
-              std::move(callback)(*session, result);
-            });
-      });
-}
-
-void NearbySharingServiceImpl::OnCreatePayloads(
-    std::vector<uint8_t> endpoint_info, OutgoingShareSession& session,
-    bool success) {
-  bool has_payloads = !session.text_payloads().empty() ||
-                      !session.file_payloads().empty() ||
-                      !session.wifi_credentials_payloads().empty();
-  if (!success || !has_payloads) {
-    LOG(WARNING) << __func__
-                 << ": Failed to send file to remote ShareTarget. Failed to "
-                    "create payloads.";
-    session.UpdateTransferMetadata(
-        TransferMetadataBuilder()
-            .set_status(TransferMetadata::Status::kMediaUnavailable)
-            .build());
-    return;
-  }
-  // Log analytics event of describing attachments.
-  analytics_recorder_.NewDescribeAttachments(session.attachment_container());
-
-  std::optional<std::vector<uint8_t>> bluetooth_mac_address =
-      GetBluetoothMacAddressForShareTarget(session);
-
-  int64_t share_target_id = session.share_target().id;
-
-  session.Connect(
-      std::move(endpoint_info), std::move(bluetooth_mac_address),
-      settings_->GetDataUsage(), GetDisableWifiHotspotState(),
-      absl::bind_front(&NearbySharingServiceImpl::OnOutgoingConnection, this,
-                       share_target_id));
-}
-
 void NearbySharingServiceImpl::Fail(IncomingShareSession& session,
                                     TransferMetadata::Status status) {
   RunOnNearbySharingServiceThreadDelayed(
@@ -2432,11 +2255,16 @@ void NearbySharingServiceImpl::OnIncomingTransferUpdate(
   }
   if (metadata.status() != TransferMetadata::Status::kCancelled &&
       metadata.status() != TransferMetadata::Status::kRejected) {
-    last_incoming_metadata_ =
-        std::make_tuple(session.share_target(), session.attachment_container(),
-                        TransferMetadataBuilder::Clone(metadata)
-                            .set_is_original(false)
-                            .build());
+    last_incoming_metadata_ = std::make_tuple(
+        session.share_target(),
+        AttachmentContainer::Builder(
+            session.attachment_container().GetTextAttachments(),
+            session.attachment_container().GetFileAttachments(),
+            session.attachment_container().GetWifiCredentialsAttachments())
+            .Build(),
+        TransferMetadataBuilder::Clone(metadata)
+            .set_is_original(false)
+            .build());
   } else {
     last_incoming_metadata_ = std::nullopt;
   }
@@ -2524,11 +2352,16 @@ void NearbySharingServiceImpl::OnOutgoingTransferUpdate(
   if (has_foreground_send_surface && metadata.is_final_status()) {
     last_outgoing_metadata_ = std::nullopt;
   } else {
-    last_outgoing_metadata_ =
-        std::make_tuple(session.share_target(), session.attachment_container(),
-                        TransferMetadataBuilder::Clone(metadata)
-                            .set_is_original(false)
-                            .build());
+    last_outgoing_metadata_ = std::make_tuple(
+        session.share_target(),
+        AttachmentContainer::Builder(
+            session.attachment_container().GetTextAttachments(),
+            session.attachment_container().GetFileAttachments(),
+            session.attachment_container().GetWifiCredentialsAttachments())
+            .Build(),
+        TransferMetadataBuilder::Clone(metadata)
+            .set_is_original(false)
+            .build());
   }
 }
 
@@ -2646,20 +2479,12 @@ void NearbySharingServiceImpl::OnOutgoingConnectionKeyVerificationDone(
     return;
   }
   // Auto Accept if key verification is successful or skip sender confirmation.
-  bool be_advanced_protection_enabled =
+  bool protection_enabled =
       preference_manager_.GetBoolean(PrefNames::kAdvancedProtectionEnabled,
                                      /*default_value=*/false);
-  bool mendel_advanced_protection_enabled =
-      !NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_sharing_feature::
-              kSenderSkipsConfirmation);
-  bool advanced_protection_mismatch =
-      (be_advanced_protection_enabled != mendel_advanced_protection_enabled);
-  // Continue to use mendel flag until we have confidence that the Nearby BE
-  // flag has the same value.
-  session->SetAdvancedProtectionStatus(mendel_advanced_protection_enabled,
-                                       advanced_protection_mismatch);
-  if (session->token().empty() || !mendel_advanced_protection_enabled) {
+  session->SetAdvancedProtectionStatus(protection_enabled,
+                                       /*advanced_protection_mismatch=*/false);
+  if (session->token().empty() || !protection_enabled) {
     // Auto accept if no token or if advanced protection is disabled.
     OutgoingSessionAccept(*session);
   } else {
@@ -2931,12 +2756,6 @@ void NearbySharingServiceImpl::OnIncomingFilesMetadataUpdated(
           // ShareTarget already disconnected.
           return;
         }
-        fast_initiation_scanner_cooldown_timer_ = std::make_unique<ThreadTimer>(
-            *service_thread_, "fast_initiation_scanner_cooldown_timer",
-            kFastInitiationScannerCooldown, [this]() {
-              fast_initiation_scanner_cooldown_timer_.reset();
-              InvalidateFastInitiationScanning();
-            });
         // Make sure to call this before calling Disconnect, or we risk losing
         // some transfer updates in the receive case due to the Disconnect call
         // cleaning up share targets.
@@ -3054,20 +2873,6 @@ IncomingShareSession* NearbySharingServiceImpl::GetIncomingShareSession(
   return &it->second;
 }
 
-std::optional<std::vector<uint8_t>>
-NearbySharingServiceImpl::GetBluetoothMacAddressForShareTarget(
-    OutgoingShareSession& session) {
-  const std::optional<NearbyShareDecryptedPublicCertificate>& certificate =
-      session.certificate();
-  if (!certificate) {
-    LOG(ERROR) << __func__ << ": No decrypted public certificate found for "
-               << "share target id: " << session.share_target().id;
-    return std::nullopt;
-  }
-
-  return GetBluetoothMacAddressFromCertificate(*certificate);
-}
-
 void NearbySharingServiceImpl::UnregisterShareTarget(int64_t share_target_id) {
   LOG(INFO) << __func__ << ": Unregister share target " << share_target_id;
 
@@ -3093,21 +2898,20 @@ void NearbySharingServiceImpl::UnregisterShareTarget(int64_t share_target_id) {
     // Find the endpoint id that matches the given share target.
     OutgoingShareSession* session =
         outgoing_targets_manager_.GetOutgoingShareSession(share_target_id);
+    absl::Duration cache_retention =
+        Milliseconds(NearbyFlags::GetInstance().GetInt64Flag(
+            config_package_nearby::nearby_sharing_feature::
+                kUnregisterTargetDiscoveryCacheLostExpiryMs));
     if (session != nullptr) {
-      LOG(INFO) << __func__ << ": [Dedupped] Move the endpoint "
-                << session->endpoint_id() << " to discovery_cache.";
-      outgoing_targets_manager_.MoveToDiscoveryCache(
-          session->endpoint_id(),
-          NearbyFlags::GetInstance().GetInt64Flag(
-              config_package_nearby::nearby_sharing_feature::
-                  kUnregisterTargetDiscoveryCacheLostExpiryMs));
+      outgoing_targets_manager_.OnShareTargetLost(session->endpoint_id(),
+                                                  cache_retention);
     } else {
       // Be careful not to clear out the share session map if a new session
       // was started during the cancellation delay.
       if (!is_scanning_ && !is_transferring_) {
         LOG(INFO) << "Cannot find session for target " << share_target_id
                   << " clearing all outgoing sessions.";
-        outgoing_targets_manager_.DisableAllOutgoingShareTargets();
+        outgoing_targets_manager_.AllTargetsLost(cache_retention);
       }
     }
 
@@ -3179,15 +2983,11 @@ void NearbySharingServiceImpl::SetInHighVisibility(
   service_observers_.NotifyHighVisibilityChanged(in_high_visibility_);
 }
 
-void NearbySharingServiceImpl::OnNetworkChanged(
-    nearby::ConnectivityManager::ConnectionType type) {
+void NearbySharingServiceImpl::OnLanConnectedChanged(bool connected) {
   on_network_changed_delay_timer_ = std::make_unique<ThreadTimer>(
       *service_thread_, "on_network_changed_delay_timer",
       kProcessNetworkChangeTimerDelay,
       [this]() { StopAdvertisingAndInvalidateSurfaceState(); });
-}
-
-void NearbySharingServiceImpl::OnLanConnectedChanged(bool connected) {
   RunOnNearbySharingServiceThread(
       "lan_connection_changed", [this, connected]() {
         VLOG(1) << __func__

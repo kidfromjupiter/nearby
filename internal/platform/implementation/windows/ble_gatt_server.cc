@@ -35,7 +35,7 @@
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/utils.h"
@@ -85,8 +85,8 @@ using ::winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::
 using ::winrt::Windows::Foundation::Collections::IVectorView;
 using ::winrt::Windows::Storage::Streams::Buffer;
 using ::winrt::Windows::Storage::Streams::DataWriter;
-using Permission = api::ble_v2::GattCharacteristic::Permission;
-using Property = api::ble_v2::GattCharacteristic::Property;
+using Permission = api::ble::GattCharacteristic::Permission;
+using Property = api::ble::GattCharacteristic::Property;
 
 constexpr absl::Duration kGattServerTimeout = absl::Milliseconds(500);
 constexpr int kGattServerCheckIntervalInMills = 50;
@@ -113,18 +113,18 @@ std::string ConvertGattStatusToString(
 }  // namespace
 
 BleGattServer::BleGattServer(api::BluetoothAdapter* adapter,
-                             api::ble_v2::ServerGattConnectionCallback callback)
+                             api::ble::ServerGattConnectionCallback callback)
     : adapter_(dynamic_cast<BluetoothAdapter*>(adapter)),
       gatt_connection_callback_(std::move(callback)) {
   DCHECK(adapter_ != nullptr);
 }
 
-absl::optional<api::ble_v2::GattCharacteristic>
+absl::optional<api::ble::GattCharacteristic>
 BleGattServer::CreateCharacteristic(
     const Uuid& service_uuid, const Uuid& characteristic_uuid,
-    api::ble_v2::GattCharacteristic::Permission permission,
-    api::ble_v2::GattCharacteristic::Property property) {
-  absl::MutexLock lock(&mutex_);
+    api::ble::GattCharacteristic::Permission permission,
+    api::ble::GattCharacteristic::Property property) {
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << __func__ << ": create characteristic, service_uuid: "
             << std::string(service_uuid)
             << ", characteristic_uuid: " << std::string(characteristic_uuid);
@@ -136,7 +136,7 @@ BleGattServer::CreateCharacteristic(
 
   service_uuid_ = service_uuid;
 
-  api::ble_v2::GattCharacteristic gatt_characteristic;
+  api::ble::GattCharacteristic gatt_characteristic;
   gatt_characteristic.uuid = characteristic_uuid;
   gatt_characteristic.service_uuid = service_uuid;
   gatt_characteristic.permission = permission;
@@ -151,9 +151,9 @@ BleGattServer::CreateCharacteristic(
 }
 
 bool BleGattServer::UpdateCharacteristic(
-    const api::ble_v2::GattCharacteristic& characteristic,
+    const api::ble::GattCharacteristic& characteristic,
     const nearby::ByteArray& value) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << __func__
             << ": update characteristic: " << std::string(characteristic.uuid);
 
@@ -192,9 +192,9 @@ bool BleGattServer::UpdateCharacteristic(
 }
 
 absl::Status BleGattServer::NotifyCharacteristicChanged(
-    const api::ble_v2::GattCharacteristic& characteristic, bool confirm,
+    const api::ble::GattCharacteristic& characteristic, bool confirm,
     const ByteArray& new_value) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   // Currently, the method is not hooked up at platform layer.
   VLOG(1) << __func__
           << ": Notify characteristic=" << std::string(characteristic.uuid)
@@ -205,7 +205,7 @@ absl::Status BleGattServer::NotifyCharacteristicChanged(
 void BleGattServer::Stop() {
   absl::AnyInvocable<void()> close_notifier = nullptr;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     VLOG(1) << __func__ << ": Start to stop GATT server.";
     if (gatt_service_provider_ != nullptr) {
       try {
@@ -396,7 +396,7 @@ bool BleGattServer::InitializeGattServer() {
 
 bool BleGattServer::StartAdvertisement(const ByteArray& service_data,
                                        bool is_connectable) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   try {
     VLOG(1) << __func__ << ": service_data="
@@ -475,7 +475,7 @@ bool BleGattServer::StartAdvertisement(const ByteArray& service_data,
 }
 
 bool BleGattServer::StopAdvertisement() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   try {
     LOG(INFO) << __func__ << ": stop advertisement.";
@@ -520,7 +520,7 @@ bool BleGattServer::StopAdvertisement() {
 }
 
 void BleGattServer::SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   close_notifier_ = std::move(notifier);
 }
 
@@ -598,9 +598,8 @@ void BleGattServer::Characteristic_SubscribedClientsChanged(
                    ::winrt::to_hstring(gatt_local_characteristic.Uuid()));
 
   try {
-    std::vector<api::ble_v2::GattCharacteristic>
-        added_subscribed_characteristics;
-    std::vector<api::ble_v2::GattCharacteristic>
+    std::vector<api::ble::GattCharacteristic> added_subscribed_characteristics;
+    std::vector<api::ble::GattCharacteristic>
         removed_subscribed_characteristics;
 
     GattCharacteristicData* characteristic_data =
@@ -685,7 +684,7 @@ void BleGattServer::ServiceProvider_AdvertisementStatusChanged(
 }
 
 void BleGattServer::NotifyValueChanged(
-    const api::ble_v2::GattCharacteristic& gatt_characteristic) {
+    const api::ble::GattCharacteristic& gatt_characteristic) {
   try {
     GattCharacteristicData* characteristic_data =
         FindGattCharacteristicData(gatt_characteristic);
@@ -743,7 +742,7 @@ BleGattServer::FindGattCharacteristicData(
 
 BleGattServer::GattCharacteristicData*
 BleGattServer::FindGattCharacteristicData(
-    const api::ble_v2::GattCharacteristic& gatt_characteristic) {
+    const api::ble::GattCharacteristic& gatt_characteristic) {
   for (auto& characteristic_data : gatt_characteristic_datas_) {
     if (gatt_characteristic.uuid ==
         characteristic_data.gatt_characteristic.uuid) {

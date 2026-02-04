@@ -30,7 +30,7 @@ option objc_class_prefix = "GNCP";
 
 // Top-level log proto for all NearbySharing logging.
 // Each log contains a key (event_type), value (a verb-noun event) pair.
-// Next Tag: 87
+// Next Tag: 90
 // LINT.IfChange
 message SharingLog {
   /* justification = {
@@ -234,6 +234,13 @@ message SharingLog {
   optional CloudUploadStart cloud_upload_start = 85;
 
   optional CloudUploadEnd cloud_upload_end = 86;
+
+  optional CloudDownloadStart cloud_download_start = 87;
+
+  optional CloudDownloadEnd cloud_download_end = 88;
+
+  // Cloud sharing RPC call event.
+  optional CloudSharingRpcResult cloud_sharing_rpc_result = 89;
 
   // Used only for Nearby Share Windows app now.
   message AppInfo {
@@ -483,6 +490,9 @@ message SharingLog {
     // provider is not external.
     optional string external_provider_id = 11
         /* type = ST_SESSION_ID */;
+    // Is this file transfer from a direct share target. This is only available
+    // for the sender log.
+    optional bool is_direct_share = 12;
   }
 
   // TODO(fdi): may consider adding a field about decipherability later.
@@ -615,6 +625,9 @@ message SharingLog {
     optional int32 connection_medium = 14;
     // The data usage of the user settings.
     optional location.nearby.proto.sharing.DataUsage data_usage = 15;
+
+    // True if the sender and receiver are mutual contacts.
+    optional bool is_mutual_contact = 16;
   }
 
   // EventType: RECEIVE_ATTACHMENTS_START
@@ -914,6 +927,7 @@ message SharingLog {
       ANDROID_APP = 3;
       AUDIO = 4;
       DOCUMENT = 5;
+      CONTACT_CARD = 6;
     }
   }
 
@@ -1046,20 +1060,66 @@ message SharingLog {
   // EventType: CLOUD_CREATE_SHARING_REQUEST
   message CloudCreateSharingRequest {
     optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudCreateSharingResult result = 2;
+    // Time taken to download attachments from the Intent in milliseconds.
+    optional int64 attachment_download_latency_millis = 3;
+    // Time taken to generate and encrypt the preview thumbnail in milliseconds.
+    optional int64 preview_thumbnail_latency_millis = 4;
+    // Time taken to make the CreateSharing RPC call in milliseconds.
+    optional int64 rpc_latency_millis = 5;
   }
+
   // EventType: CLOUD_REGISTER_RECEIVER used by QR code cloud web receiver
-  message CloudRegisterReceiver {}
+  message CloudRegisterReceiver {
+    optional location.nearby.proto.sharing.CloudRegisterReceiverResult result =
+        1;
+  }
 
   // EventType: CLOUD_UPLOAD_START used by QR code cloud web sender
   // The cloud_sharing_id and flow_id are logged in the event metadata.
   message CloudUploadStart {
     optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
   }
 
   // EventType: CLOUD_UPLOAD_END used by QR code cloud web sender
   // The cloud_sharing_id and flow_id are logged in the event metadata.
   message CloudUploadEnd {
     repeated CloudAttachmentInfo upload_infos = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_DOWNLOAD_START used by QR code cloud web receiver
+  // The cloud_sharing_id and cloud_receiver_session_id are logged in the
+  // event_metadata into the anonymous logs.
+  message CloudDownloadStart {
+    optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_DOWNLOAD_END used by QR code cloud web receiver
+  // The cloud_sharing_id and cloud_receiver_session_id are logged in the
+  // event_metadata into the anonymous logs.
+  message CloudDownloadEnd {
+    repeated CloudAttachmentInfo download_infos = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_SHARING_RPC_RESULT
+  // Event logging the result of a Cloud Sharing RPC call. This event captures
+  // the type of RPC, its outcome, and performance metrics.
+  message CloudSharingRpcResult {
+    // The specific RPC method that was called.
+    optional string rpc_name = 1;
+    // The canonical gRPC status code (io.grpc.Status.Code) resulting from the
+    // call.
+    optional int32 status_code = 2;
+    // The total time taken for the RPC call to complete, in milliseconds.
+    optional int64 latency_millis = 3;
+    // The unique identifier for the cloud sharing session, if available at the
+    // time of the call. This helps correlate RPC events to a specific sharing
+    // session.
+    optional string cloud_sharing_id = 4;
   }
 }
 // LINT.ThenChange(//depot/google3/logs/proto/location/nearby/nearby_client_log.proto)

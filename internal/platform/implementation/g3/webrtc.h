@@ -59,7 +59,7 @@ class WebRtcMedium : public api::WebRtcMedium {
   WebRtcMedium() = default;
   ~WebRtcMedium() override;
 
-  const std::string GetDefaultCountryCode() override;
+  std::string GetDefaultCountryCode() override;
 
   // Creates and returns a new webrtc::PeerConnectionInterface object via
   // |callback|.

@@ -1,4 +1,4 @@
-// Copyright 2022-2023 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,22 +16,24 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "internal/flags/nearby_flags.h"
 #include "internal/platform/clock.h"
 #include "internal/platform/task_runner.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
-#include "sharing/flags/generated/nearby_sharing_feature_flags.h"
 #include "sharing/internal/public/logging.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/outgoing_share_session.h"
@@ -45,157 +47,188 @@
 namespace nearby::sharing {
 
 OutgoingTargetsManager::OutgoingTargetsManager(
-    Clock* clock, TaskRunner* service_thread,
-    NearbyConnectionsManager* connections_manager,
+    Clock* absl_nonnull clock, TaskRunner* absl_nonnull service_thread,
+    NearbyConnectionsManager* absl_nonnull connections_manager,
     analytics::AnalyticsRecorder* analytics_recorder,
+    absl::AnyInvocable<void(const ShareTarget&)>
+        share_target_discovered_callback,
     absl::AnyInvocable<void(const ShareTarget&)> share_target_updated_callback,
-    absl::AnyInvocable<void(const ShareTarget&)> share_target_lost_callback)
+    absl::AnyInvocable<void(const ShareTarget&)> share_target_lost_callback,
+    std::function<void(OutgoingShareSession& session,
+                       const TransferMetadata& metadata)>
+        transfer_update_callback)
     : clock_(*clock),
       service_thread_(*service_thread),
       connections_manager_(*connections_manager),
       analytics_recorder_(*analytics_recorder),
+      share_target_discovered_callback_(
+          std::move(share_target_discovered_callback)),
       share_target_updated_callback_(std::move(share_target_updated_callback)),
-      share_target_lost_callback_(std::move(share_target_lost_callback)) {}
+      share_target_lost_callback_(std::move(share_target_lost_callback)),
+      transfer_update_callback_(std::move(transfer_update_callback)) {}
 
-
-void OutgoingTargetsManager::DeduplicateInOutgoingShareTarget(
-    const ShareTarget& share_target, absl::string_view endpoint_id,
+void OutgoingTargetsManager::OnShareTargetDiscovered(
+    ShareTarget share_target, absl::string_view endpoint_id,
     std::optional<NearbyShareDecryptedPublicCertificate> certificate) {
-  // TODO(b/343764269): may need to update last_outgoing_metadata_ if the
-  // deduped target id matches the one in last_outgoing_metadata_.
-  // But since we do not modify the share target of a connected session, it may
-  // not happen.
-
-  auto session_it = outgoing_share_session_map_.find(share_target.id);
-  if (session_it == outgoing_share_session_map_.end()) {
-    LOG(WARNING) << __func__ << ": share_target.id=" << share_target.id
-                 << " not found in outgoing share session map.";
+  std::optional<int64_t> old_id =
+      FindExistingTargetId(endpoint_id, share_target);
+  if (old_id.has_value()) {
+    // If the duplicate is found, share_target.id needs to be updated to the old
+    // "discovered" share_target_id so ShareTarget updates matches a target
+    // that was discovered before.
+    share_target.id = *old_id;
+    LOG(INFO) << __func__
+              << ": ShareTarget updated, endpoint_id: " << endpoint_id
+              << ", share_target: " << share_target.ToString();
+    auto session_it = outgoing_share_session_map_.find(*old_id);
+    if (session_it != outgoing_share_session_map_.end()) {
+      OutgoingShareSession& session = session_it->second;
+      std::string old_endpoint_id = session.endpoint_id();
+      if (session.UpdateSessionForDedup(share_target, std::move(certificate),
+                                        endpoint_id) &&
+          old_endpoint_id != endpoint_id) {
+        // Session updated and endpoint_id changed.  Need to update endpoint id
+        // to share target id mapping.
+        outgoing_target_id_map_.erase(old_endpoint_id);
+        outgoing_target_id_map_.insert(
+            {std::string(endpoint_id), share_target.id});
+      }
+    }
+    share_target_updated_callback_(share_target);
     return;
   }
-  if (session_it->second.IsConnected()) {
-    LOG(INFO) << __func__ << ": share_target.id=" << share_target.id
-              << " is connected, not updating outgoing_share_session_map_.";
-    return;
+  old_id = FindInDiscoveryCache(endpoint_id, share_target);
+  bool in_discovery_cache = old_id.has_value();
+  if (in_discovery_cache) {
+    share_target.id = *old_id;
   }
-  session_it->second.UpdateSessionForDedup(share_target, std::move(certificate),
-                                           endpoint_id);
-
-  share_target_updated_callback_(share_target);
-
   LOG(INFO) << __func__
-            << ": [Dedupped] NotifyShareTargetUpdated to all surfaces "
-               "for share_target: "
-            << share_target.ToString();
+            << (in_discovery_cache ? ": Recovered from discovery cache"
+                                   : ": Discovered new target")
+            << ": endpoint_id=" << endpoint_id
+            << ", share_target=" << share_target.ToString();
+  AddTarget(share_target, endpoint_id, std::move(certificate));
+  if (in_discovery_cache) {
+    share_target_updated_callback_(share_target);
+  } else {
+    share_target_discovered_callback_(share_target);
+  }
 }
 
-bool OutgoingTargetsManager::FindDuplicateInDiscoveryCache(
-    absl::string_view endpoint_id, ShareTarget& share_target) {
+std::optional<int64_t> OutgoingTargetsManager::FindInDiscoveryCache(
+    absl::string_view endpoint_id, const ShareTarget& share_target) {
   auto it = discovery_cache_.find(endpoint_id);
   if (it != discovery_cache_.end()) {
+    int64_t old_id = it->second.share_target.id;
     // If endpoint info changes for an endpoint ID, NC will send a rediscovery
     // event for the same endpoint id.
-    LOG(INFO) << __func__
-              << ": [Dedupped] Found duplicate endpoint_id: " << endpoint_id
-              << ", share_target.id changed from: " << share_target.id << " to "
-              << it->second.share_target.id;
-    share_target.id = it->second.share_target.id;
+    LOG(INFO) << __func__ << ": Found existing endpoint_id: " << endpoint_id
+              << ", mapping share_target.id: " << share_target.id
+              << " to: " << it->second.share_target.id;
     discovery_cache_.erase(it);
-    return true;
+    return old_id;
   }
 
-  for (auto it = discovery_cache_.begin(); it != discovery_cache_.end(); ++it) {
-    if (it->second.share_target.device_id == share_target.device_id) {
-      LOG(INFO) << __func__
-                << ": [Dedupped] Found duplicate device_id, share_target.id "
-                   "changed from: "
-                << share_target.id << " to " << it->second.share_target.id
-                << ". New endpoint_id: " << endpoint_id;
-      // Share targets in discovery cache have receive_disabled set to true.
-      // Copy only the id field from cache entry,
-      share_target.id = it->second.share_target.id;
-      discovery_cache_.erase(it);
-      return true;
-    }
-  }
-  return false;
-}
-
-bool OutgoingTargetsManager::FindDuplicateInOutgoingShareTargets(
-    absl::string_view endpoint_id, ShareTarget& share_target) {
-  // If the duplicate is found, share_target.id needs to be updated to the old
-  // "discovered" share_target_id so NotifyShareTargetUpdated matches a target
-  // that was discovered before.
-
-  auto it = outgoing_share_target_map_.find(endpoint_id);
-  if (it != outgoing_share_target_map_.end()) {
-    // If endpoint info changes for an endpoint ID, NC will send a rediscovery
-    // event for the same endpoint id.
-    LOG(INFO) << __func__
-              << ": [Dedupped] Found duplicate endpoint_id: " << endpoint_id
-              << " in outgoing_share_target_map, share_target.id changed from: "
-              << share_target.id << " to " << it->second.id;
-    share_target.id = it->second.id;
-    it->second = share_target;
-    return true;
-  }
-
-  for (auto it = outgoing_share_target_map_.begin();
-       it != outgoing_share_target_map_.end(); ++it) {
-    if (it->second.device_id == share_target.device_id) {
-      LOG(INFO)
-          << __func__
-          << ": [Dedupped] Found duplicate device_id, endpoint ID "
-             "changed from: "
-          << it->first << " to " << endpoint_id
-          << " in outgoing_share_target_map, share_target.id changed from: "
-          << share_target.id << " to " << it->second.id;
-      share_target.id = it->second.id;
-      outgoing_share_target_map_.erase(it);
-      outgoing_share_target_map_.insert_or_assign(endpoint_id, share_target);
-      return true;
-    }
-  }
-  return false;
-}
-
-std::optional<ShareTarget>
-OutgoingTargetsManager::RemoveOutgoingShareTargetWithEndpointId(
-    absl::string_view endpoint_id) {
-  VLOG(1) << __func__ << ":Outgoing connection to " << endpoint_id
-          << " disconnected";
-  auto target_node = outgoing_share_target_map_.extract(endpoint_id);
-  if (target_node.empty()) {
-    LOG(WARNING) << __func__ << ": endpoint_id=" << endpoint_id
-                 << " not found in outgoing share target map.";
+  if (share_target.device_id.empty()) {
+    // Do not match empty device_id.
     return std::nullopt;
   }
-  ShareTarget& share_target = target_node.mapped();
-  VLOG(1) << __func__ << ": Removing (endpoint_id=" << endpoint_id
-          << ", share_target.id=" << target_node.mapped().id
-          << ") from outgoing share target map";
+  auto device_id_it = std::find_if(
+      discovery_cache_.begin(), discovery_cache_.end(),
+      [&share_target](const auto& pair) {
+        return pair.second.share_target.device_id == share_target.device_id;
+      });
+  if (device_id_it != discovery_cache_.end()) {
+    int64_t old_id = device_id_it->second.share_target.id;
+    LOG(INFO) << __func__
+              << ": Found existing device_id, updating endpoint ID: "
+              << device_id_it->first << " to: " << endpoint_id
+              << " , mapping share_target.id: " << share_target.id
+              << " to: " << old_id;
+    discovery_cache_.erase(device_id_it);
+    return old_id;
+  }
+  return std::nullopt;
+}
 
+std::optional<int64_t> OutgoingTargetsManager::FindExistingTargetId(
+    absl::string_view endpoint_id,
+    const ShareTarget& share_target) {
+  auto it = outgoing_target_id_map_.find(endpoint_id);
+  if (it != outgoing_target_id_map_.end()) {
+    int64_t old_share_target_id = it->second;
+    // If endpoint info changes for an endpoint ID, NC will send a rediscovery
+    // event for the same endpoint id.
+    LOG(INFO) << __func__ << ": Found existing endpoint_id: " << endpoint_id
+              << ", mapping share_target.id: " << share_target.id
+              << " to: " << old_share_target_id;
+    return old_share_target_id;
+  }
+
+  if (share_target.device_id.empty()) {
+    // Do not match empty device_id.
+    return std::nullopt;
+  }
+  auto device_id_it = std::find_if(
+      outgoing_share_session_map_.begin(), outgoing_share_session_map_.end(),
+      [&share_target](const auto& pair) {
+        return pair.second.share_target().device_id == share_target.device_id;
+      });
+  if (device_id_it != outgoing_share_session_map_.end()) {
+    int64_t old_share_target_id = device_id_it->second.share_target().id;
+    LOG(INFO) << __func__
+              << ": Found existing device_id, updating endpoint ID: "
+              << device_id_it->first << " to: " << endpoint_id
+              << " , mapping share_target.id: " << share_target.id
+              << " to: " << old_share_target_id;
+    return old_share_target_id;
+  }
+  return std::nullopt;
+}
+
+std::optional<ShareTarget> OutgoingTargetsManager::RemoveTarget(
+    absl::string_view endpoint_id, bool close_connected) {
+  VLOG(1) << __func__ << ":Removing endpoint_id " << endpoint_id;
+  auto it = outgoing_target_id_map_.find(endpoint_id);
+  if (it == outgoing_target_id_map_.end()) {
+    LOG(WARNING) << __func__ << ": endpoint_id=" << endpoint_id
+                 << " not found.";
+    return std::nullopt;
+  }
+  int64_t share_target_id = it->second;
+  auto session_it = outgoing_share_session_map_.find(share_target_id);
+  if (session_it == outgoing_share_session_map_.end()) {
+    LOG(ERROR) << __func__ << ": share_target.id=" << share_target_id
+                 << " not found in outgoing share session map.";
+    outgoing_target_id_map_.erase(it);
+    return std::nullopt;
+  }
+  if (!close_connected && session_it->second.IsActive()) {
+    LOG(INFO) << __func__ << ": share_target.id=" << share_target_id
+              << " is active, not removing.";
+    return std::nullopt;
+  }
+  VLOG(1) << __func__
+          << ": Removing share_target.id=" << share_target_id
+          << " from outgoing share target map";
+  outgoing_target_id_map_.erase(it);
   // Do not destroy the session until it has been removed from the map.
   // Session destruction can trigger callbacks that traverses the map and it
   // cannot access the map while it is being modified.
-  auto session_node =
-      outgoing_share_session_map_.extract(target_node.mapped().id);
-  if (!session_node.empty()) {
-    session_node.mapped().OnDisconnect();
-  } else {
-    LOG(WARNING) << __func__ << ": share_target.id=" << target_node.mapped().id
-                 << " not found in outgoing share session map.";
-  }
-  return share_target;
+  auto session_node = outgoing_share_session_map_.extract(session_it);
+  ShareTarget removed_target = session_node.mapped().share_target();
+  session_node.mapped().OnDisconnect();
+  return std::move(removed_target);
 }
 
 // Pass endpoint_id by value here since we remove entries from the
-// outgoing_share_target_map_ in this function, and some callers like
-// DisableAllOutgoingShareTargets pass the map item key as the endpoint_id.
+// outgoing_target_id_map_ in this function, and some callers like
+// AllTargetsLost pass the map item key as the endpoint_id.
 // This prevents the endpoint_id from being invalidated in this function.
-void OutgoingTargetsManager::MoveToDiscoveryCache(std::string endpoint_id,
-                                                    uint64_t expiry_ms) {
+void OutgoingTargetsManager::OnShareTargetLost(std::string endpoint_id,
+                                               absl::Duration retention) {
   std::optional<ShareTarget> share_target_opt =
-      RemoveOutgoingShareTargetWithEndpointId(endpoint_id);
+      RemoveTarget(endpoint_id, /*close_connected=*/false);
   if (!share_target_opt.has_value()) {
     return;
   }
@@ -205,8 +238,7 @@ void OutgoingTargetsManager::MoveToDiscoveryCache(std::string endpoint_id,
   cache_entry.share_target.receive_disabled = true;
   cache_entry.expiry_timer = std::make_unique<ThreadTimer>(
       service_thread_, absl::StrCat("discovery_cache_timeout_", endpoint_id),
-      absl::Milliseconds(expiry_ms),
-      [this, expiry_ms, endpoint_id = std::string(endpoint_id)]() {
+      retention, [this, retention, endpoint_id]() {
         auto cache_node = discovery_cache_.extract(endpoint_id);
         if (cache_node.empty()) {
           LOG(WARNING) << "Trying to remove endpoint_id: " << endpoint_id
@@ -214,45 +246,53 @@ void OutgoingTargetsManager::MoveToDiscoveryCache(std::string endpoint_id,
           return;
         }
         ShareTarget& share_target = cache_node.mapped().share_target;
-        LOG(INFO) << ": Removing (endpoint_id=" << endpoint_id
-                  << ", share_target.id=" << share_target.id
-                  << ") from discovery_cache after " << expiry_ms << "ms";
-
+        LOG(INFO) << ": ShareTarget lost after retention: " << retention
+                  << ", endpoint_id=" << endpoint_id
+                  << ", share_target=" << share_target.ToString();
         share_target_lost_callback_(share_target);
-
-        VLOG(1) << "discovery_cache entry: " << endpoint_id << " timeout after "
-                << expiry_ms << "ms"
-                << ": [Dedupped] NotifyShareTargetLost to all surfaces for "
-                << "share_target: " << share_target.ToString();
       });
   // Send ShareTarget update to set receive disabled to true.
+  LOG(INFO) << __func__
+            << ": ShareTarget disabled, endpoint_id: " << endpoint_id << ", "
+            << cache_entry.share_target.ToString();
   share_target_updated_callback_(cache_entry.share_target);
-  auto [it, inserted] =
-      discovery_cache_.insert_or_assign(endpoint_id, std::move(cache_entry));
-  LOG(INFO) << "[Dedupped] added to discovery_cache: " << endpoint_id << " by "
-            << (inserted ? "insert" : "assign");
+  discovery_cache_.insert_or_assign(endpoint_id, std::move(cache_entry));
 }
 
-void OutgoingTargetsManager::CreateOutgoingShareSession(
+void OutgoingTargetsManager::AddTarget(
     const ShareTarget& share_target, absl::string_view endpoint_id,
-    std::optional<NearbyShareDecryptedPublicCertificate> certificate,
-    absl::AnyInvocable<void(OutgoingShareSession& session,
-                            const TransferMetadata& metadata)>
-        transfer_update_callback) {
-  outgoing_share_target_map_.insert_or_assign(endpoint_id, share_target);
-  auto [it_out, inserted] = outgoing_share_session_map_.try_emplace(
+    std::optional<NearbyShareDecryptedPublicCertificate> certificate) {
+  auto [target_it, target_inserted] = outgoing_target_id_map_.insert(
+      {std::string(endpoint_id), share_target.id});
+  if (!target_inserted) {
+    if (target_it->second != share_target.id) {
+      LOG(ERROR) << __func__ << ": endpoint_id=" << endpoint_id
+                 << " already associated with share_target id="
+                 << target_it->second
+                 << ", cannot replace with share_target id=" << share_target.id;
+      return;
+    }
+    LOG(WARNING) << __func__ << ": endpoint_id=" << endpoint_id
+                 << " already exists, share target not updated.";
+  }
+  auto [session_it, session_inserted] = outgoing_share_session_map_.try_emplace(
       share_target.id, &clock_, service_thread_, &connections_manager_,
       analytics_recorder_, std::string(endpoint_id), share_target,
-      std::move(transfer_update_callback));
-  if (!inserted) {
+      transfer_update_callback_);
+  if (!session_inserted) {
     LOG(WARNING) << __func__ << ": share_target.id=" << share_target.id
                  << " already exists in outgoing share session map. This "
                     "should NOT happen";
-  } else {
-    auto& session = it_out->second;
-    if (certificate.has_value()) {
-      session.set_certificate(std::move(*certificate));
+    if (session_it->second.IsConnected()) {
+      LOG(WARNING) << __func__
+                   << ": session for share_target.id=" << share_target.id
+                   << " is connected, certificate not updated.";
+      return;
     }
+  }
+  auto& session = session_it->second;
+  if (certificate.has_value()) {
+    session.set_certificate(std::move(*certificate));
   }
 }
 
@@ -266,22 +306,26 @@ OutgoingShareSession* OutgoingTargetsManager::GetOutgoingShareSession(
   return &it->second;
 }
 
-void OutgoingTargetsManager::DisableAllOutgoingShareTargets() {
+void OutgoingTargetsManager::AllTargetsLost(absl::Duration retention) {
   VLOG(1) << "Move all outgoing share targets to discovery cache.";
-  while (!outgoing_share_target_map_.empty()) {
-    MoveToDiscoveryCache(outgoing_share_target_map_.begin()->first,
-                         NearbyFlags::GetInstance().GetInt64Flag(
-                             config_package_nearby::nearby_sharing_feature::
-                                 kUnregisterTargetDiscoveryCacheLostExpiryMs));
+  std::vector<std::string> endpoint_ids_to_remove;
+  endpoint_ids_to_remove.reserve(outgoing_target_id_map_.size());
+  for (const auto& [endpoint_id, share_target_id] : outgoing_target_id_map_) {
+    endpoint_ids_to_remove.push_back(endpoint_id);
   }
-  DCHECK(outgoing_share_target_map_.empty());
-  DCHECK(outgoing_share_session_map_.empty());
+  for (const auto& endpoint_id : endpoint_ids_to_remove) {
+    OnShareTargetLost(endpoint_id, retention);
+  }
 }
 
 void OutgoingTargetsManager::Cleanup() {
-  while (!outgoing_share_target_map_.empty()) {
-    RemoveOutgoingShareTargetWithEndpointId(
-        outgoing_share_target_map_.begin()->first);
+  std::vector<std::string> endpoint_ids_to_remove;
+  endpoint_ids_to_remove.reserve(outgoing_target_id_map_.size());
+  for (const auto& [endpoint_id, share_target_id] : outgoing_target_id_map_) {
+    endpoint_ids_to_remove.push_back(endpoint_id);
+  }
+  for (const auto& endpoint_id : endpoint_ids_to_remove) {
+    RemoveTarget(endpoint_id, /*close_connected=*/true);
   }
   discovery_cache_.clear();
 }
@@ -293,8 +337,8 @@ void OutgoingTargetsManager::ForEachShareTarget(
   for (const auto& [endpoint_id, discovery_cache_entry] : discovery_cache_) {
     callback(discovery_cache_entry.share_target);
   }
-  for (const auto& [endpoint_id, share_target] : outgoing_share_target_map_) {
-    callback(share_target);
+  for (const auto& [target_id, session] : outgoing_share_session_map_) {
+    callback(session.share_target());
   }
 }
 

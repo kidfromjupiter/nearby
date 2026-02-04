@@ -146,7 +146,7 @@ TEST(BluetoothAdapter, DISABLED_SetName_Exceeded) {
 
 TEST(BluetoothAdapter, DISABLED_GetMacAddress) {
   BluetoothAdapter bluetooth_adapter;
-  EXPECT_TRUE(!bluetooth_adapter.GetMacAddress().empty());
+  EXPECT_TRUE(bluetooth_adapter.GetMacAddress().IsSet());
 }
 
 TEST(BluetoothAdapter, DISABLED_SetOnScanModeChanged) {

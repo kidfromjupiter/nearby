@@ -173,7 +173,7 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
     }
 
     BluetoothDevice* remote_device_to_connect_ =
-        GetRemoteDeviceInternal(remote_device.GetAddress());
+        GetRemoteDeviceInternal(remote_device.GetMacAddress());
 
     if (remote_device_to_connect_ == nullptr ||
         remote_device_to_connect_->GetId().empty()) {
@@ -293,11 +293,11 @@ api::BluetoothDevice* BluetoothClassicMedium::GetRemoteDevice(
 std::unique_ptr<api::BluetoothPairing> BluetoothClassicMedium::CreatePairing(
     api::BluetoothDevice& remote_device) {
   VLOG(1) << __func__ << ": Start to createPairing with device: "
-          << remote_device.GetMacAddress();
+          << remote_device.GetMacAddress().ToString();
   try {
     winrt::Windows::Devices::Bluetooth::BluetoothDevice bluetooth_device =
         winrt::Windows::Devices::Bluetooth::BluetoothDevice::
-            FromBluetoothAddressAsync(remote_device.GetAddress().address())
+            FromBluetoothAddressAsync(remote_device.GetMacAddress().address())
                 .get();
     winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing
         custom_pairing =
@@ -485,7 +485,7 @@ bool BluetoothClassicMedium::CheckSdp(RfcommDeviceService requested_service) {
 }
 
 bool BluetoothClassicMedium::HasRemoteDevice(MacAddress mac_address) {
-  absl::MutexLock lock(&devices_map_mutex_);
+  absl::MutexLock lock(devices_map_mutex_);
   if (IsWatcherStarted()) {
     return mac_address_to_bluetooth_device_map_.contains(mac_address);
   } else {
@@ -494,7 +494,7 @@ bool BluetoothClassicMedium::HasRemoteDevice(MacAddress mac_address) {
 }
 
 bool BluetoothClassicMedium::RemoveRemoteDevice(MacAddress mac_address) {
-  absl::MutexLock lock(&devices_map_mutex_);
+  absl::MutexLock lock(devices_map_mutex_);
 
   auto it = mac_address_to_bluetooth_device_map_.find(mac_address);
   if (it != mac_address_to_bluetooth_device_map_.end()) {
@@ -508,7 +508,7 @@ bool BluetoothClassicMedium::RemoveRemoteDevice(MacAddress mac_address) {
 
 bool BluetoothClassicMedium::AssignRemoteDevice(
     MacAddress mac_address, std::unique_ptr<BluetoothDevice> device) {
-  absl::MutexLock lock(&devices_map_mutex_);
+  absl::MutexLock lock(devices_map_mutex_);
   auto result = mac_address_to_bluetooth_device_map_.insert_or_assign(
       mac_address, std::move(device));
   return result.second;
@@ -516,7 +516,7 @@ bool BluetoothClassicMedium::AssignRemoteDevice(
 
 BluetoothDevice* BluetoothClassicMedium::GetRemoteDeviceInternal(
     MacAddress mac_address) {
-  absl::MutexLock lock(&devices_map_mutex_);
+  absl::MutexLock lock(devices_map_mutex_);
   if (IsWatcherStarted()) {
     auto it = mac_address_to_bluetooth_device_map_.find(mac_address);
 
@@ -559,7 +559,7 @@ bool BluetoothClassicMedium::StartScanning() {
     }
 
     {
-      absl::MutexLock lock(&devices_map_mutex_);
+      absl::MutexLock lock(devices_map_mutex_);
       mac_address_to_bluetooth_device_map_.clear();
       removed_bluetooth_devices_map_.clear();
       if (!cached_bluetooth_devices_map_.empty()) {

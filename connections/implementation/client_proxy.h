@@ -22,9 +22,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
@@ -45,19 +48,15 @@
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/error_code_recorder.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
+#include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/mac_address.h"
 #include "internal/platform/mutex.h"
-// Prefer using absl:: versions of a set and a map; they tend to be more
-// efficient: implementation is using open-addressing hash tables.
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
-#include "absl/types/span.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/scheduled_executor.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 // ClientProxy is tracking state of client's connection, and serves as
 // a proxy for notifications sent to this client.
@@ -198,8 +197,6 @@ class ClientProxy final {
   std::string GetBssid(const std::string& endpoint_id) const;
   // Returns WIFI Frequency for this endpoint.
   std::int32_t GetApFrequency(const std::string& endpoint_id) const;
-  // Returns IP Address in 4 bytes format for this endpoint.
-  std::string GetIPAddress(const std::string& endpoint_id) const;
   // Returns true if it's safe to send payloads to this endpoint.
   bool IsConnectedToEndpoint(const std::string& endpoint_id) const;
   // Returns all endpoints that can safely be sent payloads.
@@ -268,15 +265,6 @@ class ClientProxy final {
   AdvertisingOptions GetAdvertisingOptions() const;
   DiscoveryOptions GetDiscoveryOptions() const;
   v3::ConnectionListeningOptions GetListeningOptions() const;
-
-  // The endpoint id will be stable for 30 seconds after high visibility mode
-  // (high power and Bluetooth Classic) advertisement stops.
-  // If client re-enters high visibility mode within 30 seconds, he is going to
-  // have the same endpoint id.
-  void EnterHighVisibilityMode();
-  // Cleans up any modifications in high visibility mode. The endpoint id always
-  // rotates.
-  void ExitHighVisibilityMode();
 
   // Enters stable endpoint ID mode.
   void EnterStableEndpointIdMode();
@@ -371,6 +359,9 @@ class ClientProxy final {
   // Forces client to regenerate a new local endpoint id.
   void ClearCachedLocalEndpointId();
 
+  // Saves the client information to preferences.
+  void SaveClientInfoToPreferences();
+
  private:
   struct Connection {
     // Status: may be either:
@@ -458,6 +449,9 @@ class ClientProxy final {
 
   std::optional<std::string> GetEndpointIdForDct() const;
 
+  void InitializePreferencesManager();
+  void LoadClientInfoFromPreferences();
+
   // The device name used for DCT advertising.
   std::string dct_device_name_;
   // The dedup value used for DCT advertising.
@@ -469,11 +463,6 @@ class ClientProxy final {
   std::int64_t client_id_;
   std::string local_endpoint_id_;
   std::string local_endpoint_info_;
-  // If currently is advertising in high visibility mode is true: high power and
-  // Bluetooth Classic enabled. When high_visibility_mode_ is true, the endpoint
-  // id is stable for 30s. When high_visibility_mode_ is false, the endpoint id
-  // always rotates.
-  bool high_vis_mode_ = false;
 
   // If advertising is in stable endpoint ID mode, the endpoint ID is stable
   // for 30s after advertising or disconnection. When stable_endpoint_id_mode_
@@ -534,6 +523,12 @@ class ClientProxy final {
   std::unique_ptr<CancellationFlag> default_cancellation_flag_ =
       std::make_unique<CancellationFlag>(true);
 
+  // An app lifecycle monitor for monitoring the app lifecycle state.
+  std::unique_ptr<api::AppLifecycleMonitor> app_lifecycle_monitor_;
+
+  // A preferences manager for storing client-specific preferences.
+  std::unique_ptr<nearby::api::PreferencesManager> preferences_manager_;
+
   // An analytics logger with |EventLogger| provided by client, which is default
   // nullptr as no-op.
   std::unique_ptr<analytics::AnalyticsRecorder> analytics_recorder_;
@@ -554,7 +549,6 @@ class ClientProxy final {
   bool is_dct_enabled_ = false;
 };
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections
 
 #endif  // CORE_INTERNAL_CLIENT_PROXY_H_

@@ -21,7 +21,7 @@
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/output_stream.h"
 
@@ -37,10 +37,10 @@ namespace linux {
 // - Client side:
 //   * TX characteristic: Our OutputStream writes -> remote reads  
 //   * RX characteristic: Remote writes (notifications) -> our InputStream reads
-class BleV2Socket : public api::ble_v2::BleSocket {
+class BleV2Socket : public api::ble::BleSocket {
  public:
   BleV2Socket() = default;
-  explicit BleV2Socket(api::ble_v2::BlePeripheral::UniqueId peripheral_id)
+  explicit BleV2Socket(api::ble::BlePeripheral::UniqueId peripheral_id)
       : peripheral_id_(peripheral_id) {}
   ~BleV2Socket() override { Close(); }
 
@@ -48,7 +48,7 @@ class BleV2Socket : public api::ble_v2::BleSocket {
   OutputStream& GetOutputStream() override;
   Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
 
-  api::ble_v2::BlePeripheral::UniqueId GetRemotePeripheralId() override {
+  api::ble::BlePeripheral::UniqueId GetRemotePeripheralId() override {
     return peripheral_id_;
   }
 
@@ -66,15 +66,15 @@ class BleV2Socket : public api::ble_v2::BleSocket {
   }
 
   // Set the GATT server and characteristics for server-side socket
-  void SetGattServer(std::unique_ptr<api::ble_v2::GattServer> gatt_server,
-                     const api::ble_v2::GattCharacteristic& rx_char,
-                     const api::ble_v2::GattCharacteristic& tx_char)
+  void SetGattServer(std::unique_ptr<api::ble::GattServer> gatt_server,
+                     const api::ble::GattCharacteristic& rx_char,
+                     const api::ble::GattCharacteristic& tx_char)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Set the GATT client and characteristics for client-side socket
-  void SetGattClient(std::unique_ptr<api::ble_v2::GattClient> gatt_client,
-                     const api::ble_v2::GattCharacteristic& rx_char,
-                     const api::ble_v2::GattCharacteristic& tx_char)
+  void SetGattClient(std::unique_ptr<api::ble::GattClient> gatt_client,
+                     const api::ble::GattCharacteristic& rx_char,
+                     const api::ble::GattCharacteristic& tx_char)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
@@ -102,12 +102,12 @@ class BleV2Socket : public api::ble_v2::BleSocket {
     BleOutputStream() = default;
     ~BleOutputStream() override = default;
 
-    Exception Write(const ByteArray& data) override
+    Exception Write(absl::string_view data) override
         ABSL_LOCKS_EXCLUDED(mutex_);
     Exception Flush() override;
     Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
 
-    using WriteCallback = absl::AnyInvocable<bool(const ByteArray& data)>;
+    using WriteCallback = absl::AnyInvocable<bool(absl::string_view data)>;
     void SetWriteCallback(WriteCallback callback)
         ABSL_LOCKS_EXCLUDED(mutex_);
 
@@ -121,15 +121,15 @@ class BleV2Socket : public api::ble_v2::BleSocket {
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
   BleInputStream input_stream_;
   BleOutputStream output_stream_;
-  api::ble_v2::BlePeripheral::UniqueId peripheral_id_ = 0;
+  api::ble::BlePeripheral::UniqueId peripheral_id_ = 0;
 
   // GATT resources (only one of these will be set)
-  std::unique_ptr<api::ble_v2::GattServer> gatt_server_ ABSL_GUARDED_BY(mutex_);
-  std::unique_ptr<api::ble_v2::GattClient> gatt_client_ ABSL_GUARDED_BY(mutex_);
+  std::unique_ptr<api::ble::GattServer> gatt_server_ ABSL_GUARDED_BY(mutex_);
+  std::unique_ptr<api::ble::GattClient> gatt_client_ ABSL_GUARDED_BY(mutex_);
   
   // Characteristics for data transfer
-  api::ble_v2::GattCharacteristic rx_char_ ABSL_GUARDED_BY(mutex_);
-  api::ble_v2::GattCharacteristic tx_char_ ABSL_GUARDED_BY(mutex_);
+  api::ble::GattCharacteristic rx_char_ ABSL_GUARDED_BY(mutex_);
+  api::ble::GattCharacteristic tx_char_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace linux

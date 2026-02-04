@@ -59,7 +59,6 @@ cc_library(
         "//internal:__pkg__",
         "//internal:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
-        "//sharing:__subpackages__",
     ],
     deps = [
         ":url",
@@ -88,10 +87,10 @@ cc_library(
     visibility = [
         "//internal:__pkg__",
         "//internal:__subpackages__",
-        "//sharing:__subpackages__",
     ],
     deps = [
         ":types",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",

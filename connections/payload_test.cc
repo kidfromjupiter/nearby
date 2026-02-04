@@ -14,13 +14,15 @@
 
 #include "connections/payload.h"
 
+#include <cstddef>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 
-#include "gmock/gmock.h"
-#include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "absl/strings/string_view.h"
+#include "connections/payload_type.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/file.h"
 #include "internal/platform/input_stream.h"
@@ -47,18 +49,15 @@ TEST(PayloadTest, SupportsFileType) {
   constexpr size_t kOffset = 99;
   const auto payload_id = Payload::GenerateId();
 
-  char test_file_data[100];
-  memcpy(test_file_data,
+  absl::string_view test_file_data{
          "012345678901234567890123456789012345678901234567890123456789012345678"
-         "901234567890123456789012345678\0",
-         100);
+         "901234567890123456789012345678\0", 100};
 
   OutputFile outputFile(payload_id);
-  ByteArray test_data(test_file_data, 100);
-  outputFile.Write(test_data);
+  outputFile.Write(test_file_data);
   outputFile.Close();
 
-  InputFile file(payload_id, 100);
+  InputFile file(payload_id);
   InputStream& stream = file.GetInputStream();
 
   Payload payload(payload_id, std::move(file));
@@ -74,7 +73,7 @@ TEST(PayloadTest, SupportsFileType) {
 
 TEST(PayloadTest, SupportsMultiDotNamedFileType) {
   constexpr char expected[] = "this.is.a.multidot.file";
-  InputFile file(expected, 0);
+  InputFile file(expected);
 
   Payload payload(/*parent_folder=*/"", expected, std::move(file));
 
@@ -87,7 +86,7 @@ TEST(PayloadTest,
       "test_folder.here\\this.is.a.multidot.backslash.folder.separated.file";
   constexpr char expected[] =
       "this.is.a.multidot.backslash.folder.separated.file";
-  InputFile file(file_name, 0);
+  InputFile file(file_name);
 
   Payload payload(/*parent_folder=*/"", file_name, std::move(file));
 

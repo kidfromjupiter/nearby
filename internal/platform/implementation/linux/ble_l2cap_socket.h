@@ -21,7 +21,7 @@
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/exception.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/output_stream.h"
 

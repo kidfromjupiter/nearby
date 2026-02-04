@@ -257,7 +257,7 @@ void GNCEnsureFileAtPath(std::string path) {
   [data writeToFile:path atomically:YES];
 
   auto input_file =
-      nearby::api::ImplementationPlatform::CreateInputFile(path.UTF8String, data.length);
+      nearby::api::ImplementationPlatform::CreateInputFile(path.UTF8String);
 
   XCTAssertNotEqual(input_file.get(), nullptr);
   XCTAssertEqual(input_file->GetTotalSize(), data.length);
@@ -311,18 +311,7 @@ void GNCEnsureFileAtPath(std::string path) {
 - (void)testCreateBleMedium {
   auto bluetooth_adapter = nearby::api::ImplementationPlatform::CreateBluetoothAdapter();
   auto ble_medium = nearby::api::ImplementationPlatform::CreateBleMedium(*bluetooth_adapter);
-  XCTAssertEqual(ble_medium.get(), nullptr);
-}
-
-- (void)testCreateBleV2Medium {
-  auto bluetooth_adapter = nearby::api::ImplementationPlatform::CreateBluetoothAdapter();
-  auto ble_medium = nearby::api::ImplementationPlatform::CreateBleV2Medium(*bluetooth_adapter);
   XCTAssertNotEqual(ble_medium.get(), nullptr);
-}
-
-- (void)testCreateServerSyncMedium {
-  auto server_sync_medium = nearby::api::ImplementationPlatform::CreateServerSyncMedium();
-  XCTAssertEqual(server_sync_medium.get(), nullptr);
 }
 
 - (void)testCreateWifiDirectMedium {
@@ -332,11 +321,11 @@ void GNCEnsureFileAtPath(std::string path) {
 
 - (void)testCreateWebRtcMedium {
   auto webrtc_medium = nearby::api::ImplementationPlatform::CreateWebRtcMedium();
-  XCTAssertEqual(webrtc_medium.get(), nullptr);
+  XCTAssertNotEqual(webrtc_medium.get(), nullptr);
 }
 
 - (void)testCreateInputFileWithPayloadID {
-  auto input_file = nearby::api::ImplementationPlatform::CreateInputFile(1234, 0);
+  auto input_file = nearby::api::ImplementationPlatform::CreateInputFile(1234);
   XCTAssertEqual(input_file.get(), nullptr);
 }
 

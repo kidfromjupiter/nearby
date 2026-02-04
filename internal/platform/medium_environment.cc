@@ -21,10 +21,10 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
-#include "absl/strings/escaping.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -34,7 +34,6 @@
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/wifi_direct.h"
@@ -52,6 +51,14 @@
 #include "internal/test/fake_clock.h"
 
 namespace nearby {
+namespace {
+std::string LastAddressCandidateToString(
+    const std::vector<ServiceAddress>& address_candidates) {
+  if (address_candidates.empty()) return "";
+  return std::string(address_candidates.back().address.begin(),
+                     address_candidates.back().address.end());
+}
+}  // namespace
 
 MediumEnvironment& MediumEnvironment::Instance() {
   alignas(MediumEnvironment) static char storage[sizeof(MediumEnvironment)];
@@ -89,7 +96,6 @@ void MediumEnvironment::Reset() {
     bluetooth_adapters_.clear();
     bluetooth_mediums_.clear();
     ble_mediums_.clear();
-    ble_v2_mediums_.clear();
 #ifndef NO_WEBRTC
     webrtc_signaling_message_callback_.clear();
     webrtc_signaling_complete_callback_.clear();
@@ -233,8 +239,8 @@ api::BluetoothDevice* MediumEnvironment::FindBluetoothDevice(
     for (auto& item : bluetooth_mediums_) {
       auto* adapter = item.second.adapter;
       if (!adapter) continue;
-      LOG(INFO) << " Adapter: " << adapter->GetAddress().ToString();
-      if (adapter->GetAddress() == mac_address) {
+      LOG(INFO) << " Adapter: " << adapter->GetMacAddress().ToString();
+      if (adapter->GetMacAddress() == mac_address) {
         device = bluetooth_adapters_[adapter];
         break;
       }
@@ -245,13 +251,13 @@ api::BluetoothDevice* MediumEnvironment::FindBluetoothDevice(
   return device;
 }
 
-api::ble_v2::BleMedium* MediumEnvironment::FindBleV2Medium(
-    api::ble_v2::BlePeripheral::UniqueId id) {
-  api::ble_v2::BleMedium* device = nullptr;
+api::ble::BleMedium* MediumEnvironment::FindBleMedium(
+    api::ble::BlePeripheral::UniqueId id) {
+  api::ble::BleMedium* device = nullptr;
   CountDownLatch latch(1);
-  LOG(INFO) << "FindBleV2Medium " << id;
+  LOG(INFO) << "FindBleMedium " << id;
   RunOnMediumEnvironmentThread([&]() {
-    for (auto& item : ble_v2_mediums_) {
+    for (auto& item : ble_mediums_) {
       auto* medium = item.first;
       if (item.second.ble_peripheral_id == id) {
         device = medium;
@@ -262,37 +268,36 @@ api::ble_v2::BleMedium* MediumEnvironment::FindBleV2Medium(
   });
   latch.Await();
   if (device == nullptr) {
-    LOG(INFO) << "FindBleV2Medium, not found: " << id;
+    LOG(INFO) << "FindBleMedium, not found: " << id;
   }
   return device;
 }
 
-void MediumEnvironment::OnBlePeripheralStateChanged(
-    BleMediumContext& info, api::BlePeripheral& peripheral,
-    const std::string& service_id, bool fast_advertisement, bool enabled) {
-  if (!enabled_) return;
-  LOG(INFO) << "OnBleServiceStateChanged [peripheral impl=" << &peripheral
-            << "]; context=" << &info << "; service_id=" << service_id
-            << "; notify=" << enable_notifications_.load();
-  if (!enable_notifications_) return;
-  if (enabled) {
-    RunOnMediumEnvironmentThread(
-        [&info, &peripheral, service_id, fast_advertisement]() {
-          LOG(INFO) << "[Run] OnBleServiceStateChanged [peripheral impl="
-                    << &peripheral << "]; context=" << &info
-                    << "; service_id=" << service_id;
-          info.discovery_callback.peripheral_discovered_cb(
-              peripheral, service_id, fast_advertisement);
-        });
-  } else {
-    info.discovery_callback.peripheral_lost_cb(peripheral, service_id);
+api::ble::BlePeripheral MediumEnvironment::FindBlePeripheral(
+    api::ble::BlePeripheral::UniqueId id) {
+  api::ble::BlePeripheral peripheral;
+  CountDownLatch latch(1);
+  RunOnMediumEnvironmentThread([&]() {
+    for (auto& item : ble_mediums_) {
+      if (item.second.ble_peripheral_id == id) {
+        peripheral = api::ble::BlePeripheral(item.second.ble_peripheral_id);
+        break;
+      }
+    }
+    latch.CountDown();
+  });
+  latch.Await();
+  if (!peripheral.IsSet()) {
+    LOG(INFO) << "FindBlePeripheral, not found: " << id;
   }
+
+  return peripheral;
 }
 
-void MediumEnvironment::OnBleV2PeripheralStateChanged(
-    bool enabled, BleV2MediumContext& context, const Uuid& service_id,
-    const api::ble_v2::BleAdvertisementData& ble_advertisement_data,
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id) {
+void MediumEnvironment::OnBlePeripheralStateChanged(
+    bool enabled, BleMediumContext& context, const Uuid& service_id,
+    const api::ble::BleAdvertisementData& ble_advertisement_data,
+    api::ble::BlePeripheral::UniqueId peripheral_id) {
   if (!enabled_) return;
   LOG(INFO) << "OnBleServiceStateChanged [peripheral id=" << peripheral_id
             << "]; medium_context=" << &context
@@ -497,152 +502,28 @@ void MediumEnvironment::UnregisterBluetoothMedium(
   latch.Await();
 }
 
-void MediumEnvironment::RegisterBleMedium(api::BleMedium& medium) {
+void MediumEnvironment::RegisterBleMedium(
+    api::ble::BleMedium& medium,
+    api::ble::BlePeripheral::UniqueId peripheral_id) {
   if (!enabled_) return;
-  RunOnMediumEnvironmentThread([this, &medium]() {
-    ble_mediums_.insert({&medium, BleMediumContext{}});
+  RunOnMediumEnvironmentThread([this, &medium, peripheral_id]() {
+    ble_mediums_.insert(
+        {&medium, BleMediumContext{.ble_peripheral_id = peripheral_id}});
     LOG(INFO) << "Registered: BLE medium:" << &medium;
   });
 }
 
 void MediumEnvironment::UpdateBleMediumForAdvertising(
-    api::BleMedium& medium, api::BlePeripheral& peripheral,
-    const std::string& service_id, bool fast_advertisement, bool enabled) {
-  if (!enabled_) return;
-  RunOnMediumEnvironmentThread(
-      [this, &medium, &peripheral, service_id, fast_advertisement, enabled]() {
-        auto item = ble_mediums_.find(&medium);
-        if (item == ble_mediums_.end()) {
-          LOG(INFO) << "UpdateBleMediumForAdvertising failed. There is no "
-                       "medium registered.";
-          return;
-        }
-        auto& context = item->second;
-        context.ble_peripheral = &peripheral;
-        context.advertising = enabled;
-        context.fast_advertisement = fast_advertisement;
-        LOG(INFO) << "Update Ble medium for advertising: this=" << this
-                  << "; medium=" << &medium << "; service_id=" << service_id
-                  << "; name=" << peripheral.GetName()
-                  << "; fast_advertisement=" << fast_advertisement
-                  << "; enabled=" << enabled;
-        for (auto& medium_info : ble_mediums_) {
-          auto& local_medium = medium_info.first;
-          auto& info = medium_info.second;
-          // Do not send notification to the same medium.
-          if (local_medium == &medium) continue;
-          OnBlePeripheralStateChanged(info, peripheral, service_id,
-                                      fast_advertisement, enabled);
-        }
-      });
-}
-
-void MediumEnvironment::UpdateBleMediumForScanning(
-    api::BleMedium& medium, const std::string& service_id,
-    const std::string& fast_advertisement_service_uuid,
-    BleDiscoveredPeripheralCallback callback, bool enabled) {
-  if (!enabled_) return;
-  RunOnMediumEnvironmentThread(
-      [this, &medium, service_id, fast_advertisement_service_uuid,
-       callback = std::move(callback), enabled]() mutable {
-        auto item = ble_mediums_.find(&medium);
-        if (item == ble_mediums_.end()) {
-          LOG(INFO) << "UpdateBleMediumFoScanning failed. There is no medium "
-                       "registered.";
-          return;
-        }
-        auto& context = item->second;
-        context.discovery_callback = std::move(callback);
-        LOG(INFO) << "Update Ble medium for scanning: this=" << this
-                  << "; medium=" << &medium << "; service_id=" << service_id
-                  << "; fast_advertisement_service_uuid="
-                  << absl::BytesToHexString(fast_advertisement_service_uuid)
-                  << "; enabled=" << enabled;
-        for (auto& medium_info : ble_mediums_) {
-          auto& local_medium = medium_info.first;
-          auto& info = medium_info.second;
-          // Do not send notification to the same medium.
-          if (local_medium == &medium) continue;
-          // Search advertising mediums and send notification.
-          if (info.advertising && enabled) {
-            OnBlePeripheralStateChanged(context, *(info.ble_peripheral),
-                                        service_id, info.fast_advertisement,
-                                        enabled);
-          }
-        }
-      });
-}
-
-void MediumEnvironment::UpdateBleMediumForAcceptedConnection(
-    api::BleMedium& medium, const std::string& service_id,
-    BleAcceptedConnectionCallback callback) {
-  if (!enabled_) return;
-  RunOnMediumEnvironmentThread([this, &medium, service_id,
-                                callback = std::move(callback)]() mutable {
-    auto item = ble_mediums_.find(&medium);
-    if (item == ble_mediums_.end()) {
-      LOG(INFO) << "Update Ble medium failed. There is no medium registered.";
-      return;
-    }
-    auto& context = item->second;
-    context.accepted_connection_callback = std::move(callback);
-    LOG(INFO) << "Update Ble medium for accepted callback: this=" << this
-              << "; medium=" << &medium << "; service_id=" << service_id;
-  });
-}
-
-void MediumEnvironment::UnregisterBleMedium(api::BleMedium& medium) {
-  if (!enabled_) return;
-  CountDownLatch latch(1);
-  RunOnMediumEnvironmentThread([&]() {
-    auto item = ble_mediums_.extract(&medium);
-    latch.CountDown();
-    if (item.empty()) return;
-    LOG(INFO) << "Unregistered BLE medium:" << &medium;
-  });
-  latch.Await();
-}
-
-void MediumEnvironment::CallBleAcceptedConnectionCallback(
-    api::BleMedium& medium, api::BleSocket& socket,
-    const std::string& service_id) {
-  if (!enabled_) return;
-  RunOnMediumEnvironmentThread([this, &medium, &socket, service_id]() {
-    auto item = ble_mediums_.find(&medium);
-    if (item == ble_mediums_.end()) {
-      LOG(INFO) << "Call AcceptedConnectionCallback failed. There is no medium "
-                   "registered.";
-      return;
-    }
-    auto& info = item->second;
-    if (info.accepted_connection_callback) {
-      info.accepted_connection_callback(socket, service_id);
-    }
-  });
-}
-
-void MediumEnvironment::RegisterBleV2Medium(
-    api::ble_v2::BleMedium& medium,
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id) {
-  if (!enabled_) return;
-  RunOnMediumEnvironmentThread([this, &medium, peripheral_id]() {
-    ble_v2_mediums_.insert(
-        {&medium, BleV2MediumContext{.ble_peripheral_id = peripheral_id}});
-    LOG(INFO) << "Registered: BLE V2 medium:" << &medium;
-  });
-}
-
-void MediumEnvironment::UpdateBleV2MediumForAdvertising(
-    bool enabled, api::ble_v2::BleMedium& medium,
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id,
-    const api::ble_v2::BleAdvertisementData& advertisement_data) {
+    bool enabled, api::ble::BleMedium& medium,
+    api::ble::BlePeripheral::UniqueId peripheral_id,
+    const api::ble::BleAdvertisementData& advertisement_data) {
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium, peripheral_id,
                                 advertisement_data = advertisement_data,
                                 enabled]() {
-    auto it = ble_v2_mediums_.find(&medium);
-    if (it == ble_v2_mediums_.end()) {
-      LOG(INFO) << "UpdateBleV2MediumForAdvertising failed. There is no "
+    auto it = ble_mediums_.find(&medium);
+    if (it == ble_mediums_.end()) {
+      LOG(INFO) << "UpdateBleMediumForAdvertising failed. There is no "
                    "medium registered.";
       return;
     }
@@ -651,13 +532,13 @@ void MediumEnvironment::UpdateBleV2MediumForAdvertising(
     context.advertising = enabled;
     context.advertisement_data = advertisement_data;
 
-    LOG(INFO) << "UpdateBleV2MediumForAdvertising: this=" << this
+    LOG(INFO) << "UpdateBleMediumForAdvertising: this=" << this
               << ", medium=" << &medium << ", medium_context=" << &context
               << ", peripheral id=" << peripheral_id << ", enabled=" << enabled;
 
-    for (auto& medium_info : ble_v2_mediums_) {
-      const api::ble_v2::BleMedium* remote_medium = medium_info.first;
-      BleV2MediumContext& remote_context = medium_info.second;
+    for (auto& medium_info : ble_mediums_) {
+      const api::ble::BleMedium* remote_medium = medium_info.first;
+      BleMediumContext& remote_context = medium_info.second;
 
       // Do not send notification to the same medium.
       if (remote_medium == &medium) continue;
@@ -679,13 +560,13 @@ void MediumEnvironment::UpdateBleV2MediumForAdvertising(
         if (it == context.advertisement_data.service_data.end() && enabled)
           continue;
 
-        LOG(INFO) << "UpdateBleV2MediumForAdvertising, found other medium="
+        LOG(INFO) << "UpdateBleMediumForAdvertising, found other medium="
                   << remote_medium
                   << ", remote_medium_context=" << &remote_context
                   << ", remote_context.peripheral="
                   << remote_context.ble_peripheral_id
-                  << ". Ready to call OnBleV2PeripheralStateChanged.";
-        OnBleV2PeripheralStateChanged(
+                  << ". Ready to call OnBlePeripheralStateChanged.";
+        OnBlePeripheralStateChanged(
             enabled, remote_context, remote_scanning_service_uuid,
             context.advertisement_data, context.ble_peripheral_id);
       }
@@ -693,24 +574,24 @@ void MediumEnvironment::UpdateBleV2MediumForAdvertising(
   });
 }
 
-void MediumEnvironment::UpdateBleV2MediumForScanning(
+void MediumEnvironment::UpdateBleMediumForScanning(
     bool enabled, const Uuid& scanning_service_uuid,
     std::uint32_t internal_session_id, BleScanCallback callback,
-    api::ble_v2::BleMedium& medium) {
+    api::ble::BleMedium& medium) {
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium,
                                 scanning_service_uuid = scanning_service_uuid,
                                 internal_session_id = internal_session_id,
                                 callback = std::move(callback),
                                 enabled]() mutable {
-    auto it = ble_v2_mediums_.find(&medium);
-    if (it == ble_v2_mediums_.end()) {
-      LOG(INFO) << "UpdateBleV2MediumForScanning failed. There is no medium "
+    auto it = ble_mediums_.find(&medium);
+    if (it == ble_mediums_.end()) {
+      LOG(INFO) << "UpdateBleMediumForScanning failed. There is no medium "
                    "registered.";
       return;
     }
-    BleV2MediumContext& context = it->second;
-    LOG(INFO) << "UpdateBleV2MediumForScanning: this=" << this
+    BleMediumContext& context = it->second;
+    LOG(INFO) << "UpdateBleMediumForScanning: this=" << this
               << ", medium=" << &medium << ", medium_context=" << &context
               << ", enabled=" << enabled;
     if (enabled) {
@@ -722,9 +603,9 @@ void MediumEnvironment::UpdateBleV2MediumForScanning(
       for (auto& element : context.scan_callback_map) {
         scanning_service_uuids.insert(element.first.first);
       }
-      for (const auto& medium_info : ble_v2_mediums_) {
-        const api::ble_v2::BleMedium* remote_medium = medium_info.first;
-        const BleV2MediumContext& remote_context = medium_info.second;
+      for (const auto& medium_info : ble_mediums_) {
+        const api::ble::BleMedium* remote_medium = medium_info.first;
+        const BleMediumContext& remote_context = medium_info.second;
         // Do not send notification to the same or the non-advertising
         // medium.
         if (remote_medium == &medium || !remote_context.advertising) continue;
@@ -733,15 +614,15 @@ void MediumEnvironment::UpdateBleV2MediumForScanning(
               scanning_service_uuid);
           if (it == remote_context.advertisement_data.service_data.end())
             continue;
-          LOG(INFO) << "UpdateBleV2MediumForScanning, found other medium="
+          LOG(INFO) << "UpdateBleMediumForScanning, found other medium="
                     << remote_medium
                     << ", remote_medium_context=" << &remote_context
                     << ", scanning_service_uuid="
                     << scanning_service_uuid.Get16BitAsString()
-                    << ". Ready to call OnBleV2PeripheralStateChanged.";
-          OnBleV2PeripheralStateChanged(enabled, context, scanning_service_uuid,
-                                        remote_context.advertisement_data,
-                                        remote_context.ble_peripheral_id);
+                    << ". Ready to call OnBlePeripheralStateChanged.";
+          OnBlePeripheralStateChanged(enabled, context, scanning_service_uuid,
+                                      remote_context.advertisement_data,
+                                      remote_context.ble_peripheral_id);
         }
       }
     } else {
@@ -754,32 +635,32 @@ void MediumEnvironment::UpdateBleV2MediumForScanning(
   });
 }
 
-void MediumEnvironment::UnregisterBleV2Medium(api::ble_v2::BleMedium& medium) {
+void MediumEnvironment::UnregisterBleMedium(api::ble::BleMedium& medium) {
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium]() {
-    auto item = ble_v2_mediums_.extract(&medium);
+    auto item = ble_mediums_.extract(&medium);
     if (item.empty()) return;
-    LOG(INFO) << "Unregistered BLE V2 medium:" << &medium;
+    LOG(INFO) << "Unregistered BLE medium:" << &medium;
   });
 }
-std::optional<MediumEnvironment::BleV2MediumStatus>
-MediumEnvironment::GetBleV2MediumStatus(const api::ble_v2::BleMedium& medium) {
+std::optional<MediumEnvironment::BleMediumStatus>
+MediumEnvironment::GetBleMediumStatus(const api::ble::BleMedium& medium) {
   if (!enabled_) return std::nullopt;
 
-  std::optional<MediumEnvironment::BleV2MediumStatus> result;
+  std::optional<MediumEnvironment::BleMediumStatus> result;
   CountDownLatch latch(1);
 
   RunOnMediumEnvironmentThread([this, &medium, &latch, &result]() {
-    auto it = ble_v2_mediums_.find(&medium);
-    if (it == ble_v2_mediums_.end()) {
+    auto it = ble_mediums_.find(&medium);
+    if (it == ble_mediums_.end()) {
       result = std::nullopt;
       latch.CountDown();
       return;
     }
-    BleV2MediumContext& context = it->second;
+    BleMediumContext& context = it->second;
 
-    result = BleV2MediumStatus{.is_advertising = context.advertising,
-                               .is_scanning = context.scanning};
+    result = BleMediumStatus{.is_advertising = context.advertising,
+                             .is_scanning = context.scanning};
     latch.CountDown();
   });
   latch.Await();
@@ -899,8 +780,7 @@ void MediumEnvironment::RegisterAwdlMedium(api::AwdlMedium& medium) {
 
 void MediumEnvironment::UpdateWifiLanMediumForAdvertising(
     api::WifiLanMedium& medium, const NsdServiceInfo& service_info,
-    const std::string& ip_address,
-    bool enabled) {
+    const std::string& ip_address, bool enabled) {
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium, service_info = service_info,
                                 ip_address, enabled]() mutable {
@@ -1098,15 +978,15 @@ void MediumEnvironment::RegisterWifiDirectMedium(
 }
 
 api::WifiDirectMedium* MediumEnvironment::GetWifiDirectMedium(
-    absl::string_view ssid, absl::string_view ip_address) {
+    absl::string_view service_name, absl::string_view ip_address) {
   MutexLock lock(&mutex_);
   for (auto& medium_info : wifi_direct_mediums_) {
     auto* medium_found = medium_info.first;
     auto& info = medium_info.second;
     if (info.is_go && info.is_active) {
-      if ((info.wifi_direct_credentials->GetSSID() == ssid) ||
+      if ((info.wifi_direct_credentials->GetServiceName() == service_name) ||
           (!ip_address.empty() &&
-           (info.wifi_direct_credentials->GetIPAddress() == ip_address))) {
+           (info.wifi_direct_credentials->GetGateway() == ip_address))) {
         LOG(INFO) << "Found Remote WifiDirect medium=" << medium_found;
         return medium_found;
       }
@@ -1135,8 +1015,9 @@ void MediumEnvironment::UpdateWifiDirectMediumForStartOrConnect(
         if (wifi_direct_credentials) {
           LOG(INFO) << "Update WifiDirect medium for GO: this=" << this
                     << "; medium=" << &medium << role_status
-                    << "; ssid=" << wifi_direct_credentials->GetSSID()
-                    << "; password=" << wifi_direct_credentials->GetPassword();
+                    << "; service_name="
+                    << wifi_direct_credentials->GetServiceName()
+                    << "; pin=" << wifi_direct_credentials->GetPin();
         } else {
           LOG(INFO) << "Reset WifiDirect medium for GO: this=" << this
                     << "; medium=" << &medium << role_status;
@@ -1171,7 +1052,8 @@ void MediumEnvironment::UnregisterWifiDirectMedium(
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium]() {
     MutexLock lock(&mutex_);
-    wifi_direct_mediums_.extract(&medium);
+    auto item = wifi_direct_mediums_.extract(&medium);
+    if (item.empty()) return;
     LOG(INFO) << "Unregistered WifiDirect medium:" << &medium;
   });
 }
@@ -1195,19 +1077,22 @@ api::WifiHotspotMedium* MediumEnvironment::GetWifiHotspotMedium(
     if (info.is_ap && info.hotspot_credentials) {
       if ((info.hotspot_credentials->GetSSID() == ssid) ||
           (!ip_address.empty() &&
-           (info.hotspot_credentials->GetIPAddress() == ip_address))) {
+           LastAddressCandidateToString(
+               info.hotspot_credentials->GetAddressCandidates()) ==
+               ip_address)) {
         LOG(INFO) << "Found Remote WifiHotspot medium=" << medium_found;
         return medium_found;
       }
     }
   }
 
+  LOG(INFO) << "Can't find WifiHotspot medium!";
   return nullptr;
 }
 
 void MediumEnvironment::UpdateWifiHotspotMediumForStartOrConnect(
-    api::WifiHotspotMedium& medium, HotspotCredentials* hotspot_credentials,
-    bool is_ap, bool enabled) {
+    api::WifiHotspotMedium& medium,
+    const HotspotCredentials* hotspot_credentials, bool is_ap, bool enabled) {
   if (!enabled_) return;
 
   CountDownLatch latch(1);
@@ -1274,13 +1159,13 @@ std::optional<FakeClock*> MediumEnvironment::GetSimulatedClock() {
 }
 
 void MediumEnvironment::RegisterGattServer(
-    api::ble_v2::BleMedium& medium,
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id,
-    Borrowable<api::ble_v2::GattServer*> gatt_server) {
+    api::ble::BleMedium& medium,
+    api::ble::BlePeripheral::UniqueId peripheral_id,
+    Borrowable<api::ble::GattServer*> gatt_server) {
   if (!enabled_) return;
   RunOnMediumEnvironmentThread([this, &medium, peripheral_id, gatt_server]() {
-    auto it = ble_v2_mediums_.find(&medium);
-    if (it == ble_v2_mediums_.end()) {
+    auto it = ble_mediums_.find(&medium);
+    if (it == ble_mediums_.end()) {
       LOG(WARNING) << "Register GattServer failed. There is no medium"
                       " registered.";
       return;
@@ -1288,19 +1173,19 @@ void MediumEnvironment::RegisterGattServer(
     auto& context = it->second;
     CHECK_EQ(context.gatt_server, nullptr);
     context.gatt_server =
-        std::make_unique<Borrowable<api::ble_v2::GattServer*>>(gatt_server);
+        std::make_unique<Borrowable<api::ble::GattServer*>>(gatt_server);
     context.ble_peripheral_id = peripheral_id;
     LOG(INFO) << "Registered: GattServer for peripheral id:" << peripheral_id
               << " on medium:" << &medium;
   });
 }
 
-void MediumEnvironment::UnregisterGattServer(api::ble_v2::BleMedium& medium) {
+void MediumEnvironment::UnregisterGattServer(api::ble::BleMedium& medium) {
   if (!enabled_) return;
   CountDownLatch latch(1);
   RunOnMediumEnvironmentThread([&]() {
-    auto it = ble_v2_mediums_.find(&medium);
-    if (it == ble_v2_mediums_.end()) {
+    auto it = ble_mediums_.find(&medium);
+    if (it == ble_mediums_.end()) {
       LOG(INFO) << "Unregister GattServer failed. There is no "
                    "medium registered on medium:"
                 << &medium;
@@ -1317,14 +1202,14 @@ void MediumEnvironment::UnregisterGattServer(api::ble_v2::BleMedium& medium) {
   latch.Await();
 }
 
-Borrowable<api::ble_v2::GattServer*> MediumEnvironment::GetGattServer(
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id) {
-  Borrowable<api::ble_v2::GattServer*> result;
+Borrowable<api::ble::GattServer*> MediumEnvironment::GetGattServer(
+    api::ble::BlePeripheral::UniqueId peripheral_id) {
+  Borrowable<api::ble::GattServer*> result;
   bool found_server = false;
   CountDownLatch latch(1);
   RunOnMediumEnvironmentThread([&]() {
-    for (const auto& medium_info : ble_v2_mediums_) {
-      const BleV2MediumContext& remote_context = medium_info.second;
+    for (const auto& medium_info : ble_mediums_) {
+      const BleMediumContext& remote_context = medium_info.second;
       if (remote_context.gatt_server != nullptr &&
           remote_context.ble_peripheral_id == peripheral_id) {
         if (remote_context.gatt_server == nullptr) {

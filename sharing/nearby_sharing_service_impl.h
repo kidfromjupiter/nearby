@@ -52,7 +52,6 @@
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/api/sharing_platform.h"
 #include "sharing/internal/api/sharing_rpc_client.h"
-#include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/nearby_connection.h"
@@ -103,7 +102,10 @@ class NearbySharingServiceImpl
   NearbySharingServiceImpl(
       std::unique_ptr<nearby::TaskRunner> service_thread, Context* context,
       nearby::sharing::api::SharingPlatform& sharing_platform,
+      std::unique_ptr<nearby::sharing::api::SharingRpcClientFactory>
+          nearby_share_client_factory,
       std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
+      std::unique_ptr<NearbyShareContactManager> contact_manager,
       analytics::AnalyticsRecorder* analytics_recorder);
   ~NearbySharingServiceImpl() override;
 
@@ -275,11 +277,6 @@ class NearbySharingServiceImpl
   StatusCodes StopScanning();
   void StopAdvertisingAndInvalidateSurfaceState();
 
-  void InvalidateFastInitiationScanning();
-  void StartFastInitiationScanning();
-  void OnFastInitiationDevicesNotDetected();
-  void StopFastInitiationScanning();
-
   void ScheduleRotateBackgroundAdvertisementTimer();
   void OnRotateBackgroundAdvertisementTimerFired();
 
@@ -290,11 +287,8 @@ class NearbySharingServiceImpl
                             absl::string_view endpoint_id,
                             NearbyConnection* connection, Status status);
 
-  void CreatePayloads(
-      OutgoingShareSession& session,
-      std::function<void(OutgoingShareSession&, bool)> callback);
-  void OnCreatePayloads(std::vector<uint8_t> endpoint_info,
-                        OutgoingShareSession& session, bool success);
+  void OutgoingSessionConnect(OutgoingShareSession& session,
+                              std::vector<uint8_t> endpoint_info);
 
   void Fail(IncomingShareSession& session, TransferMetadata::Status status);
   void OnIncomingAdvertisementDecoded(
@@ -350,9 +344,6 @@ class NearbySharingServiceImpl
   ShareSession* GetShareSession(int64_t share_target_id);
   IncomingShareSession* GetIncomingShareSession(int64_t share_target_id);
 
-  std::optional<std::vector<uint8_t>> GetBluetoothMacAddressForShareTarget(
-      OutgoingShareSession& session);
-
   void UnregisterShareTarget(int64_t share_target_id);
 
   void OnStartAdvertisingResult(bool used_device_name, Status status);
@@ -369,7 +360,6 @@ class NearbySharingServiceImpl
       bool is_initiator_of_cancellation);
 
   // Monitor connectivity changes.
-  void OnNetworkChanged(nearby::ConnectivityManager::ConnectionType type);
   void OnLanConnectedChanged(bool connected);
 
   // Resets all settings of the nearby sharing service.
@@ -455,10 +445,12 @@ class NearbySharingServiceImpl
   // Registers the most recent TransferMetadata and ShareTarget used for
   // transitioning notifications between foreground surfaces and background
   // surfaces. Empty if no metadata is available.
-  std::optional<std::tuple<ShareTarget, AttachmentContainer, TransferMetadata>>
+  std::optional<std::tuple<ShareTarget, std::unique_ptr<AttachmentContainer>,
+                           TransferMetadata>>
       last_incoming_metadata_;
   // The most recent outgoing TransferMetadata and ShareTarget.
-  std::optional<std::tuple<ShareTarget, AttachmentContainer, TransferMetadata>>
+  std::optional<std::tuple<ShareTarget, std::unique_ptr<AttachmentContainer>,
+                           TransferMetadata>>
       last_outgoing_metadata_;
   // A map of ShareTarget id to IncomingShareSession. This lets us know which
   // Nearby Connections endpoint and public certificate are related to the
@@ -497,10 +489,6 @@ class NearbySharingServiceImpl
 
   // Used to debounce OnNetworkChanged processing.
   std::unique_ptr<ThreadTimer> on_network_changed_delay_timer_;
-
-  // Used to prevent the "Device nearby is sharing" notification from appearing
-  // immediately after a completed share.
-  std::unique_ptr<ThreadTimer> fast_initiation_scanner_cooldown_timer_;
 
   // A queue of endpoint-discovered and endpoint-lost events that ensures the
   // events are processed sequentially, in the order received from Nearby

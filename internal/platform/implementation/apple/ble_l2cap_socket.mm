@@ -17,7 +17,7 @@
 #import "internal/platform/implementation/apple/Log/GNCLogger.h"
 #import "internal/platform/implementation/apple/Mediums/BLE/GNCBLEL2CAPConnection.h"
 #import "internal/platform/implementation/apple/utils.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 
 namespace nearby {
 namespace apple {
@@ -104,7 +104,7 @@ BleL2capOutputStream::~BleL2capOutputStream() {
   NSCAssert(!connection_, @"BleL2capOutputStream not closed before destruction");
 }
 
-Exception BleL2capOutputStream::Write(const ByteArray &data) {
+Exception BleL2capOutputStream::Write(absl::string_view data) {
   [condition_ lock];
   if (!connection_) {
     [condition_ unlock];
@@ -166,7 +166,7 @@ BleL2capSocket::BleL2capSocket(GNCBLEL2CAPConnection *connection)
     : BleL2capSocket(connection, BlePeripheral::DefaultBlePeripheral().GetUniqueId()) {}
 
 BleL2capSocket::BleL2capSocket(GNCBLEL2CAPConnection *connection,
-                               api::ble_v2::BlePeripheral::UniqueId peripheral_id)
+                               api::ble::BlePeripheral::UniqueId peripheral_id)
     : input_stream_(std::make_unique<BleL2capInputStream>(connection)),
       output_stream_(std::make_unique<BleL2capOutputStream>(connection)),
       peripheral_id_(peripheral_id) {}

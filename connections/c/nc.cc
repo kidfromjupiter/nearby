@@ -34,7 +34,6 @@
 #include "connections/connection_options.h"
 #include "connections/core.h"
 #include "connections/discovery_options.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/out_of_band_connection_metadata.h"
@@ -156,15 +155,6 @@ typedef struct NcContext {
 
 absl::NoDestructor<absl::flat_hash_map<NC_INSTANCE, NcContext>> kNcContextMap;
 
-int64_t getFileSize(const char* filename) {
-  struct stat file_status;
-  if (stat(filename, &file_status) < 0) {
-    return -1;
-  }
-
-  return file_status.st_size;
-}
-
 int convertStringToInt(absl::string_view data) {
   if (data.size() != 4) {
     return 0;
@@ -265,45 +255,6 @@ NcCreateServiceWithEventLogger(const NC_EVENT_LOGGER* event_logger) {
   absl::SetGlobalVLogLevel(1);  // OS_LOG_TYPE_DEBUG
   ::nearby::apple::EnableOsLog("com.google.nearby.connections");
 #endif  // TARGET_OS_IOS
-
-#if defined(NC_IOS_SDK)
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableBleV2,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableDct,
-      false);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableDynamicRoleSwitch,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableBleL2cap,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableGattClientDisconnection,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableAwdl,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableStopBleScanningOnWifiUpgrade,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kUseStableEndpointId,
-      true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableGattQueryInThread,
-      true);
-#endif
 
   nc_context.router = new ::nearby::connections::ServiceControllerRouter();
   nc_context.event_logger =
@@ -531,7 +482,7 @@ void NcInjectEndpoint(NC_INSTANCE instance, const NC_DATA* service_id,
   }
 
   ::nearby::connections::OutOfBandConnectionMetadata
-      cpp_out_of_band_connection_metadata;
+      cpp_out_of_band_connection_metadata{};
   cpp_out_of_band_connection_metadata.endpoint_id = metadata->endpoint_id;
   cpp_out_of_band_connection_metadata.endpoint_info = {
       metadata->endpoint_info.data,
@@ -541,6 +492,10 @@ void NcInjectEndpoint(NC_INSTANCE instance, const NC_DATA* service_id,
   cpp_out_of_band_connection_metadata.remote_bluetooth_mac_address = {
       metadata->remote_bluetooth_mac_address.data,
       static_cast<size_t>(metadata->remote_bluetooth_mac_address.size)};
+  cpp_out_of_band_connection_metadata.ble_peripheral_native_id = {
+      metadata->ble_peripheral_native_id.data,
+      static_cast<size_t>(metadata->ble_peripheral_native_id.size)};
+  cpp_out_of_band_connection_metadata.psm = metadata->psm;
 
   nc_context->core->InjectEndpoint(
       std::string(service_id->data, service_id->size),
@@ -729,8 +684,7 @@ void NcSendPayload(NC_INSTANCE instance, size_t endpoint_ids_size,
                                     payload->content.file.file_name);
     }
 
-    nearby::InputFile input_file(full_file_name,
-                                 getFileSize(full_file_name.c_str()));
+    nearby::InputFile input_file(full_file_name);
     cpp_payload =
         ::nearby::connections::Payload(payload->id, std::move(input_file));
   } else if (payload->type == NC_PAYLOAD_TYPE_STREAM) {
@@ -815,10 +769,6 @@ int NcGetLocalEndpointId(NC_INSTANCE instance) {
 
 void NcEnableBleV2(NC_INSTANCE instance, bool enable,
                    NcCallbackResult result_callback, CALLER_CONTEXT context) {
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableBleV2,
-      enable);
   result_callback(NC_STATUS_SUCCESS, context);
 }
 

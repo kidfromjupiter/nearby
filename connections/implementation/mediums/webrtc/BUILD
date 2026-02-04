@@ -42,6 +42,7 @@ cc_library(
         "//connections/implementation/mediums:webrtc_utils",
         "//internal/platform:base",
         "//internal/platform:comm",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//proto/mediums:web_rtc_signaling_frames_cc_proto",
         # TODO: Support WebRTC
@@ -68,9 +69,10 @@ cc_library(
         "//connections/implementation:__subpackages__",
     ],
     deps = [
-        "//connections:core_types",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:types",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -99,6 +101,7 @@ cc_test(
         "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
         "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],

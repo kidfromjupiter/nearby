@@ -162,7 +162,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
 
   void SetUp() override {
     EnvironmentConfig config{/*webrtc_enabled=*/false,
-                             /*use_simulated_clock=*/true};
+                             /*use_simulated_clock=*/true,
+                             /*use_temporary_directory_for_app_path=*/true};
     env_.Start(config);
     client1_ = std::make_unique<ClientProxy>(&event_logger1_);
     client2_ = std::make_unique<ClientProxy>(&event_logger2_);
@@ -173,12 +174,6 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
     client2_.reset();
     env_.Stop();
     NearbyFlags::GetInstance().ResetOverridedValues();
-  }
-
-  bool ShouldEnterHighVisibilityMode(
-      const AdvertisingOptions& advertising_options) {
-    return !advertising_options.low_power &&
-           advertising_options.allowed.bluetooth;
   }
 
   bool ShouldEnterStableEndpointIdMode(
@@ -195,16 +190,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
   Endpoint StartAdvertising(
       ClientProxy* client, ConnectionListener listener,
       AdvertisingOptions advertising_options = AdvertisingOptions{}) {
-    if (NearbyFlags::GetInstance().GetBoolFlag(
-            connections::config_package_nearby::nearby_connections_feature::
-                kUseStableEndpointId)) {
-      if (ShouldEnterStableEndpointIdMode(advertising_options)) {
-        client->EnterStableEndpointIdMode();
-      }
-    } else {
-      if (ShouldEnterHighVisibilityMode(advertising_options)) {
-        client->EnterHighVisibilityMode();
-      }
+    if (ShouldEnterStableEndpointIdMode(advertising_options)) {
+      client->EnterStableEndpointIdMode();
     }
     Endpoint endpoint{
         .info = ByteArray{"advertising endpoint name"},
@@ -366,13 +353,6 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
   void OnPayloadProgress(ClientProxy* client, const Endpoint& endpoint) {
     EXPECT_CALL(mock_discovery_payload_.payload_progress_cb, Call).Times(1);
     client->OnPayloadProgress(endpoint.id, {});
-  }
-
-  void EnableUseStableEndpointIdFeature() {
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        connections::config_package_nearby::nearby_connections_feature::
-            kUseStableEndpointId,
-        true);
   }
 
   ClientProxy* client1() { return client1_.get(); }
@@ -574,7 +554,6 @@ TEST_F(ClientProxyTest, DumpString) {
       "Nearby Connections State\n"
       "  Client ID: %d\n"
       "  Local Endpoint ID: %s\n"
-      "  High Visibility Mode: false\n"
       "  Is Advertising: false\n"
       "  Is Discovering: false\n"
       "  Advertising Service ID: \n"
@@ -825,7 +804,6 @@ TEST_F(ClientProxyTest,
 
 TEST_F(ClientProxyTest,
        RotateWhenLowVizAdvertisementAfterHighVizAndStableAdvertisement) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -866,7 +844,6 @@ TEST_F(ClientProxyTest,
 TEST_F(
     ClientProxyTest,
     NoRotateWhenLowVizStableAdvertisementAfterHighVizAndStableAdvertisement) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -910,7 +887,6 @@ TEST_F(
 TEST_F(
     ClientProxyTest,
     NoRotateWhenAdvertisementHasConnectionAfterStableAdvertisementForAWhile) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -957,7 +933,6 @@ TEST_F(
 }
 
 TEST_F(ClientProxyTest, RotateWhenLowVizAdvertisementAfterDisconnection) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1000,7 +975,6 @@ TEST_F(ClientProxyTest, RotateWhenLowVizAdvertisementAfterDisconnection) {
 
 TEST_F(ClientProxyTest,
        NoRotateWhenLowVizAndStableAdvertisementAfterDisconnection) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1045,7 +1019,6 @@ TEST_F(ClientProxyTest,
 }
 
 TEST_F(ClientProxyTest, RotateWhenAdvertisementAfterDisconnectionForAWhile) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1139,36 +1112,6 @@ TEST_F(ClientProxyTest,
 
   StopAdvertising(client1());
   StartDiscovery(client1(), GetDiscoveryListener());
-
-  Endpoint advertising_endpoint_2 = StartAdvertising(
-      client1(), advertising_connection_listener_, advertising_options);
-
-  EXPECT_NE(advertising_endpoint_1.id, advertising_endpoint_2.id);
-}
-
-// Tests the low visibility mode with bluetooth disabled advertisment.
-TEST_F(ClientProxyTest,
-       EndpointIdRotateWhenLowVizAdvertisementWithBluetoothDisabled) {
-  BooleanMediumSelector booleanMediumSelector;
-  booleanMediumSelector.bluetooth = false;
-
-  AdvertisingOptions advertising_options{
-      {
-          strategy_,
-          booleanMediumSelector,
-      },
-      false,  // auto_upgrade_bandwidth
-      false,  // enforce_topology_constraints
-      false,  // low_power
-      true,   // enable_bluetooth_listening
-      false,  // enable_webrtc_listening
-      true,   // use_stable_endpoint_id
-  };
-
-  Endpoint advertising_endpoint_1 = StartAdvertising(
-      client1(), advertising_connection_listener_, advertising_options);
-
-  StopAdvertising(client1());
 
   Endpoint advertising_endpoint_2 = StartAdvertising(
       client1(), advertising_connection_listener_, advertising_options);
@@ -1457,9 +1400,9 @@ TEST_F(ClientProxyTest, GetLocalDeviceWorksWithDeviceProvider) {
   MockDeviceProvider provider;
   client1()->RegisterDeviceProvider(&provider);
   ASSERT_NE(client1()->GetLocalDeviceProvider(), nullptr);
-  EXPECT_CALL(
-      *(down_cast<MockDeviceProvider*>(client1()->GetLocalDeviceProvider())),
-      GetLocalDevice);
+  EXPECT_CALL(*(absl::down_cast<MockDeviceProvider*>(
+                  client1()->GetLocalDeviceProvider())),
+              GetLocalDevice);
   client1()->GetLocalDevice();
 }
 
@@ -1618,6 +1561,54 @@ TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::
           kEnableMultiplexWifiLan,
+      false);
+}
+
+TEST_F(ClientProxyTest, SaveClientInfoFromPreferences) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
+      true);
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  std::string endpoint_id = advertising_endpoint.id;
+  client1_->SaveClientInfoToPreferences();
+
+  // Destroy the client and create a new one.
+  client1_.reset();
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+
+  // The new client should load the same endpoint ID.
+  EXPECT_EQ(client1()->GetLocalEndpointId(), endpoint_id);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
+      false);
+}
+
+TEST_F(ClientProxyTest, NotLoadClientInfoFromPreferencesOnExpired) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
+      true);
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  std::string endpoint_id = advertising_endpoint.id;
+  client1_->SaveClientInfoToPreferences();
+
+  // Destroy the client and create a new one.
+  client1_.reset();
+  FastForward(absl::Hours(25));
+
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+
+  // The new client should load the same endpoint ID.
+  EXPECT_NE(client1()->GetLocalEndpointId(), endpoint_id);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
       false);
 }
 

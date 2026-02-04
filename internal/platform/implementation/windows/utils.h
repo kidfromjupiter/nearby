@@ -42,15 +42,6 @@ ByteArray Sha256(absl::string_view input, size_t size);
 
 // Reads the IPv4 addresses
 std::vector<std::string> GetIpv4Addresses();
-std::vector<std::string> Get4BytesIpv4Addresses();
-std::vector<std::string> GetWifiIpv4Addresses();
-void GetIpv4Addresses(std::vector<std::string>& wifi_addresses,
-                      std::vector<std::string>& ethernet_addresses,
-                      std::vector<std::string>& other_addresses);
-
-// Returns the connection state of the different network types.
-void GetConnectedNetworks(bool& is_wifi_connected, bool& is_ethernet_connected,
-                          bool& is_other_connected);
 
 // Help methods to convert between Uuid and winrt::guid
 Uuid winrt_guid_to_nearby_uuid(const ::winrt::guid& guid);
@@ -62,6 +53,9 @@ bool is_nearby_uuid_equal_to_winrt_guid(const Uuid& uuid,
 
 // Returns the DNS host name of the computer or std::nullopt if it fails.
 std::optional<std::wstring> GetDnsHostName();
+
+// Returns true if the system has an Intel Wi-Fi adapter.
+bool IsIntelWifiAdapter();
 
 namespace Constants {
 // The Id of the Service Name SDP attribute
@@ -87,6 +81,7 @@ class InspectableReader {
   static uint32_t ReadUint32(IInspectable inspectable);
   static std::string ReadString(IInspectable inspectable);
   static std::vector<std::string> ReadStringArray(IInspectable inspectable);
+  static GUID ReadGuid(IInspectable inspectable);
 };
 
 }  // namespace windows

@@ -275,7 +275,7 @@ Exception BleL2capOutputStream::Close() {
 }
 
 BleL2capSocket::BleL2capSocket(int fd,
-                               api::ble_v2::BlePeripheral::UniqueId peripheral_id)
+                               api::ble::BlePeripheral::UniqueId peripheral_id)
     : peripheral_id_(peripheral_id),
       input_stream_(std::make_unique<BleL2capInputStream>(fd)),
       output_stream_(std::make_unique<BleL2capOutputStream>(fd))

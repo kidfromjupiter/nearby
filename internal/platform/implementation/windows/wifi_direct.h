@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,91 +20,78 @@
 #include <wlanapi.h>
 
 // Standard C/C++ headers
-#include <deque>
-#include <exception>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 // Nearby connections headers
-#include "internal/platform/implementation/wifi_direct.h"
-#include "internal/platform/implementation/windows/scheduled_executor.h"
-
-// ABSL header
+#include "absl/base/nullability.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/optional.h"
+#include "internal/platform/cancellation_flag.h"
+#include "internal/platform/exception.h"
+#include "internal/platform/implementation/wifi_direct.h"
+#include "internal/platform/implementation/windows/nearby_client_socket.h"
+#include "internal/platform/implementation/windows/nearby_server_socket.h"
+#include "internal/platform/implementation/windows/socket_address.h"
+#include "internal/platform/implementation/windows/submittable_executor.h"
+#include "internal/platform/input_stream.h"
+#include "internal/platform/output_stream.h"
+#include "internal/platform/wifi_credential.h"
 
 // WinRT headers
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Enumeration.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.WiFi.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.WiFiDirect.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.WiFiDirect.Services.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.Collections.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Networking.Connectivity.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Networking.Sockets.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.Networking.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Security.Credentials.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Security.Cryptography.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Storage.Streams.h"
+#include "internal/platform/implementation/windows/generated/winrt/Windows.System.h"
 #include "internal/platform/implementation/windows/generated/winrt/base.h"
 
-namespace nearby {
-namespace windows {
+namespace nearby::windows {
 
+using ::winrt::event_token;
 using ::winrt::fire_and_forget;
-using ::winrt::Windows::Devices::WiFiDirect::
-    WiFiDirectAdvertisementListenStateDiscoverability;
-using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisher;
-using ::winrt::Windows::Devices::WiFiDirect::
-    WiFiDirectAdvertisementPublisherStatus;
-using ::winrt::Windows::Devices::WiFiDirect::
-    WiFiDirectAdvertisementPublisherStatusChangedEventArgs;
-using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionListener;
-using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionRequest;
-using ::winrt::Windows::Devices::WiFiDirect::
-    WiFiDirectConnectionRequestedEventArgs;
-using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionStatus;
-using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectDevice;
-
-using ::winrt::Windows::Devices::WiFi::WiFiAccessStatus;
-using ::winrt::Windows::Devices::WiFi::WiFiAdapter;
-using ::winrt::Windows::Devices::WiFi::WiFiAvailableNetwork;
-using ::winrt::Windows::Devices::WiFi::WiFiConnectionStatus;
-using ::winrt::Windows::Devices::WiFi::WiFiReconnectionKind;
-
 using ::winrt::Windows::Devices::Enumeration::DeviceInformation;
-using ::winrt::Windows::Devices::Enumeration::DeviceInformationPairing;
-
-using ::winrt::Windows::Storage::Streams::Buffer;
-using ::winrt::Windows::Storage::Streams::IInputStream;
-using ::winrt::Windows::Storage::Streams::InputStreamOptions;
-using ::winrt::Windows::Storage::Streams::IOutputStream;
-
-using ::winrt::Windows::Security::Credentials::PasswordCredential;
-using ::winrt::Windows::Security::Cryptography::CryptographicBuffer;
-
-using ::winrt::Windows::Networking::HostName;
-using ::winrt::Windows::Networking::HostNameType;
-using ::winrt::Windows::Networking::Connectivity::ConnectionProfile;
-using ::winrt::Windows::Networking::Connectivity::ConnectionProfileDeleteStatus;
-using ::winrt::Windows::Networking::Connectivity::NetworkInformation;
-using ::winrt::Windows::Networking::Sockets::StreamSocket;
-using ::winrt::Windows::Networking::Sockets::StreamSocketListener;
-using ::winrt::Windows::Networking::Sockets::
-    StreamSocketListenerConnectionReceivedEventArgs;
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationUpdate;
+using ::winrt::Windows::Devices::Enumeration::DeviceWatcher;
+using ::winrt::Windows::Devices::WiFiDirect::Services::WiFiDirectService;
+using ::winrt::Windows::Devices::WiFiDirect::Services::
+    WiFiDirectServiceAdvertisementStatus;
+using ::winrt::Windows::Devices::WiFiDirect::Services::
+    WiFiDirectServiceAdvertiser;
+using ::winrt::Windows::Devices::WiFiDirect::Services::
+    WiFiDirectServiceAutoAcceptSessionConnectedEventArgs;
+using ::winrt::Windows::Devices::WiFiDirect::Services::
+    WiFiDirectServiceConfigurationMethod;
+using ::winrt::Windows::Devices::WiFiDirect::Services::WiFiDirectServiceSession;
+using ::winrt::Windows::Devices::WiFiDirect::Services::
+    WiFiDirectServiceSessionRequestedEventArgs;
+using ::winrt::Windows::Devices::WiFiDirect::Services::WiFiDirectServiceStatus;
+using ::winrt::Windows::Foundation::AsyncStatus;
+using ::winrt::Windows::Foundation::IInspectable;
 
 // WifiDirectSocket wraps the socket functions to read and write stream.
-// In WifiDirect GO, A WifiDirectSocket will be passed to
-// StartAcceptingConnections's call back when StreamSocketListener got connect.
-// When call API to connect to remote WiFi Direct service, also will return a
-// WifiDirectSocket to caller.
+// On WiFiDirect GO serverside, a WifiDirectSocket will be passed to
+// StartAcceptingConnections's callback when Winsock Server Socket receives a
+// new connection. When client side call API to connect to remote WiFi
+// WifiDirect GO service, it will return a WifiDirectServiceSocket to caller.
 class WifiDirectSocket : public api::WifiDirectSocket {
  public:
-  explicit WifiDirectSocket(StreamSocket socket);
-  WifiDirectSocket(const WifiDirectSocket&) = default;
+  WifiDirectSocket();
+  explicit WifiDirectSocket(
+      absl_nonnull std::unique_ptr<NearbyClientSocket> socket);
   WifiDirectSocket(WifiDirectSocket&&) = default;
   ~WifiDirectSocket() override;
-  WifiDirectSocket& operator=(const WifiDirectSocket&) = default;
   WifiDirectSocket& operator=(WifiDirectSocket&&) = default;
 
   // Returns the InputStream of the WifiDirectSocket.
@@ -112,71 +99,40 @@ class WifiDirectSocket : public api::WifiDirectSocket {
   //
   // The returned object is not owned by the caller, and can be invalidated once
   // the WifiDirectSocket object is destroyed.
-  InputStream& GetInputStream() override;
+  InputStream& GetInputStream() override { return input_stream_; }
 
   // Returns the OutputStream of the WifiDirectSocket.
   // On error, returned stream will report Exception::kIo on any operation.
   //
   // The returned object is not owned by the caller, and can be invalidated once
   // the WifiDirectSocket object is destroyed.
-  OutputStream& GetOutputStream() override;
+  OutputStream& GetOutputStream() override { return output_stream_; }
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
-  Exception Close() override;
+  Exception Close() override { return client_socket_->Close(); }
+
+  bool Connect(const SocketAddress& server_address) {
+    return client_socket_->Connect(server_address, absl::InfiniteDuration());
+  }
 
  private:
-  // A simple wrapper to handle input stream of socket
-  class SocketInputStream : public InputStream {
-   public:
-    explicit SocketInputStream(IInputStream input_stream);
-    ~SocketInputStream() override = default;
-
-    ExceptionOr<ByteArray> Read(std::int64_t size) override;
-    ExceptionOr<size_t> Skip(size_t offset) override;
-    Exception Close() override;
-
-   private:
-    IInputStream input_stream_{nullptr};
-  };
-
-  // A simple wrapper to handle output stream of socket
-  class SocketOutputStream : public OutputStream {
-   public:
-    explicit SocketOutputStream(IOutputStream output_stream);
-    ~SocketOutputStream() override = default;
-
-    Exception Write(const ByteArray& data) override;
-    Exception Flush() override;
-    Exception Close() override;
-
-   private:
-    IOutputStream output_stream_{nullptr};
-  };
-
-  // Internal properties
-  StreamSocket stream_soket_{nullptr};
-  SocketInputStream input_stream_{nullptr};
-  SocketOutputStream output_stream_{nullptr};
+  absl_nonnull std::unique_ptr<NearbyClientSocket> client_socket_;
+  SocketInputStream input_stream_;
+  SocketOutputStream output_stream_;
 };
 
-// WifiDirectServerSocket provides the support to server socket, this server
-// socket accepts connection from clients.
+// WifiDirectServerSocket provides the support to server socket, this
+// server socket accepts connection from clients.
 class WifiDirectServerSocket : public api::WifiDirectServerSocket {
  public:
-  explicit WifiDirectServerSocket(int port = 0);
-  WifiDirectServerSocket(const WifiDirectServerSocket&) = default;
-  WifiDirectServerSocket(WifiDirectServerSocket&&) = default;
+  WifiDirectServerSocket() = default;
   ~WifiDirectServerSocket() override;
-  WifiDirectServerSocket& operator=(const WifiDirectServerSocket&) = default;
+  WifiDirectServerSocket(WifiDirectServerSocket&&) = default;
   WifiDirectServerSocket& operator=(WifiDirectServerSocket&&) = default;
 
   std::string GetIPAddress() const override;
-  int GetPort() const override;
-  void SetPort(int port) { port_ = port; }
 
-  StreamSocketListener GetSocketListener() const {
-    return stream_socket_listener_;
-  }
+  int GetPort() const override { return server_socket_.GetPort(); }
 
   // Blocks until either:
   // - at least one incoming connection request is available, or
@@ -187,72 +143,68 @@ class WifiDirectServerSocket : public api::WifiDirectServerSocket {
   std::unique_ptr<api::WifiDirectSocket> Accept() override;
 
   // Called by the server side of a connection before passing ownership of
-  // WifiDirectServerSocker to user, to track validity of a pointer to this
-  // server socket.
-  void SetCloseNotifier(absl::AnyInvocable<void()> notifier);
+  // WifiDirectServerSocker to user, to track validity of a pointer to
+  // this server socket.
+  void SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
+    server_socket_.SetCloseNotifier(std::move(notifier));
+  }
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   Exception Close() override;
 
+  // Populates the provided `wifi_direct_credentials` with the IP address
+  // and port of this server socket.
+  void PopulateWifiDirectCredentials(
+      WifiDirectCredentials& wifi_direct_credentials) override;
+
+  void SetIPAddress(std::string ip_address);
+
   // Binds to local port
-  bool listen();
+  bool Listen(int port);
 
  private:
-  // The listener is accepting incoming connections
-  fire_and_forget Listener_ConnectionReceived(
-      StreamSocketListener listener,
-      StreamSocketListenerConnectionReceivedEventArgs const& args);
-
-  // Retrieves IP addresses from local machine
-  std::vector<std::string> GetIpAddresses() const;
-  std::string GetDirectGOIpAddresses() const;
+  // Retrieves WifiDirect GO IP address from local machine
+  std::string GetWifiDirectIpAddress() const;
 
   mutable absl::Mutex mutex_;
-  absl::CondVar cond_;
+  absl::CondVar is_listen_ready_;
+  bool is_listen_started_ ABSL_GUARDED_BY(mutex_) = false;
 
-  std::deque<StreamSocket> pending_sockets_ ABSL_GUARDED_BY(mutex_);
-  StreamSocketListener stream_socket_listener_{nullptr};
-  winrt::event_token listener_event_token_{};
-
-  // Close notifier
-  absl::AnyInvocable<void()> close_notifier_ = nullptr;
-
-  // IP addresses of the computer. mDNS uses them to advertise.
-  std::vector<std::string> ip_addresses_{};
-
-  // Cache socket not be picked by upper layer
-  std::string wifi_direct_go_ipaddr_ = {};
-  int port_ = 0;
+  // IP addresses of the server socket.
+  std::string wifi_direct_ipaddr_ = {};
   bool closed_ = false;
+  NearbyServerSocket server_socket_;
+  bool server_socket_accepted_connection_ = false;
 };
 
-// Container of operations that can be performed over the WifiDirect medium.
 class WifiDirectMedium : public api::WifiDirectMedium {
  public:
-  WifiDirectMedium() = default;
+  WifiDirectMedium();
   ~WifiDirectMedium() override;
+  // WifiDirectMedium is neither copyable nor movable.
+  WifiDirectMedium(const WifiDirectMedium&) = delete;
+  WifiDirectMedium& operator=(const WifiDirectMedium&) = delete;
 
-  // If the WiFi Adaptor supports to start a WifiDirect interface.
+  // If the WiFi Adaptor supports to start WifiDirect Service GO.
   bool IsInterfaceValid() const override;
 
-  // WifiDirect GC connects to server socket
+  // Discoverer connects to server socket
   std::unique_ptr<api::WifiDirectSocket> ConnectToService(
       absl::string_view ip_address, int port,
       CancellationFlag* cancellation_flag) override;
 
-  // WifiDirect GO starts to listen on server socket
+  // Advertiser starts to listen on server socket
   std::unique_ptr<api::WifiDirectServerSocket> ListenForService(
       int port) override;
 
-  // Start WifiDirect GO with specific Credentials.
+  // Advertiser start WiFiDirect GO with specific Credentials.
   bool StartWifiDirect(WifiDirectCredentials* wifi_direct_credentials) override;
-  // Stop the current WifiDirect GO
+  // Advertiser stop the current WiFiDirect GO.
   bool StopWifiDirect() override;
-
-  // WifiDirect GC connects to the GO
+  // Discoverer connects to the WifiDirect GO as GC.
   bool ConnectWifiDirect(
-      WifiDirectCredentials* wifi_direct_credentials) override;
-  // WifiDirect GC disconnects to the GO
+      const WifiDirectCredentials& wifi_direct_credentials) override;
+  // Discoverer disconnects from the connected WifiDirect GO.
   bool DisconnectWifiDirect() override;
 
   absl::optional<std::pair<std::int32_t, std::int32_t>> GetDynamicPortRange()
@@ -260,62 +212,92 @@ class WifiDirectMedium : public api::WifiDirectMedium {
     return absl::nullopt;
   }
 
+  // Returns the supported WifiDirect auth types.
+  std::vector<WifiDirectAuthType> GetSupportedWifiDirectAuthTypes()
+      const override;
+
  private:
   enum Value : char {
     kMediumStatusIdle = 0,
     kMediumStatusAccepting = (1 << 0),
-    kMediumStatusBeaconing = (1 << 1),
-    kMediumStatusConnected = (1 << 2),
+    kMediumStatusGOStarted = (1 << 1),
+    kMediumStatusConnecting = (1 << 2),
+    kMediumStatusConnected = (1 << 3),
   };
-
-  // Implemented the internal disconnection to WifiDirect GO, and used to avoid
-  // deadlock.
-  bool InternalDisconnectWifiDirect();
-  bool IsIdle() { return medium_status_ == kMediumStatusIdle; }
-  // WifiDirect GO is accepting connection on server socket
-  bool IsAccepting() { return (medium_status_ & kMediumStatusAccepting) != 0; }
-  // WifiDirect GO is started and sending beacon
-  bool IsBeaconing() { return (medium_status_ & kMediumStatusBeaconing) != 0; }
-  // WifiDirect GC is connected with the GO
-  bool IsConnected() { return (medium_status_ & kMediumStatusConnected) != 0; }
-  void RestoreWifiConnection();
-  // Gets error message from exception pointer
-  std::string GetErrorMessage(std::exception_ptr eptr);
-
-  fire_and_forget OnStatusChanged(
-      WiFiDirectAdvertisementPublisher sender,
-      WiFiDirectAdvertisementPublisherStatusChangedEventArgs event);
-
-  fire_and_forget OnConnectionRequested(
-      WiFiDirectConnectionListener const& sender,
-      WiFiDirectConnectionRequestedEventArgs const& event);
-
-  // WINRT related data member
-  WiFiAdapter wifi_adapter_{nullptr};
-  WiFiAvailableNetwork wifi_connected_network_{nullptr};
-  WiFiDirectAdvertisementPublisher publisher_{nullptr};
-  WiFiDirectConnectionListener listener_{nullptr};
-  WiFiDirectDevice wifi_direct_device_{nullptr};
-  winrt::event_token publisher_status_changed_token_;
-  winrt::event_token connection_requested_token_;
-
-  // Protects to access some members
-  absl::Mutex mutex_;
-
   // Medium Status
   int medium_status_ = kMediumStatusIdle;
 
+  bool IsWifiDirectServiceSupported();
+  bool IsIdle() { return medium_status_ == kMediumStatusIdle; }
+  // Advertiser is accepting connection on server socket
+  bool IsAccepting() { return (medium_status_ & kMediumStatusAccepting) != 0; }
+  // Advertiser started WifiDirect GO
+  bool IsGOStarted() {
+    return (medium_status_ & kMediumStatusGOStarted) != 0;
+  }
+  // Discoverer is connecting with the WifiDirect
+  bool IsConnecting() {
+    return (medium_status_ & kMediumStatusConnecting) != 0;
+  }
+  // Discoverer is connected with the WifiDirect
+  bool IsConnected() { return (medium_status_ & kMediumStatusConnected) != 0; }
+
+  // Converts WiFiDirectServiceConfigurationMethod enum to a string.
+  static std::string ConfigMethodToString(
+      WiFiDirectServiceConfigurationMethod config_method);
+
+  WiFiDirectServiceAdvertiser advertiser_ = nullptr;
+  WiFiDirectService service_ = nullptr;
+  WiFiDirectServiceSession session_ = nullptr;
+  winrt::Windows::System::DispatcherQueueController controller_ = nullptr;
+  winrt::Windows::System::DispatcherQueue dispatcher_queue_ = nullptr;
+  DeviceInformation device_info_ = nullptr;
+
+  fire_and_forget OnAdvertisementStatusChanged(
+      WiFiDirectServiceAdvertiser sender, IInspectable const& event);
+  fire_and_forget OnAutoAcceptSessionConnected(
+      WiFiDirectServiceAdvertiser sender,
+      WiFiDirectServiceAutoAcceptSessionConnectedEventArgs const& args);
+  fire_and_forget OnSessionRequested(
+      WiFiDirectServiceAdvertiser const& sender,
+      WiFiDirectServiceSessionRequestedEventArgs const& args);
+
+  event_token advertisement_status_changed_token_;
+  event_token auto_accept_session_connected_token_;
+  event_token session_requested_token_;
+
+  // Discovery properties
+  DeviceWatcher device_watcher_{nullptr};
+  event_token device_watcher_added_event_token_;
+  event_token device_watcher_updated_event_token_;
+  event_token device_watcher_removed_event_token_;
+  event_token device_watcher_enumeration_completed_event_token_;
+  event_token device_watcher_stopped_event_token_;
+
+  fire_and_forget Watcher_DeviceAdded(DeviceWatcher sender,
+                                      DeviceInformation device_info);
+  fire_and_forget Watcher_DeviceUpdated(
+      DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate);
+  fire_and_forget Watcher_DeviceRemoved(
+      DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate);
+  fire_and_forget Watcher_DeviceEnumerationCompleted(DeviceWatcher sender,
+                                                     IInspectable inspectable);
+  fire_and_forget Watcher_DeviceStopped(DeviceWatcher sender,
+                                        IInspectable inspectable);
+
+  bool is_interface_valid_ = false;
+  WifiDirectCredentials* credentials_go_ = nullptr;
+  WifiDirectCredentials credentials_gc_;
+  std::string ip_address_local_;
+  std::string ip_address_remote_;
+
+  absl::Mutex mutex_;
+  absl::CondVar is_ip_address_ready_;
   // Keep the server socket listener pointer
   WifiDirectServerSocket* server_socket_ptr_ ABSL_GUARDED_BY(mutex_) = nullptr;
-
-  // Scheduler for timeout.
-  ScheduledExecutor scheduled_executor_;
-
-  // Scheduled task for connection timeout.
-  std::shared_ptr<api::Cancelable> connection_timeout_ = nullptr;
+  SubmittableExecutor listener_executor_;
 };
 
-}  // namespace windows
-}  // namespace nearby
+}  // namespace nearby::windows
 
 #endif  // PLATFORM_IMPL_WINDOWS_WIFI_DIRECT_H_

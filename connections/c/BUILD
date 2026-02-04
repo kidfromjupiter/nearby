@@ -56,6 +56,7 @@ cc_library(
         "//internal/flags:flag_reader",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/proto/analytics:connections_log_cc_proto",
@@ -65,8 +66,10 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ] + select({
-        "@platforms//os:platform_ios": [
+        "@platforms//os:apple": [
+            "//internal/platform/implementation/apple",
             "//internal/platform/implementation/apple:nearby_logger",
+            "//internal/platform/implementation/apple/Mediums",
         ],
         "//conditions:default": [],
     }),

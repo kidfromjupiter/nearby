@@ -43,8 +43,7 @@
 #include "internal/platform/logging.h"
 #include "internal/platform/medium_environment.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 namespace {
 
 constexpr BooleanMediumSelector kTestCases[] = {
@@ -84,16 +83,11 @@ constexpr BooleanMediumSelector kTestCases[] = {
     },
 };
 
-// Combines the bool `kEnableBleV2` as param testing but should revert it back
-// if ble_v2 is done and ble will be replaced by ble_v2.
 class P2pStarPcpHandlerTest
-    : public testing::TestWithParam<std::tuple<BooleanMediumSelector, bool>> {
+    : public testing::TestWithParam<std::tuple<BooleanMediumSelector>> {
  protected:
   void SetUp() override {
     LOG(INFO) << "SetUp: begin";
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        config_package_nearby::nearby_connections_feature::kEnableBleV2,
-        std::get<1>(GetParam()));
     if (advertising_options_.allowed.ble) {
       LOG(INFO) << "SetUp: BLE enabled";
     }
@@ -124,7 +118,7 @@ class P2pStarPcpHandlerTest
           std::get<0>(GetParam()),
       },
       false,  // auto_upgrade_bandwidth
-      true,  // enforce_topology_constraints
+      true,   // enforce_topology_constraints
   };
   AdvertisingOptions advertising_options_{
       {
@@ -132,7 +126,7 @@ class P2pStarPcpHandlerTest
           std::get<0>(GetParam()),
       },
       false,  // auto_upgrade_bandwidth
-      true,  // enforce_topology_constraints
+      true,   // enforce_topology_constraints
   };
   DiscoveryOptions discovery_options_{
       {
@@ -225,13 +219,10 @@ TEST_P(P2pStarPcpHandlerTest, CanConnect) {
 
   const std::string kBssid = "34:36:3B:C7:8C:71";
   const std::int32_t kFreq = 5200;
-  constexpr char kIp4Bytes[] = {(char)192, (char)168, (char)1, (char)37, 0};
 
   connection_options_.connection_info.supports_5_ghz = true;
   connection_options_.connection_info.bssid = kBssid;
   connection_options_.connection_info.ap_frequency = kFreq;
-  connection_options_.connection_info.ip_address.resize(4);
-  connection_options_.connection_info.ip_address = kIp4Bytes;
 
   client_b_.AddCancellationFlag(discovered.endpoint_id);
   handler_b.RequestConnection(
@@ -253,8 +244,6 @@ TEST_P(P2pStarPcpHandlerTest, CanConnect) {
   EXPECT_TRUE(client_b_.Is5GHzSupported(discovered.endpoint_id));
   EXPECT_EQ(client_b_.GetBssid(discovered.endpoint_id), kBssid);
   EXPECT_EQ(client_b_.GetApFrequency(discovered.endpoint_id), kFreq);
-  EXPECT_EQ(client_b_.GetIPAddress(discovered.endpoint_id),
-            std::string(kIp4Bytes));
   // When connection is established, EndpointManager will setup KeepAliveManager
   // loop. When it fails, the connection will be dismantled. Since this a unit
   // test, KeepAliveManager won't be really up. The disconnection may happen
@@ -267,8 +256,6 @@ TEST_P(P2pStarPcpHandlerTest, CanConnect) {
               mediums_b.GetWifi().GetInformation().bssid);
     EXPECT_EQ(client_a_.GetApFrequency(client_b_local_endpoint),
               mediums_b.GetWifi().GetInformation().ap_frequency);
-    EXPECT_EQ(client_a_.GetIPAddress(client_b_local_endpoint),
-              mediums_b.GetWifi().GetInformation().ip_address_4_bytes);
   }
 
   handler_a.StopAdvertising(&client_a_);
@@ -280,11 +267,8 @@ TEST_P(P2pStarPcpHandlerTest, CanConnect) {
   env_.Stop();
 }
 
-INSTANTIATE_TEST_SUITE_P(ParametrisedPcpHandlerTest,
-                         P2pStarPcpHandlerTest,
-                         ::testing::Combine(::testing::ValuesIn(kTestCases),
-                                            ::testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(ParametrisedPcpHandlerTest, P2pStarPcpHandlerTest,
+                         ::testing::Combine(::testing::ValuesIn(kTestCases)));
 
 }  // namespace
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

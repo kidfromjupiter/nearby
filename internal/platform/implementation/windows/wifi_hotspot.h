@@ -24,37 +24,30 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <list>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 
 // Nearby connections headers
-#include "absl/base/nullability.h"
 #include "absl/base/thread_annotations.h"
-#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/byte_array.h"
+#include "absl/types/optional.h"
 #include "internal/platform/cancellation_flag.h"
-#include "internal/platform/exception.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
-#include "internal/platform/implementation/windows/nearby_client_socket.h"
-#include "internal/platform/implementation/windows/nearby_server_socket.h"
 #include "internal/platform/implementation/windows/scheduled_executor.h"
 #include "internal/platform/implementation/windows/wifi_hotspot_native.h"
+#include "internal/platform/implementation/windows/wifi_hotspot_server_socket.h"
 
 // WinRT headers
-#include "absl/types/optional.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.WiFiDirect.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.h"
 #include "internal/platform/implementation/windows/generated/winrt/base.h"
-#include "internal/platform/input_stream.h"
-#include "internal/platform/output_stream.h"
+
 #include "internal/platform/wifi_credential.h"
 
-namespace nearby {
-namespace windows {
+namespace nearby::windows {
 
 using ::winrt::fire_and_forget;
 using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisher;
@@ -65,140 +58,10 @@ using ::winrt::Windows::Devices::WiFiDirect::
     WiFiDirectConnectionRequestedEventArgs;
 using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectDevice;
 
-// WifiHotspotSocket wraps the socket functions to read and write stream.
-// In WiFi HOTSPOT, A WifiHotspotSocket will be passed to
-// StartAcceptingConnections's callback when Winsock Server Socket receives a
-// new connection. When call API to connect to remote WiFi Hotspot service, also
-// will return a WifiHotspotSocket to caller.
-class WifiHotspotSocket : public api::WifiHotspotSocket {
- public:
-  WifiHotspotSocket();
-  explicit WifiHotspotSocket(
-      absl_nonnull std::unique_ptr<NearbyClientSocket> socket);
-  WifiHotspotSocket(WifiHotspotSocket&&) = default;
-  ~WifiHotspotSocket() override;
-  WifiHotspotSocket& operator=(WifiHotspotSocket&&) = default;
-
-  // Returns the InputStream of the WifiHotspotSocket.
-  // On error, returned stream will report Exception::kIo on any operation.
-  //
-  // The returned object is not owned by the caller, and can be invalidated once
-  // the WifiHotspotSocket object is destroyed.
-  InputStream& GetInputStream() override { return input_stream_; }
-
-  // Returns the OutputStream of the WifiHotspotSocket.
-  // On error, returned stream will report Exception::kIo on any operation.
-  //
-  // The returned object is not owned by the caller, and can be invalidated once
-  // the WifiHotspotSocket object is destroyed.
-  OutputStream& GetOutputStream() override { return output_stream_; }
-
-  // Returns Exception::kIo on error, Exception::kSuccess otherwise.
-  Exception Close() override { return client_socket_->Close(); }
-
-  bool Connect(const std::string& ip_address, int port) {
-    return client_socket_->Connect(ip_address, port);
-  }
-
- private:
-  // A simple wrapper to handle input stream of socket
-  class SocketInputStream : public InputStream {
-   public:
-    explicit SocketInputStream(NearbyClientSocket* absl_nonnull client_socket)
-        : client_socket_(client_socket) {}
-    ~SocketInputStream() override = default;
-
-    ExceptionOr<ByteArray> Read(std::int64_t size) override {
-      return client_socket_->Read(size);
-    }
-    ExceptionOr<size_t> Skip(size_t offset) override {
-      return client_socket_->Skip(offset);
-    }
-    Exception Close() override { return client_socket_->Close(); }
-
-   private:
-    NearbyClientSocket* absl_nonnull const client_socket_;
-  };
-
-  // A simple wrapper to handle output stream of socket
-  class SocketOutputStream : public OutputStream {
-   public:
-    explicit SocketOutputStream(NearbyClientSocket* absl_nonnull client_socket)
-        : client_socket_(client_socket) {}
-    ~SocketOutputStream() override = default;
-
-    Exception Write(const ByteArray& data) override {
-      return client_socket_->Write(data);
-    }
-    Exception Flush() override { return client_socket_->Flush(); }
-    Exception Close() override { return client_socket_->Close(); }
-
-   private:
-    NearbyClientSocket* absl_nonnull const client_socket_;
-  };
-
-  absl_nonnull std::unique_ptr<NearbyClientSocket> client_socket_;
-  SocketInputStream input_stream_;
-  SocketOutputStream output_stream_;
-};
-
-// WifiHotspotServerSocket provides the support to server socket, this server
-// socket accepts connection from clients.
-class WifiHotspotServerSocket : public api::WifiHotspotServerSocket {
- public:
-  explicit WifiHotspotServerSocket(int port = 0);
-  WifiHotspotServerSocket(const WifiHotspotServerSocket&) = default;
-  WifiHotspotServerSocket(WifiHotspotServerSocket&&) = default;
-  ~WifiHotspotServerSocket() override;
-  WifiHotspotServerSocket& operator=(const WifiHotspotServerSocket&) = default;
-  WifiHotspotServerSocket& operator=(WifiHotspotServerSocket&&) = default;
-
-  std::string GetIPAddress() const override;
-  int GetPort() const override;
-
-  // Blocks until either:
-  // - at least one incoming connection request is available, or
-  // - ServerSocket is closed.
-  // On success, returns connected socket, ready to exchange data.
-  // Returns nullptr on error.
-  // Once error is reported, it is permanent, and ServerSocket has to be closed.
-  std::unique_ptr<api::WifiHotspotSocket> Accept() override;
-
-  // Called by the server side of a connection before passing ownership of
-  // WifiHotspotServerSocker to user, to track validity of a pointer to this
-  // server socket.
-  void SetCloseNotifier(absl::AnyInvocable<void()> notifier);
-
-  // Returns Exception::kIo on error, Exception::kSuccess otherwise.
-  Exception Close() override;
-
-  // Binds to local port
-  bool listen();
-
-  NearbyServerSocket server_socket_;
-
- private:
-  // Retrieves hotspot IP address from local machine
-  std::string GetHotspotIpAddress() const;
-
-  const int port_;
-  mutable absl::Mutex mutex_;
-
-  // Close notifier
-  absl::AnyInvocable<void()> close_notifier_ = nullptr;
-
-  // IP addresses of the computer. mDNS uses them to advertise.
-  std::vector<std::string> ip_addresses_{};
-
-  // Cache socket not be picked by upper layer
-  std::string hotspot_ipaddr_ = {};
-  bool closed_ = false;
-};
-
 // Container of operations that can be performed over the WifiHotspot medium.
 class WifiHotspotMedium : public api::WifiHotspotMedium {
  public:
-  WifiHotspotMedium();
+  WifiHotspotMedium() = default;
   ~WifiHotspotMedium() override;
 
   // If the WiFi Adaptor supports to start a Hotspot interface.
@@ -206,7 +69,7 @@ class WifiHotspotMedium : public api::WifiHotspotMedium {
 
   // Discoverer connects to server socket
   std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
-      absl::string_view ip_address, int port,
+      const ServiceAddress& service_address,
       CancellationFlag* cancellation_flag) override;
 
   // Advertiser starts to listen on server socket
@@ -218,7 +81,8 @@ class WifiHotspotMedium : public api::WifiHotspotMedium {
   // Advertiser stop the current WiFi Hotspot
   bool StopWifiHotspot() override;
   // Discoverer connects to the Hotspot
-  bool ConnectWifiHotspot(HotspotCredentials* hotspot_credentials) override;
+  bool ConnectWifiHotspot(
+      const HotspotCredentials& hotspot_credentials) override;
   // Discoverer disconnects from the Hotspot
   bool DisconnectWifiHotspot() override;
 
@@ -234,11 +98,6 @@ class WifiHotspotMedium : public api::WifiHotspotMedium {
     kMediumStatusBeaconing = (1 << 1),
     kMediumStatusConnected = (1 << 2),
   };
-
-  // Store the Hotspot SSID to local storage
-  void StoreHotspotSsid(std::string ssid);
-  // Get the Hotspot SSID from local storage
-  std::string GetStoredHotspotSsid();
 
   bool IsIdle() { return medium_status_ == kMediumStatusIdle; }
   // Advertiser is accepting connection on server socket
@@ -281,10 +140,8 @@ class WifiHotspotMedium : public api::WifiHotspotMedium {
 
   // connects Wi-Fi hotspot using native API.
   WifiHotspotNative wifi_hotspot_native_;
-  std::optional<std::wstring> connected_hotspot_profile_name_;
 };
 
-}  // namespace windows
-}  // namespace nearby
+}  // namespace nearby::windows
 
 #endif  // PLATFORM_IMPL_WINDOWS_WIFI_HOTSPOT_H_

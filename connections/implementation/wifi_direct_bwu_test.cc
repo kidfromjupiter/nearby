@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +23,15 @@
 #include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/wifi_direct_bwu_handler.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
-#include "internal/platform/feature_flags.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/medium_environment.h"
 #include "internal/platform/single_thread_executor.h"
@@ -51,7 +52,13 @@ constexpr absl::string_view kEndpointID{"WifiDirect_GO"};
 
 class WifiDirectTest : public testing::Test {
  protected:
-  WifiDirectTest() { env_.Start(); }
+  WifiDirectTest() {
+    NearbyFlags::GetInstance().OverrideBoolFlagValue(
+        connections::config_package_nearby::nearby_connections_feature::
+            kEnableWifiDirect,
+        true);
+    env_.Start();
+  }
   ~WifiDirectTest() override { env_.Stop(); }
 
   MediumEnvironment& env_{MediumEnvironment::Instance()};
@@ -85,18 +92,12 @@ TEST_F(WifiDirectTest, WFDGOBWUInit_GCCreateEndpointChannel) {
                          mutable_connection) {
         LOG(INFO) << "Server socket connection accept call back, Socket name: "
                   << mutable_connection->socket->ToString();
-        std::shared_ptr<BwuHandler::IncomingSocketConnection> connection(
-            mutable_connection.release());
         accept_latch.CountDown();
         EXPECT_TRUE(end_latch.Await(kWaitDuration).result());
-
-        connection->channel->Close();
-        connection->socket->Close();
       });
 
   SingleThreadExecutor wfd_go_executor;
-  wfd_go_executor.Execute([&wfd_go_bwu_handler, &wifi_direct_go, &upgrade_frame,
-                           &start_latch]() {
+  wfd_go_executor.Execute([&]() {
     ByteArray upgrade_path_available_frame =
         wfd_go_bwu_handler->InitializeUpgradedMediumForEndpoint(
             &wifi_direct_go, std::string(kServiceID), std::string(kEndpointID));

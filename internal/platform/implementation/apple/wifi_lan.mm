@@ -53,7 +53,7 @@ Exception WifiLanInputStream::Close() {
 
 WifiLanOutputStream::WifiLanOutputStream(GNCNWFrameworkSocket* socket) : socket_(socket) {}
 
-Exception WifiLanOutputStream::Write(const ByteArray& data) {
+Exception WifiLanOutputStream::Write(absl::string_view data) {
   NSError* error = nil;
   BOOL result = [socket_ write:[NSData dataWithBytes:data.data() length:data.size()] error:&error];
   if (!result) {
@@ -165,9 +165,9 @@ std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
 }
 
 std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
-    const std::string& ip_address, int port, CancellationFlag* cancellation_flag) {
+    const ServiceAddress& service_address, CancellationFlag* cancellation_flag) {
   GNCNWFrameworkSocket* socket = network_utils::ConnectToService(
-      medium_, ip_address, port, /*include_peer_to_peer=*/false, cancellation_flag);
+      medium_, service_address, /*include_peer_to_peer=*/false, cancellation_flag);
   if (socket != nil) {
     return std::make_unique<WifiLanSocket>(socket);
   }
@@ -181,6 +181,18 @@ std::unique_ptr<api::WifiLanServerSocket> WifiLanMedium::ListenForService(int po
     return std::make_unique<WifiLanServerSocket>(serverSocket);
   }
   return nil;
+}
+
+api::UpgradeAddressInfo WifiLanMedium::GetUpgradeAddressCandidates(
+    const api::WifiLanServerSocket& server_socket) {
+  std::string ip_address = server_socket.GetIPAddress();
+  api::UpgradeAddressInfo result;
+  result.num_interfaces = 1;
+  result.num_ipv6_only_interfaces = 0;
+  result.address_candidates.push_back(
+      {.address = std::vector<char>(ip_address.begin(), ip_address.end()),
+       .port = static_cast<uint16_t>(server_socket.GetPort())});
+  return result;
 }
 
 }  // namespace apple

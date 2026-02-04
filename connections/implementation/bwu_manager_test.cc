@@ -19,8 +19,10 @@
 #include <utility>
 
 #include "gtest/gtest.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
 #include "connections/connection_options.h"
+#include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
@@ -32,10 +34,13 @@
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/service_id_constants.h"
 #include "connections/listeners.h"
+#include "connections/medium_selector.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/service_address.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
@@ -44,8 +49,6 @@ namespace connections {
 namespace {
 using ::location::nearby::analytics::proto::ConnectionsLog;
 using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
-using ::location::nearby::connections::
-    BandwidthUpgradeNegotiationFrame_UpgradePathInfo;
 using ::location::nearby::connections::MediumRole;
 using ::location::nearby::connections::OfflineFrame;
 using ::location::nearby::connections::OsInfo;
@@ -60,9 +63,31 @@ constexpr absl::string_view kEndpointId3 = "Endpoint3";
 constexpr absl::string_view kEndpointId4 = "Endpoint4";
 constexpr absl::string_view kEndpointId5 = "Endpoint5";
 
+BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+CreateWifiHotspotCredentials() {
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+      credentials;
+  credentials.set_ssid("Direct-357a2d8c");
+  credentials.set_password("b592f7d3");
+  credentials.set_port(1234);
+  credentials.set_frequency(2412);
+  credentials.set_gateway("123.234.23.1");
+  auto* candidate = credentials.mutable_address_candidates()->Add();
+  candidate->set_ip_address(std::string(
+      "\xfe\x80\\x00\x00\x00\x00\x00\x00\x4d\xb2\xb3\x5c\x22\x03\x98\xa1", 16));
+  candidate->set_port(1234);
+  candidate = credentials.mutable_address_candidates()->Add();
+  candidate->set_ip_address("\x7b\xea\x17\x01");
+  candidate->set_port(2412);
+  return credentials;
+}
+
 class BwuManagerTest : public ::testing::Test {
  protected:
   BwuManagerTest() {
+    NearbyFlags::GetInstance().OverrideBoolFlagValue(
+        config_package_nearby::nearby_connections_feature::kEnableWifiDirect,
+        true);
     // Set up fake BWU handlers for WebRTC and WifiLAN.
     absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers;
     auto fake_web_rtc = std::make_unique<FakeBwuHandler>(Medium::WEB_RTC);
@@ -181,6 +206,9 @@ class BwuManagerTest : public ::testing::Test {
 };
 
 TEST(BwuManagerBaseTest, AllowToUpgradeMedium) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::kEnableWifiDirect,
+      true);
   ClientProxy client;
   EndpointChannelManager ecm;
   EndpointManager em(&ecm);
@@ -833,8 +861,8 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagEnabled) {
       /*initialize_call_index=*/2u, bwu_manager_.get());
 
   // This upgrade fails.
-  BwuHandler::UpgradePathInfo info;
-  info.set_medium(BwuHandler::UpgradePathInfo::WEB_RTC);
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo info;
+  info.set_medium(BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WEB_RTC);
   ExceptionOr<OfflineFrame> upgrade_failure =
       parser::FromBytes(parser::ForBwuFailure(info));
   bwu_manager_->OnIncomingFrame(upgrade_failure.result(),
@@ -871,8 +899,8 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
       /*initialize_call_index=*/2u, bwu_manager_.get());
 
   // This upgrade fails.
-  BwuHandler::UpgradePathInfo info;
-  info.set_medium(BwuHandler::UpgradePathInfo::WEB_RTC);
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo info;
+  info.set_medium(BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WEB_RTC);
   ExceptionOr<OfflineFrame> upgrade_failure =
       parser::FromBytes(parser::ForBwuFailure(info));
   bwu_manager_->OnIncomingFrame(upgrade_failure.result(),
@@ -894,15 +922,16 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_WifiDirect) {
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
 
   ByteArray bytes = parser::ForBwuWifiDirectPathAvailable(
-      /*ssid=*/"Direct-12345678", /*password=*/"87654321", /*port=*/2143,
+      /*ssid=*/"", /*password=*/"", /*port=*/2143,
       /*frequency=*/2412, /*supports_disabling_encryption=*/false,
-      /*gateway=*/"123.234.23.1");
+      /*gateway=*/"123.234.23.1", /*service_name=*/"NC-WifiDirectTest",
+      /*pin=*/"b592f7d3");
   frame.ParseFromString(std::string(bytes));
 
   ::nearby::connections::V1Frame* v1_frame = frame.mutable_v1();
   ::nearby::connections::BandwidthUpgradeNegotiationFrame* sub_frame =
       v1_frame->mutable_bandwidth_upgrade_negotiation();
-  ::nearby::connections::BandwidthUpgradeNegotiationFrame_UpgradePathInfo*
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo*
       upgrade_path_info = sub_frame->mutable_upgrade_path_info();
   upgrade_path_info->set_supports_client_introduction_ack(false);
   bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId1), &client_,
@@ -928,9 +957,9 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
 
   ExceptionOr<OfflineFrame> hotspot_path_available_frame =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1",
-          false));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/false));
+  ASSERT_TRUE(hotspot_path_available_frame.ok());
   OfflineFrame frame = hotspot_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -956,9 +985,9 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Wlan) {
 
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
 
-  ExceptionOr<OfflineFrame> wlan_path_available_frame = parser::FromBytes(
-      parser::ForBwuWifiLanPathAvailable(/*ip_address=*/"ABCD",
-                                         /*port=*/1234));
+  ExceptionOr<OfflineFrame> wlan_path_available_frame =
+      parser::FromBytes(parser::ForBwuWifiLanPathAvailable(
+          {ServiceAddress{.address = {'A', 'B', 'C', 'D'}, .port = 1234}}));
   OfflineFrame frame = wlan_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -995,8 +1024,8 @@ TEST_F(BwuManagerTest, BlockBwuFrameBeforeAccept) {
 
   ExceptionOr<OfflineFrame> hotspot_path_available_frame2 =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1", true));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/true));
   OfflineFrame frame2 = hotspot_path_available_frame2.result();
   frame2.set_version(OfflineFrame::V1);
   auto* v1_frame2 = frame2.mutable_v1();
@@ -1018,8 +1047,8 @@ TEST_F(BwuManagerTest, BlockBwuFrameBeforeAccept) {
 TEST_F(BwuManagerTest, BlockBwuFrameFromAdvertiser) {
   ExceptionOr<OfflineFrame> hotspot_path_available_frame =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1", true));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/true));
   OfflineFrame frame = hotspot_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();

@@ -100,6 +100,19 @@ enum Medium {
 //     //depot/google3/third_party/nearby/connections/c/nc_types.h
 // )
 
+// LINT.IfChange
+// The authentication type of WifiDirect.
+enum WifiDirectAuthType {
+  WIFI_DIRECT_TYPE_UNKNOWN = 0;
+  // WifiDirect type that uses ssid/password for authentication. Android
+  // supports this type, but Windows does not.
+  WIFI_DIRECT_WITH_PASSWORD = 1;
+  // WifiDirect type that uses service_name/pin for authentication. Android
+  // and Windows both support this type.
+  WIFI_DIRECT_WITH_PIN = 2;
+}
+// LINT.ThenChange(//depot/google3/third_party/nearby/connections/implementation/proto/offline_wire_formats.proto)
+
 // The medium technologies used during the sharing.
 enum ConnectionTechnology {
   CONNECTION_TECHNOLOGY_UNKNOWN_TECHNOLOGY = 0;
@@ -1058,6 +1071,14 @@ enum OperationResultCode {
   // Payloads IOError due to endpoint get IOException on AWDL medium
   // (IOException on Channel#write)
   CONNECTIVITY_CHANNEL_IO_ERROR_ON_AWDL = 3606;
+  // Failed to join Wifi Aware network dur to network unavailable
+  CONNECTIVITY_WIFI_AWARE_DO_UNAVAILABLE = 3607;
+  // The discovered Wifi Aware peer is null and screen off
+  CONNECTIVITY_WIFI_AWARE_DISCOVER_PEER_NULL_SCREEN_OFF = 3608;
+  // The discovered Wifi Aware peer is null due to timeout
+  CONNECTIVITY_WIFI_AWARE_DISCOVER_PEER_NULL_TIMEOUT = 3609;
+  // Failed to join Wifi Aware network
+  CONNECTIVITY_WIFI_AWARE_JOIN_NETWORK_FAILED = 3610;
 
   // Section of CATEGORY_NEARBY_ERROR, from 4500
   // NO BLE MAC address associated to the GATT advertisement
@@ -1350,6 +1371,24 @@ enum OperationResultCode {
   DCT_ERROR_UNVERIFIED_INTEGRITY = 5023;
   // HTTP server closed
   DCT_ERROR_HTTP_SERVER_CLOSED = 5024;
+  // Failed to perform checkin
+  DCT_ERROR_CHECKIN_FAILURE = 5025;
+  // Failed to verify remote device due to timeout
+  DCT_ERROR_REMOTE_ATTESTATION_TIMEOUT = 5026;
+  // Incoming attestation packet is null
+  DCT_ERROR_REMOTE_ATTESTATION_NULL_PACKET = 5027;
+  // Attestation status is not available
+  DCT_ERROR_REMOTE_ATTESTATION_STATUS_NOT_AVAILABLE = 5028;
+  // Attestation hash is too short
+  DCT_ERROR_REMOTE_ATTESTATION_HASH_TOO_SHORT = 5029;
+  // Remote device attestation Apple integrity unavailable
+  DCT_ERROR_REMOTE_ATTESTATION_APPLE_INTEGRITY_UNAVAILABLE = 5030;
+  // Local attestation Play Integrity API unavailable
+  DCT_ERROR_LOCAL_ATTESTATION_PLAY_INTEGRITY_UNAVAILABLE = 5031;
+  // Local attestation timeout
+  DCT_ERROR_LOCAL_ATTESTATION_TIMEOUT = 5032;
+  // Parallel attestation timeout
+  DCT_ERROR_PARALLEL_ATTESTATION_TIMEOUT = 5033;
 }
 
 enum StopAdvertisingReason {
@@ -1380,6 +1419,18 @@ enum SupportedService {
   SUPPORTED_SERVICE_SETTINGS_ESIM = 1;
   SUPPORTED_SERVICE_DATA_MIGRATION = 2;
   SUPPORTED_SERVICE_DATA_TRANSFER = 3;
+}
+
+enum DctPayloadType {
+  DCT_PAYLOAD_TYPE_UNSPECIFIED = 0;
+  // A Payload representing a request.
+  DCT_PAYLOAD_TYPE_REQUEST = 1;
+  // A Payload consisting of a list of byte arrays as a response.
+  DCT_PAYLOAD_TYPE_BYTES_RESPONSE = 2;
+  // A Payload representing a list of files and their metadata as a response.
+  DCT_PAYLOAD_TYPE_FILES_RESPONSE = 3;
+  // A one-way message payload.
+  DCT_PAYLOAD_TYPE_ONE_WAY_MESSAGE = 4;
 }
 // LINT.ThenChange(
 //     //depot/google3/wireless/android/stats/platform/westworld/public/protos/enums/android/nearby/connections/enums.proto

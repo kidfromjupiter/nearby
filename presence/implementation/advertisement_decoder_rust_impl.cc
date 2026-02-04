@@ -37,19 +37,10 @@ namespace nearby {
 namespace presence {
 namespace {
 
-absl::StatusOr<nearby_protocol::ActionType> MapAction(const ActionBit action) {
-  switch (action) {
-    case ActionBit::kActiveUnlockAction:
-      return nearby_protocol::ActionType::ActiveUnlock;
-    case ActionBit::kNearbyShareAction:
-      return nearby_protocol::ActionType::NearbyShare;
-    case ActionBit::kInstantTetheringAction:
-      return nearby_protocol::ActionType::InstantTethering;
-    case ActionBit::kPhoneHubAction:
-      return nearby_protocol::ActionType::PhoneHub;
-    default:
-      return absl::InvalidArgumentError("Unsupported action type");
-  }
+absl::StatusOr<::nearby_protocol::ActionType> MapAction(
+    const ActionBit action) {
+  return ::nearby_protocol::ActionType::TryBuildFromU8(
+      static_cast<uint8_t>(action));
 }
 
 void AddActionsToAdvertisement(const nearby_protocol::V0Actions& parsed_actions,
@@ -77,6 +68,11 @@ void ProcessDataElement(const nearby_protocol::V0DataElement& data_element,
     }
     case nearby_protocol::V0DataElementKind::Actions: {
       AddActionsToAdvertisement(data_element.AsActions(), advertisement);
+      return;
+    }
+    default: {
+      LOG(WARNING) << "Unsupported data element type: "
+                   << (int)data_element.GetKind();
     }
   }
 }

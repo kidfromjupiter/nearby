@@ -239,6 +239,10 @@ ExceptionOr<bool> EndpointManager::HandleData(
     ExceptionOr<ByteArray> bytes = endpoint_channel->Read(packet_meta_data);
     if (!bytes.ok()) {
       LOG(INFO) << "Stop reading on read-time exception: " << bytes.exception();
+      // Treat kNoData as kIo.
+      if (bytes.exception() == Exception::kNoData) {
+        return ExceptionOr<bool>(Exception::kIo);
+      }
       return ExceptionOr<bool>(bytes.exception());
     }
     ExceptionOr<OfflineFrame> wrapped_frame = parser::FromBytes(bytes.result());
@@ -956,7 +960,8 @@ std::vector<std::string> EndpointManager::SendTransferFrameBytes(
       continue;
     }
 
-    Exception write_exception = channel->Write(bytes, packet_meta_data);
+    Exception write_exception =
+        channel->Write(bytes.AsStringView(), packet_meta_data);
     if (!write_exception.Ok()) {
       failed_endpoint_ids.push_back(endpoint_id);
       LOG(INFO) << "Failed to send packet; endpoint_id=" << endpoint_id;

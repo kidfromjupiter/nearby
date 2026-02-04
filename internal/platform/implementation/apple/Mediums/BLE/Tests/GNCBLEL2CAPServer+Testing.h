@@ -16,11 +16,13 @@
 
 #import <Foundation/Foundation.h>
 
+#import "internal/platform/implementation/apple/Mediums/BLE/GNCPeripheralManager.h"
+
 @protocol GNCPeripheralManager;
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface GNCBLEL2CAPServer (Testing)
+@interface GNCBLEL2CAPServer (Testing) <GNCPeripheralManagerDelegate>
 
 /**
  * Creates a L2CAP server with a provided peripheral manager.
@@ -30,6 +32,13 @@ NS_ASSUME_NONNULL_BEGIN
  * @param peripheralManager The peripheral manager instance.
  */
 - (instancetype)initWithPeripheralManager:(id<GNCPeripheralManager>)peripheralManager;
+
+/**
+ * Closes the L2CAP channel.
+ *
+ * This is only exposed for testing.
+ */
+- (void)closeL2CAPChannel;
 
 @end
 

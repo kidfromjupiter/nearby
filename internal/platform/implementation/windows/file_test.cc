@@ -91,7 +91,7 @@ std::string CreateTempFile(absl::string_view prefix, size_t size) {
 
 TEST(IOFileTest, InputFileNonexistentPathHasZeroSize) {
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(/*file_path=*/"", /*size=*/0);
+      IOFile::CreateInputFile(/*file_path=*/"");
   ASSERT_NE(input_file, nullptr);
 
   EXPECT_EQ(input_file->GetTotalSize(), 0);
@@ -99,7 +99,7 @@ TEST(IOFileTest, InputFileNonexistentPathHasZeroSize) {
 
 TEST(IOFileTest, InputFileNonexistentPathFailsToRead) {
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(/*file_path=*/"", /*size=*/0);
+      IOFile::CreateInputFile(/*file_path=*/"");
   ASSERT_NE(input_file, nullptr);
 
   ExceptionOr<ByteArray> read_result = input_file->Read(/*size=*/1);
@@ -110,7 +110,7 @@ TEST(IOFileTest, InputFileNonexistentPathFailsToRead) {
 
 TEST(IOFileTest, InputFileNonexistentPathCloseSucceeds) {
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(/*file_path=*/"", /*size=*/0);
+      IOFile::CreateInputFile(/*file_path=*/"");
   ASSERT_NE(input_file, nullptr);
 
   ExceptionOr<ByteArray> close_result = input_file->Close();
@@ -124,7 +124,7 @@ TEST(IOFileTest, InputFileLargeFileSize) {
   ASSERT_FALSE(temp_file.empty());
 
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(temp_file, /*size=*/0);
+      IOFile::CreateInputFile(temp_file);
   ASSERT_NE(input_file, nullptr);
 
   EXPECT_EQ(input_file->GetTotalSize(), kLargeFileSize);
@@ -137,7 +137,7 @@ TEST(IOFileTest, InputFileReadToEnd) {
   ASSERT_FALSE(temp_file.empty());
 
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(temp_file, /*size=*/0);
+      IOFile::CreateInputFile(temp_file);
   ASSERT_NE(input_file, nullptr);
 
   EXPECT_EQ(input_file->GetTotalSize(), kFileSize);
@@ -161,7 +161,7 @@ TEST(IOFileTest, OutputFileAlreadyExists) {
   ASSERT_NE(output_file, nullptr);
 
   EXPECT_EQ(output_file->GetTotalSize(), 0);
-  ExceptionOr<ByteArray> write_result = output_file->Write(ByteArray("test"));
+  ExceptionOr<ByteArray> write_result = output_file->Write("test");
   EXPECT_FALSE(write_result.ok());
   EXPECT_TRUE(write_result.GetException().Raised(Exception::kIo));
 
@@ -173,14 +173,14 @@ TEST(IOFileTest, OutputFileWrite) {
   std::unique_ptr<IOFile> output_file = IOFile::CreateOutputFile(temp_file);
   ASSERT_NE(output_file, nullptr);
 
-  ExceptionOr<ByteArray> write_result = output_file->Write(ByteArray("test1"));
+  ExceptionOr<ByteArray> write_result = output_file->Write("test1");
   EXPECT_TRUE(write_result.ok());
-  write_result = output_file->Write(ByteArray("test2"));
+  write_result = output_file->Write("test2");
   EXPECT_TRUE(write_result.ok());
   EXPECT_TRUE(output_file->Close().Ok());
 
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(temp_file, /*size=*/0);
+      IOFile::CreateInputFile(temp_file);
   ExceptionOr<ByteArray> read_result = input_file->Read(10);
   EXPECT_TRUE(read_result.ok());
   EXPECT_EQ(read_result.result(), ByteArray("test1test2"));
@@ -197,7 +197,7 @@ TEST(IOFileTest, GetSetModifiedTime) {
   output_file->Close();
 
   std::unique_ptr<IOFile> input_file =
-      IOFile::CreateInputFile(temp_file, /*size=*/0);
+      IOFile::CreateInputFile(temp_file);
   EXPECT_EQ(input_file->GetLastModifiedTime(),
             absl::FromUnixSeconds(1234567890));
 

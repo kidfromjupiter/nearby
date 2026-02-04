@@ -21,11 +21,15 @@
 #include <utility>
 
 #include <arpa/inet.h>
+#include "internal/base/masker.h"
 #include "internal/platform/cancellation_flag_listener.h"
 #import "internal/platform/implementation/apple/Log/GNCLogger.h"
 #import "internal/platform/implementation/apple/Mediums/Hotspot/GNCHotspotMedium.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCIPv4Address.h"
+#import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFramework.h"
+#import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFrameworkServerSocket.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFrameworkSocket.h"
+#import "internal/platform/implementation/apple/network_utils.h"
 
 namespace nearby {
 namespace apple {
@@ -57,7 +61,7 @@ Exception WifiHotspotInputStream::Close() {
 
 WifiHotspotOutputStream::WifiHotspotOutputStream(GNCNWFrameworkSocket* socket) : socket_(socket) {}
 
-Exception WifiHotspotOutputStream::Write(const ByteArray& data) {
+Exception WifiHotspotOutputStream::Write(absl::string_view data) {
   NSError* error = nil;
   BOOL result = [socket_ write:[NSData dataWithBytes:data.data() length:data.size()] error:&error];
   if (!result) {
@@ -102,14 +106,17 @@ WifiHotspotMedium::WifiHotspotMedium() {
   medium_ = [[GNCHotspotMedium alloc] initWithQueue:hotspot_queue_];
 }
 
+WifiHotspotMedium::WifiHotspotMedium(GNCHotspotMedium* hotspot_medium) : medium_(hotspot_medium) {}
+
 WifiHotspotMedium::~WifiHotspotMedium() { DisconnectWifiHotspot(); }
 
-bool WifiHotspotMedium::ConnectWifiHotspot(HotspotCredentials* hotspot_credentials_) {
-  NSString* ssid = [[NSString alloc] initWithUTF8String:hotspot_credentials_->GetSSID().c_str()];
-  NSString* password =
-      [[NSString alloc] initWithUTF8String:hotspot_credentials_->GetPassword().c_str()];
+bool WifiHotspotMedium::ConnectWifiHotspot(const HotspotCredentials& hotspot_credentials_) {
+  NSString* ssid = [[NSString alloc] initWithUTF8String:hotspot_credentials_.GetSSID().c_str()];
+  std::string hotspot_password = hotspot_credentials_.GetPassword();
+  NSString* password = [[NSString alloc] initWithUTF8String:hotspot_password.c_str()];
 
-  GNCLoggerInfo(@"ConnectWifiHotspot SSID: %@ Password: %@", ssid, password);
+  GNCLoggerInfo(@"ConnectWifiHotspot SSID: %@ Password: %s", ssid,
+                masker::Mask(hotspot_password).c_str());
   bool result = [medium_ connectToWifiNetworkWithSSID:ssid password:password];
   if (result) {
     GNCLoggerInfo(@"Successfully connected to %@", ssid);
@@ -132,26 +139,19 @@ bool WifiHotspotMedium::DisconnectWifiHotspot() {
 }
 
 std::unique_ptr<api::WifiHotspotSocket> WifiHotspotMedium::ConnectToService(
-    absl::string_view ip_address, int port, CancellationFlag* cancellation_flag) {
+    const ServiceAddress& service_address, CancellationFlag* cancellation_flag) {
   NSError* error = nil;
   GNCIPv4Address* host;
 
-  if (ip_address.size() == 4) {
-    // 4 bytes IP address format.
-    NSData* host_ip_address = [NSData dataWithBytes:ip_address.data() length:ip_address.size()];
-    host = [GNCIPv4Address addressFromData:host_ip_address];
-  } else {
-    // Dot-decimal IP address format.
-    // Convert the dot-decimal IP address string to a network byte order integer.
-    struct in_addr host_ip_address;
-    host_ip_address.s_addr = inet_addr(ip_address.data());
-
-    if (host_ip_address.s_addr == INADDR_NONE) {
-      GNCLoggerError(@"Invalid IP address: %.*s\n", (int)ip_address.size(), ip_address.data());
-      return nil;
-    }
-    host = [GNCIPv4Address addressFromFourByteInt:host_ip_address.s_addr];
+  // Only supports IPv4 address.
+  if (service_address.address.size() != 4) {
+    GNCLoggerError(@"Invalid IP address size: %lu", service_address.address.size());
+    return nullptr;
   }
+  // 4 bytes IP address format.
+  NSData* host_ip_address = [NSData dataWithBytes:service_address.address.data()
+                                            length:service_address.address.size()];
+  host = [GNCIPv4Address addressFromData:host_ip_address];
   GNCLoggerInfo(@"Connect to Hotspot host server: %@", [host dottedRepresentation]);
 
   // Setup cancel listener
@@ -174,14 +174,14 @@ std::unique_ptr<api::WifiHotspotSocket> WifiHotspotMedium::ConnectToService(
   }
 
   GNCNWFrameworkSocket* socket = [medium_ connectToHost:host
-                                               port:port
-                                       cancelSource:cancellation_source
-                                              error:&error];
+                                                   port:service_address.port
+                                           cancelSource:cancellation_source
+                                                  error:&error];
   if (socket != nil) {
     return std::make_unique<WifiHotspotSocket>(socket);
   }
   if (error != nil) {
-    GNCLoggerError(@"Error connecting to %@:%d: %@", host, port, error);
+    GNCLoggerError(@"Error connecting to %@:%d: %@", host, service_address.port, error);
   }
   return nil;
 }

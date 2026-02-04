@@ -20,19 +20,19 @@
 #include <string>
 
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_v2_socket.h"
 
 namespace nearby {
 namespace linux {
 
-class BleV2ServerSocket final : public api::ble_v2::BleServerSocket {
+class BleV2ServerSocket final : public api::ble::BleServerSocket {
  public:
   explicit BleV2ServerSocket(const std::string& service_id)
       : service_id_(service_id) {}
   ~BleV2ServerSocket() override = default;
 
-  std::unique_ptr<api::ble_v2::BleSocket> Accept() override
+  std::unique_ptr<api::ble::BleSocket> Accept() override
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);

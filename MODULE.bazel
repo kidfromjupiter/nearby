@@ -1,32 +1,21 @@
 bazel_dep(name = "platforms", version = "1.0.0")
-bazel_dep(name = "rules_apple", version = "3.19.0")
-bazel_dep(name = "rules_cc", version = "0.2.0")
-bazel_dep(name = "rules_rust", version = "0.54.1")
-bazel_dep(name = "bazel_skylib", version = "1.8.1")
-bazel_dep(name = "abseil-cpp", version = "20250814.0", repo_name = "com_google_absl")
-bazel_dep(name = "rules_foreign_cc", version = "0.15.0")
+bazel_dep(name = "rules_apple", version = "4.3.3")
+bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "rules_rust", version = "0.68.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+bazel_dep(name = "abseil-cpp", version = "20260107.0", repo_name = "com_google_absl")
+
 # version of prebuilt protoc in com_github_protobuf_prebuilt must match this.
-bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
-bazel_dep(name = "googletest", version = "1.17.0", repo_name = "com_google_googletest")
-bazel_dep(name = "boringssl", version = "0.0.0-20240126-22d349c")
+bazel_dep(name = "protobuf", version = "33.4", repo_name = "com_google_protobuf")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_google_googletest")
+bazel_dep(name = "boringssl", version = "0.20251124.0")
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 git_repository(
     name = "beto-core",
-    commit = "415bd032561d078720642d52e28fd3bc9d5155d4",
+    commit = "479289ef072b0880c0347d36937265e44f00f4ee",
     remote = "https://beto-core.googlesource.com/beto-core",
-)
-
-# Hedron's Compile Commands Extractor for Bazel
-# https://github.com/hedronvision/bazel-compile-commands-extractor
-# Hedron's Compile Commands Extractor for Bazel
-# https://github.com/hedronvision/bazel-compile-commands-extractor
-bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
-git_override(
-    module_name = "hedron_compile_commands",
-    remote = "https://github.com/mikael-s-persson/bazel-compile-commands-extractor",
-    commit = "02d15621b528efd877f5d5657c4b738523a0eb17"
 )
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
@@ -62,6 +51,7 @@ http_archive(
 http_archive(
     name = "aappleby_smhasher",
     build_file_content = """
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 package(default_visibility = ["//visibility:public"])
 cc_library(
     name = "libmurmur3",
@@ -77,12 +67,13 @@ cc_library(
 http_archive(
     name = "nlohmann_json",
     build_file_content = """
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 cc_library(
   name = "json",
   hdrs = glob([
     "include/nlohmann/**/*.hpp",
   ]),
-    strip_include_prefix = "include",
+  includes = ["include"],
   visibility = ["//visibility:public"],
   alwayslink = True,
 )""",

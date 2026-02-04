@@ -16,8 +16,6 @@ load("@rules_apple//apple:ios.bzl", "ios_unit_test")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("//third_party/nearby:minimum_os.bzl", "IOS_MINIMUM_OS")
 
-package(default_visibility = ["//:__subpackages__"])
-
 objc_library(
     name = "HotspotTestslib",
     testonly = True,
@@ -25,12 +23,19 @@ objc_library(
         "GNCHotspotMediumTest.m",
     ],
     deps = [
+        "//internal/platform/implementation/apple/Mediums/CoreLocation/CLLocationManager/Fake",
         "//internal/platform/implementation/apple/Mediums/Hotspot",
         "//internal/platform/implementation/apple/Mediums/WiFiCommon",
         "//third_party/apple_frameworks:CoreLocation",
         "//third_party/apple_frameworks:NetworkExtension",
         "//third_party/apple_frameworks:XCTest",
-    ],
+        "//third_party/objective_c/ocmock/v3:OCMock",
+    ] + select({
+        "@platforms//os:platform_macos": [
+            "//third_party/apple_frameworks:CoreWLAN",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 ios_unit_test(

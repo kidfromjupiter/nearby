@@ -19,36 +19,12 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/mac_address.h"
 
 namespace nearby {
-
-// Opaque wrapper over a BLE peripheral. Must contain enough data about a
-// particular BLE peripheral to connect to its GATT server.
-class BlePeripheral final {
- public:
-  BlePeripheral() = default;
-  BlePeripheral(const BlePeripheral&) = default;
-  BlePeripheral& operator=(const BlePeripheral&) = default;
-  explicit BlePeripheral(api::BlePeripheral* peripheral) : impl_(peripheral) {}
-
-  std::string GetName() const { return impl_->GetName(); }
-
-  ByteArray GetAdvertisementBytes(const std::string& service_id) const {
-    return impl_->GetAdvertisementBytes(service_id);
-  }
-
-  api::BlePeripheral& GetImpl() { return *impl_; }
-  bool IsValid() const { return impl_ != nullptr; }
-
- private:
-  api::BlePeripheral* impl_;
-};
 
 // https://developer.android.com/reference/android/bluetooth/BluetoothDevice.html.
 class BluetoothDevice final {
@@ -61,7 +37,7 @@ class BluetoothDevice final {
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothDevice.html#getName()
   std::string GetName() const { return impl_->GetName(); }
-  MacAddress GetAddress() const { return impl_->GetAddress(); }
+  MacAddress GetAddress() const { return impl_->GetMacAddress(); }
 
   api::BluetoothDevice& GetImpl() { return *impl_; }
   bool IsValid() const { return impl_ != nullptr; }
@@ -104,7 +80,7 @@ class BluetoothAdapter final {
   // https://developer.android.com/reference/android/bluetooth/BluetoothAdapter.html#getName()
   // Returns an empty string on error
   std::string GetName() const { return impl_->GetName(); }
-  MacAddress GetAddress() const { return impl_->GetAddress(); }
+  MacAddress GetAddress() const { return impl_->GetMacAddress(); }
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothAdapter.html#setName(java.lang.String)
   bool SetName(absl::string_view name) {

@@ -1,6 +1,3 @@
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,10 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -37,8 +38,8 @@ cc_library(
     deps = [
         ":types",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
-        "//internal/platform:types",
         "//internal/platform:util",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -58,7 +59,6 @@ cc_library(
         "base_pcp_handler.cc",
         "ble_endpoint_channel.cc",
         "ble_l2cap_endpoint_channel.cc",
-        "ble_v2_endpoint_channel.cc",
         "bluetooth_bwu_handler.cc",
         "bluetooth_device_name.cc",
         "bluetooth_endpoint_channel.cc",
@@ -79,7 +79,6 @@ cc_library(
         "p2p_star_pcp_handler.cc",
         "payload_manager.cc",
         "pcp_manager.cc",
-        "reconnect_manager.cc",
         "service_controller_router.cc",
         "webrtc_bwu_handler.cc",
         "webrtc_bwu_handler_stub.cc",
@@ -100,7 +99,6 @@ cc_library(
         "base_pcp_handler.h",
         "ble_endpoint_channel.h",
         "ble_l2cap_endpoint_channel.h",
-        "ble_v2_endpoint_channel.h",
         "bluetooth_bwu_handler.h",
         "bluetooth_device_name.h",
         "bluetooth_endpoint_channel.h",
@@ -124,7 +122,6 @@ cc_library(
         "payload_manager.h",
         "pcp_handler.h",
         "pcp_manager.h",
-        "reconnect_manager.h",
         "service_controller.h",
         "service_controller_router.h",
         "service_id_constants.h",
@@ -162,10 +159,14 @@ cc_library(
         "//connections/implementation/mediums:webrtc_utils",
         "//connections/implementation/mediums/advertisements:dct_advertisement",
         "//connections/implementation/mediums/advertisements:util",
-        "//connections/implementation/mediums/ble_v2:ble_advertisement_header",
+        "//connections/implementation/mediums/ble:ble_advertisement_header",
+        "//connections/implementation/mediums/ble:ble_socket",
         "//connections/implementation/proto:offline_wire_formats_cc_proto",
         "//connections/v3:v3_types",
         "//internal/analytics:event_logger",
+        "//internal/base:file_path",
+        "//internal/base:files",
+        "//internal/base:masker",
         "//internal/flags:nearby_flags",
         "//internal/interop:authentication_status",
         "//internal/interop:authentication_transport_interface",
@@ -175,6 +176,7 @@ cc_library(
         "//internal/platform:comm",
         "//internal/platform:connection_info",
         "//internal/platform:error_code_recorder",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform:util",
@@ -190,9 +192,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/functional:bind_front",
-        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/random",
-        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -227,12 +227,15 @@ cc_library(
         "//connections:core_types",
         "//connections/implementation/analytics",
         "//connections/implementation/flags:connections_flags",
+        "//connections/implementation/mediums",
         "//connections/v3:v3_types",
         "//internal/flags:nearby_flags",
         "//internal/interop:device",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
+        "//internal/platform/implementation:types",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/strings",
@@ -258,12 +261,15 @@ cc_test(
         "//connections/implementation/mediums",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:test_util",
         "//internal/platform:types",
+        "//internal/platform/flags:platform_flags",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/proto/analytics:connections_log_cc_proto",
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
@@ -309,15 +315,18 @@ cc_test(
         "//connections/implementation/mediums:webrtc_utils",
         "//connections/implementation/proto:offline_wire_formats_cc_proto",
         "//connections/v3:v3_types",
+        "//internal/analytics:mock_event_logger",
         "//internal/flags:nearby_flags",
         "//internal/interop:authentication_status",
         "//internal/interop:authentication_transport_interface",
         "//internal/interop:device",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
+        "//internal/proto/analytics:connections_log_cc_proto",
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/base:core_headers",
@@ -407,9 +416,11 @@ cc_test(
         "//connections/implementation/analytics",
         "//internal/platform:base",
         "//internal/platform:types",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
         "@com_google_ukey2//:ukey2",
@@ -428,12 +439,14 @@ cc_test(
         "//connections/implementation/flags:connections_flags",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/test",
         "//proto:connections_enums_cc_proto",
         "//testing/fuzzing:fuzztest",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
@@ -448,7 +461,10 @@ cc_test(
     ],
     deps = [
         ":internal",
+        "//connections/implementation/flags:connections_flags",
+        "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/proto/analytics:connections_log_cc_proto",
@@ -474,6 +490,7 @@ cc_test(
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
@@ -489,35 +506,14 @@ cc_test(
         ":internal_test",
         "//connections:core_types",
         "//connections/implementation/analytics",
-        "//connections/implementation/flags:connections_flags",
-        "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:test_util",
         "//internal/platform:types",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "reconnect_manager_test",
-    srcs = [
-        "reconnect_manager_test.cc",
-    ],
-    deps = [
-        ":internal",
-        ":internal_test",
-        "//connections:core_types",
-        "//connections/implementation/mediums",
-        "//internal/platform:base",
-        "//internal/platform:test_util",
-        "//internal/platform:types",
-        "//internal/platform/implementation/g3",  # build_cleaner: keep
-        "@com_github_protobuf_matchers//protobuf-matchers",
-        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
@@ -539,8 +535,10 @@ cc_test(
         "//internal/interop:authentication_status",
         "//internal/interop:device",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:test_util",
         "//internal/platform:types",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
@@ -584,6 +582,30 @@ cc_test(
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "wifi_lan_bwu_handler_test",
+    srcs = [
+        "wifi_lan_bwu_handler_test.cc",
+    ],
+    deps = [
+        ":internal",
+        "//connections:core_types",
+        "//connections/implementation/mediums",
+        "//internal/analytics:mock_event_logger",
+        "//internal/platform:base",
+        "//internal/platform:mock_platform",
+        "//internal/platform:test_util",
+        "//internal/platform/implementation:comm",
+        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation:platform_impl",
+        "//internal/proto/analytics:connections_log_cc_proto",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )

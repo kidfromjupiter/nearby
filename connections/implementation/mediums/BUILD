@@ -1,6 +1,3 @@
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,10 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -21,7 +22,6 @@ cc_library(
     srcs = [
         "awdl.cc",
         "ble.cc",
-        "ble_v2.cc",
         "bluetooth_classic.cc",
         "bluetooth_radio.cc",
         "mediums.cc",
@@ -34,7 +34,6 @@ cc_library(
     hdrs = [
         "awdl.h",
         "ble.h",
-        "ble_v2.h",
         "bluetooth_classic.h",
         "bluetooth_radio.h",
         "mediums.h",
@@ -55,9 +54,10 @@ cc_library(
         "//connections:core_types",
         "//connections/implementation:types",
         "//connections/implementation/flags:connections_flags",
-        "//connections/implementation/mediums/ble_v2",
-        "//connections/implementation/mediums/ble_v2:ble_advertisement_header",
-        "//connections/implementation/mediums/ble_v2:bloom_filter",
+        "//connections/implementation/mediums/ble",
+        "//connections/implementation/mediums/ble:ble_advertisement_header",
+        "//connections/implementation/mediums/ble:ble_socket",
+        "//connections/implementation/mediums/ble:bloom_filter",
         "//connections/implementation/mediums/multiplex",
         "//connections/implementation/mediums/webrtc",
         "//connections/implementation/proto:offline_wire_formats_cc_proto",
@@ -65,9 +65,11 @@ cc_library(
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:comm",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform:uuid",
+        "//internal/platform/flags:platform_flags",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation:wifi_utils",
@@ -116,7 +118,7 @@ cc_library(
     name = "lost_entity_tracker",
     hdrs = ["lost_entity_tracker.h"],
     visibility = [
-        "//connections/implementation/mediums/ble_v2:__pkg__",
+        "//connections/implementation/mediums/ble:__pkg__",
     ],
     deps = [
         "//internal/platform:types",
@@ -132,7 +134,7 @@ cc_library(
     visibility = [
         "//connections/implementation:__pkg__",
         "//connections/implementation/mediums/advertisements:__pkg__",
-        "//connections/implementation/mediums/ble_v2:__subpackages__",
+        "//connections/implementation/mediums/ble:__subpackages__",
         "//connections/implementation/mediums/multiplex:__pkg__",
         "//internal/platform/implementation/windows:__pkg__",
     ],
@@ -148,7 +150,6 @@ cc_test(
     srcs = [
         "awdl_test.cc",
         "ble_test.cc",
-        "ble_v2_test.cc",
         "bluetooth_classic_test.cc",
         "bluetooth_radio_test.cc",
         "lost_entity_tracker_test.cc",
@@ -161,18 +162,20 @@ cc_test(
     deps = [
         ":lost_entity_tracker",
         ":mediums",
-        ":utils",
         "//connections:core_types",
         "//connections/implementation:types",
         "//connections/implementation/flags:connections_flags",
-        "//connections/implementation/mediums/ble_v2",
+        "//connections/implementation/mediums/ble",
+        "//connections/implementation/mediums/ble:ble_socket",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:comm",
+        "//internal/platform:logging",
+        "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:types",
-        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation:comm",
         "//internal/platform/implementation:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
@@ -205,6 +208,7 @@ cc_test(
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/test",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )

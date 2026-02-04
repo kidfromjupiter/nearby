@@ -41,8 +41,6 @@ NS_ASSUME_NONNULL_BEGIN
   NSUUID *_identifier;
 }
 
-@synthesize peripheralDelegate;
-
 - (instancetype)init {
   self = [super init];
   if (self) {
@@ -50,6 +48,23 @@ NS_ASSUME_NONNULL_BEGIN
     _identifier = [[NSUUID alloc] init];
   }
   return self;
+}
+
+- (instancetype)initWithIdentifier:(NSUUID *)identifier {
+  self = [super init];
+  if (self) {
+    _services = [[NSMutableArray alloc] init];
+    _identifier = identifier;
+  }
+  return self;
+}
+
+- (void)setPeripheralDelegate:(nullable id<GNCPeripheralDelegate>)peripheralDelegate {
+  self.delegate = peripheralDelegate;
+}
+
+- (nullable id<GNCPeripheralDelegate>)peripheralDelegate {
+  return (id<GNCPeripheralDelegate>)self.delegate;
 }
 
 - (NSUUID *)identifier {
@@ -68,7 +83,7 @@ NS_ASSUME_NONNULL_BEGIN
       }
     }
 
-    [peripheralDelegate gnc_peripheral:self didDiscoverServices:_discoverServicesError];
+    [self.peripheralDelegate gnc_peripheral:self didDiscoverServices:_discoverServicesError];
   }];
 }
 
@@ -90,7 +105,7 @@ NS_ASSUME_NONNULL_BEGIN
       service.characteristics = characteristics;
     }
 
-    [peripheralDelegate gnc_peripheral:self
+    [self.peripheralDelegate gnc_peripheral:self
         didDiscoverCharacteristicsForService:service
                                        error:_discoverCharacteristicsForServiceError];
   }];
@@ -102,30 +117,39 @@ NS_ASSUME_NONNULL_BEGIN
       characteristic.value = [NSData data];
     }
 
-    [peripheralDelegate gnc_peripheral:self
-        didUpdateValueForCharacteristic:characteristic
-                                  error:_readValueForCharacteristicError];
+    [self.peripheralDelegate gnc_peripheral:self
+            didUpdateValueForCharacteristic:characteristic
+                                      error:_readValueForCharacteristicError];
   }];
 }
 
 - (void)openL2CAPChannel:(CBL2CAPPSM)PSM {
   [self delayDelegateUsingBlock:^() {
     CBL2CAPChannel *channel = [[CBL2CAPChannel alloc] init];
+    if (self.channelInputStream) {
+      [channel setValue:self.channelInputStream forKey:@"inputStream"];
+    }
+    if (self.channelOutputStream) {
+      [channel setValue:self.channelOutputStream forKey:@"outputStream"];
+    }
     if (_openL2CAPChannelError) {
-      [peripheralDelegate gnc_peripheral:self
-                     didOpenL2CAPChannel:channel
-                                   error:_openL2CAPChannelError];
+      [self.peripheralDelegate peripheral:(CBPeripheral *)self
+                      didOpenL2CAPChannel:channel
+                                    error:_openL2CAPChannelError];
     } else {
-      [peripheralDelegate gnc_peripheral:self didOpenL2CAPChannel:channel error:nil];
+      [self.peripheralDelegate peripheral:(CBPeripheral *)self
+                      didOpenL2CAPChannel:channel
+                                    error:nil];
     }
   }];
 }
 
 - (void)delayDelegateUsingBlock:(void (^)())block {
-  if (_delegateDelay <= 0) {
+  NSTimeInterval delegateDelay = self.delegateDelay;
+  if (delegateDelay <= 0) {
     block();
   } else {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, _delegateDelay * NSEC_PER_SEC),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delegateDelay * NSEC_PER_SEC),
                    dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
                      block();
                    });

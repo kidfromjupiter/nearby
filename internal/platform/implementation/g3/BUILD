@@ -1,6 +1,3 @@
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,10 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -53,8 +54,8 @@ cc_library(
         "//internal/base:file_path",
         "//internal/base:files",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:test_util",
-        "//internal/platform:types",
         "//internal/platform/implementation:types",
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/shared:posix_mutex",
@@ -62,7 +63,6 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/log:log_streamer",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
@@ -80,7 +80,6 @@ cc_library(
     srcs = [
         "awdl.cc",
         "ble.cc",
-        "ble_v2.cc",
         "bluetooth_adapter.cc",
         "bluetooth_classic.cc",
         "credential_storage_impl.cc",
@@ -91,7 +90,6 @@ cc_library(
     hdrs = [
         "awdl.h",
         "ble.h",
-        "ble_v2.h",
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
         "credential_storage_impl.h",
@@ -106,12 +104,13 @@ cc_library(
         ":types",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:types",
         "//internal/platform:uuid",
         "//internal/platform/implementation:comm",
-        "//internal/platform/implementation/shared:count_down_latch",
+        "//internal/platform/implementation:wifi_utils",
         "//internal/proto:credential_cc_proto",
         "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
         "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
@@ -134,13 +133,14 @@ cc_test(
     name = "comm_test",
     srcs = [
         "awdl_test.cc",
-        "ble_v2_test.cc",
+        "ble_test.cc",
     ],
     deps = [
         ":comm",
         ":g3",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
+        "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:uuid",
         "//internal/platform/implementation:comm",
@@ -188,7 +188,6 @@ cc_library(
         "//internal/platform:__subpackages__",
         "//internal/preferences:__subpackages__",
         "//internal/proto/analytics:__subpackages__",
-        "//internal/test:__subpackages__",
         "//internal/weave:__subpackages__",
         "//location/nearby/cpp:__subpackages__",
         "//location/nearby/sharing/sdk:__subpackages__",

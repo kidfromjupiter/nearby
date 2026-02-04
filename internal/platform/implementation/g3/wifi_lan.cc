@@ -14,19 +14,24 @@
 
 #include "internal/platform/implementation/g3/wifi_lan.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/cancellation_flag_listener.h"
 #include "internal/platform/exception.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/medium_environment.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/service_address.h"
 
 namespace nearby {
 namespace g3 {
@@ -203,43 +208,48 @@ std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
   std::string service_type = remote_service_info.GetServiceType();
   LOG(INFO) << "G3 WifiLan ConnectToService [self]: medium=" << this
             << ", service_type=" << service_type;
-  return ConnectToService(remote_service_info.GetIPAddress(),
-                          remote_service_info.GetPort(), cancellation_flag);
+  std::string ip_address = remote_service_info.GetIPAddress();
+  return ConnectToService(
+      {
+          .address = {ip_address.begin(), ip_address.end()},
+          .port = static_cast<uint16_t>(remote_service_info.GetPort()),
+      },
+      cancellation_flag);
 }
 
 std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
-    const std::string& ip_address, int port,
+    const ServiceAddress& service_address,
     CancellationFlag* cancellation_flag) {
   LOG(INFO) << "G3 WifiLan ConnectToService [self]: medium=" << this
-            << ", port=" << port;
+            << ", [" << service_address << "]";
   // First, find an instance of remote medium, that exposed this service.
   auto& env = MediumEnvironment::Instance();
-  auto* remote_medium =
-      static_cast<WifiLanMedium*>(env.GetWifiLanMedium(ip_address, port));
+  auto* remote_medium = static_cast<WifiLanMedium*>(
+      env.GetWifiLanMedium(std::string(service_address.address.begin(),
+                                       service_address.address.end()),
+                           service_address.port));
   if (!remote_medium) {
     return {};
   }
 
   WifiLanServerSocket* server_socket = nullptr;
   LOG(INFO) << "G3 WifiLan ConnectToService [peer]: medium=" << remote_medium
-            << ", port=" << port;
+            << ", [" << service_address << "]";
   // Then, find our server socket context in this medium.
   {
     absl::MutexLock medium_lock(remote_medium->mutex_);
-    auto item = remote_medium->server_sockets_.find(port);
+    auto item = remote_medium->server_sockets_.find(service_address.port);
     server_socket =
         item != remote_medium->server_sockets_.end() ? item->second : nullptr;
     if (server_socket == nullptr) {
-      LOG(ERROR)
-          << "G3 WifiLan Failed to find WifiLan Server socket: port="
-          << port;
+      LOG(ERROR) << "G3 WifiLan Failed to find WifiLan Server socket: "
+                 << service_address;
       return {};
     }
   }
 
   if (cancellation_flag->Cancelled()) {
-    LOG(ERROR) << "G3 WifiLan Connect: Has been cancelled: port="
-               << port;
+    LOG(ERROR) << "G3 WifiLan Connect: Has been cancelled: " << service_address;
     return {};
   }
 
@@ -254,8 +264,7 @@ std::unique_ptr<api::WifiLanSocket> WifiLanMedium::ConnectToService(
   // Finally, Request to connect to this socket.
   if (!server_socket->Connect(*socket)) {
     LOG(ERROR) << "G3 WifiLan Failed to connect to existing WifiLan "
-                  "Server socket: port="
-               << port;
+                  "Server socket: " << service_address;
     return {};
   }
   LOG(INFO) << "G3 WifiLan ConnectToService: connected: socket="
@@ -279,6 +288,19 @@ std::unique_ptr<api::WifiLanServerSocket> WifiLanMedium::ListenForService(
   absl::MutexLock lock(mutex_);
   server_sockets_.insert({server_port, server_socket.get()});
   return server_socket;
+}
+
+api::UpgradeAddressInfo WifiLanMedium::GetUpgradeAddressCandidates(
+    const api::WifiLanServerSocket& server_socket) {
+  std::string ip_address = server_socket.GetIPAddress();
+  return {
+    .num_interfaces = 1,
+    .num_ipv6_only_interfaces = 0,
+    .address_candidates =
+      {ServiceAddress{
+      .address = std::vector<char>(ip_address.begin(), ip_address.end()),
+      .port = static_cast<uint16_t>(server_socket.GetPort())}}
+  };
 }
 
 }  // namespace g3

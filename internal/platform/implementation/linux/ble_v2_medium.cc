@@ -26,7 +26,7 @@
 #include <sdbus-c++/Types.h>
 
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 // #include "internal/platform/implementation/linux/ble_gatt_client.h"
 // #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "internal/platform/implementation/linux/ble_v2_medium.h"
@@ -86,8 +86,8 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   // called twice. Once with extended regular advertisement ( when IsExtendedAdvertisementsAvailable() == true )
   // and another for GATT-backed header advertisement for legacy devices
   bool BleV2Medium::StartAdvertising(
-    const api::ble_v2::BleAdvertisementData &advertising_data,
-    api::ble_v2::AdvertiseParameters advertise_set_parameters) {
+    const api::ble::BleAdvertisementData &advertising_data,
+    api::ble::AdvertiseParameters advertise_set_parameters) {
     if (!advertising_data.is_extended_advertisement)
     {
       // can't send two LE advertisements at the same
@@ -128,10 +128,10 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
 
 //async api
 // this doesn't run. wonder why
-std::unique_ptr<api::ble_v2::BleMedium::AdvertisingSession>
+std::unique_ptr<api::ble::BleMedium::AdvertisingSession>
 BleV2Medium::StartAdvertising(
-  const api::ble_v2::BleAdvertisementData &advertising_data,
-  api::ble_v2::AdvertiseParameters advertise_set_parameters,
+  const api::ble::BleAdvertisementData &advertising_data,
+  api::ble::AdvertiseParameters advertise_set_parameters,
   AdvertisingCallback callback) {
   if (!adapter_.IsEnabled()) {
     LOG(WARNING) << ": BLE cannot start advertising because the "
@@ -204,8 +204,8 @@ BleV2Medium::StartAdvertising(
     advs_.erase(adv_it);
     return absl::OkStatus();
   };
-  return std::make_unique<api::ble_v2::BleMedium::AdvertisingSession>(
-    api::ble_v2::BleMedium::AdvertisingSession{std::move(stop_adv)});
+  return std::make_unique<api::ble::BleMedium::AdvertisingSession>(
+    api::ble::BleMedium::AdvertisingSession{std::move(stop_adv)});
 }
 
   bool BleV2Medium::StopAdvertising() {
@@ -225,7 +225,7 @@ BleV2Medium::StartAdvertising(
   }
 
 bool BleV2Medium::StartScanning(const Uuid &service_uuid,
-                                api::ble_v2::TxPowerLevel tx_power_level,
+                                api::ble::TxPowerLevel tx_power_level,
                                 ScanCallback callback) {
   if (cur_monitored_service_uuid_.has_value()) {
     LOG(ERROR) << __func__
@@ -339,9 +339,9 @@ bool BleV2Medium::StopScanning() {
 
   return true;
 }
-  std::unique_ptr<api::ble_v2::BleMedium::ScanningSession>
+  std::unique_ptr<api::ble::BleMedium::ScanningSession>
   BleV2Medium::StartScanning(const Uuid &service_uuid,
-                             api::ble_v2::TxPowerLevel tx_power_level,
+                             api::ble::TxPowerLevel tx_power_level,
                              ScanningCallback callback) {
     if (adv_monitor_manager_ == nullptr) {
       // TODO: Implement manual monitoring.
@@ -429,8 +429,8 @@ bool BleV2Medium::StopScanning() {
       }});
   }
 
-std::unique_ptr<api::ble_v2::GattServer> BleV2Medium::StartGattServer(
-  api::ble_v2::ServerGattConnectionCallback callback) {
+std::unique_ptr<api::ble::GattServer> BleV2Medium::StartGattServer(
+  api::ble::ServerGattConnectionCallback callback) {
   // (void)callback;
   // return nullptr;
 
@@ -439,10 +439,10 @@ std::unique_ptr<api::ble_v2::GattServer> BleV2Medium::StartGattServer(
   );
 }
 
-std::unique_ptr<api::ble_v2::GattClient> BleV2Medium::ConnectToGattServer(
-  api::ble_v2::BlePeripheral::UniqueId peripheral_id,
-  api::ble_v2::TxPowerLevel tx_power_level,
-  api::ble_v2::ClientGattConnectionCallback callback) {
+std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
+  api::ble::BlePeripheral::UniqueId peripheral_id,
+  api::ble::TxPowerLevel tx_power_level,
+  api::ble::ClientGattConnectionCallback callback) {
   (void)peripheral_id;
   (void)tx_power_level;
   (void)callback;
@@ -451,14 +451,14 @@ std::unique_ptr<api::ble_v2::GattClient> BleV2Medium::ConnectToGattServer(
   return nullptr;
 }
 
-std::unique_ptr<api::ble_v2::BleServerSocket> BleV2Medium::OpenServerSocket(
+std::unique_ptr<api::ble::BleServerSocket> BleV2Medium::OpenServerSocket(
   const std::string &service_id) {
   LOG(INFO) << __func__ << ": Opening BLE server socket for service "
             << service_id;
   return std::make_unique<BleV2ServerSocket>(service_id);
 }
 
-std::unique_ptr<api::ble_v2::BleL2capServerSocket>
+std::unique_ptr<api::ble::BleL2capServerSocket>
 BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
   // return nullptr;
   LOG(INFO) << __func__ << ": Opening L2CAP server socket for service "
@@ -474,9 +474,9 @@ BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
 }
 
 // This is supposed to be for a socket on top of Weave protocol.
-std::unique_ptr<api::ble_v2::BleSocket> BleV2Medium::Connect(
-  const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
-  api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+std::unique_ptr<api::ble::BleSocket> BleV2Medium::Connect(
+  const std::string &service_id, api::ble::TxPowerLevel tx_power_level,
+  api::ble::BlePeripheral::UniqueId peripheral_id,
   CancellationFlag *cancellation_flag) {
   LOG(INFO) << __func__ << ": Not implemented on linux ";
   return nullptr;
@@ -519,18 +519,18 @@ bool BleV2Medium::StartLEDiscovery() {
   return true;
 }
 
-// std::unique_ptr<api::ble_v2::BleSocket> BleV2Medium::Connect(
-//     const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
-//     api::ble_v2::BlePeripheral &peripheral,
+// std::unique_ptr<api::ble::BleSocket> BleV2Medium::Connect(
+//     const std::string &service_id, api::ble::TxPowerLevel tx_power_level,
+//     api::ble::BlePeripheral &peripheral,
 //     CancellationFlag *cancellation_flag) {
 //   LOG(WARNING) << __func__ << ": BLE socket connections not implemented on Linux";
 //   return nullptr;
 // }
 
-std::unique_ptr<api::ble_v2::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
+std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
     int psm, const std::string &service_id,
-    api::ble_v2::TxPowerLevel tx_power_level,
-    api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+    api::ble::TxPowerLevel tx_power_level,
+    api::ble::BlePeripheral::UniqueId peripheral_id,
     CancellationFlag *cancellation_flag) {
   // return nullptr;
   auto device = devices_->get_device_by_unique_id(peripheral_id);
@@ -595,7 +595,7 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
 
 bool BleV2Medium::StartMultipleServicesScanning(
     const std::vector<Uuid> &service_uuids,
-    api::ble_v2::TxPowerLevel tx_power_level, ScanCallback callback) {
+    api::ble::TxPowerLevel tx_power_level, ScanCallback callback) {
   LOG(WARNING) << __func__
                << ": Multiple services scanning not implemented on Linux. "
                << "Use single service scanning instead.";
@@ -618,7 +618,7 @@ void BleV2Medium::AddAlternateUuidForService(uint16_t uuid,
             << uuid << ", service_id: " << service_id;
 }
 
-std::optional<api::ble_v2::BlePeripheral::UniqueId>
+std::optional<api::ble::BlePeripheral::UniqueId>
 BleV2Medium::RetrieveBlePeripheralIdFromNativeId(
     const std::string &ble_peripheral_native_id) {
   LOG(WARNING) << __func__

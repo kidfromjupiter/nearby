@@ -14,10 +14,18 @@
 
 #include "connections/implementation/wifi_hotspot_bwu_handler.h"
 
+#if !defined(_WIN32)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
+
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/functional/bind_front.h"
 #include "connections/implementation/base_bwu_handler.h"
@@ -25,11 +33,15 @@
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/offline_frames.h"
+#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/implementation/wifi_hotspot_endpoint_channel.h"
 #include "connections/strategy.h"
+#include "internal/base/masker.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/implementation/wifi_utils.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/service_address.h"
 #include "internal/platform/wifi_credential.h"
 #include "internal/platform/wifi_hotspot.h"
 
@@ -37,7 +49,21 @@ namespace nearby {
 namespace connections {
 
 namespace {
+using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
 using ::location::nearby::proto::connections::OperationResultCode;
+
+std::vector<char> GatewayToAddressBytes(const std::string& gateway) {
+  std::vector<char> address_bytes;
+  // Gateway address is IPv4 only.
+  uint32_t address_int = inet_addr(gateway.c_str());
+  if (address_int == INADDR_NONE) {
+    LOG(ERROR) << "Invalid gateway address";
+    return address_bytes;
+  }
+  address_bytes.resize(4);
+  std::memcpy(address_bytes.data(), reinterpret_cast<char*>(&address_int), 4);
+  return address_bytes;
+}
 }  // namespace
 
 WifiHotspotBwuHandler::WifiHotspotBwuHandler(
@@ -83,18 +109,42 @@ ByteArray WifiHotspotBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
       wifi_hotspot_medium_.GetCredentials(upgrade_service_id);
   std::string ssid = hotspot_crendential->GetSSID();
   std::string password = hotspot_crendential->GetPassword();
-  std::string gateway = hotspot_crendential->GetGateway();
-  std::int32_t port = hotspot_crendential->GetPort();
   std::int32_t frequency = hotspot_crendential->GetFrequency();
 
-  LOG(INFO) << "Start SoftAP with SSID:" << ssid << ",  Password:" << password
-            << ",  Port:" << port << ",  Gateway:" << gateway
+  LOG(INFO) << "Start SoftAP with SSID:" << ssid
+            << ",  Password:" << masker::Mask(password)
             << ",  Frequency:" << frequency;
 
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+      credentials;
+  credentials.set_ssid(ssid);
+  credentials.set_password(password);
+  credentials.set_frequency(frequency);
+  const std::vector<ServiceAddress>& address_candidates =
+      hotspot_crendential->GetAddressCandidates();
+  if (!address_candidates.empty()) {
+    for (const auto& service_address : address_candidates) {
+      // service address must be either 4 bytes (IPv4) or 16 bytes (IPv6).
+      if (service_address.address.size() != 4 &&
+          service_address.address.size() != 16) {
+        LOG(WARNING) << "Invalid service address size: "
+                     << service_address.address.size();
+        continue;
+      }
+      ServiceAddressToProto(service_address,
+                            *(credentials.add_address_candidates()));
+    }
+    const ServiceAddress& last_service_address = address_candidates.back();
+    // We assume the last service address is IPv4.
+    credentials.set_gateway(WifiUtils::GetHumanReadableIpAddress(
+        std::string(last_service_address.address.begin(),
+                    last_service_address.address.end())));
+    credentials.set_port(last_service_address.port);
+  }
   bool disabling_encryption =
       (client->GetAdvertisingOptions().strategy == Strategy::kP2pPointToPoint);
   return parser::ForBwuWifiHotspotPathAvailable(
-      ssid, password, port, frequency, gateway,
+      std::move(credentials),
       /* supports_disabling_encryption */ disabling_encryption);
 }
 
@@ -113,50 +163,74 @@ void WifiHotspotBwuHandler::HandleRevertInitiatorStateForService(
 ErrorOr<std::unique_ptr<EndpointChannel>>
 WifiHotspotBwuHandler::CreateUpgradedEndpointChannel(
     ClientProxy* client, const std::string& service_id,
-    const std::string& endpoint_id, const UpgradePathInfo& upgrade_path_info) {
+    const std::string& endpoint_id,
+    const BandwidthUpgradeNegotiationFrame::UpgradePathInfo&
+        upgrade_path_info) {
   if (!upgrade_path_info.has_wifi_hotspot_credentials()) {
     LOG(INFO) << "No Hotspot Credential";
     return {Error(
         OperationResultCode::CONNECTIVITY_WIFI_HOTSPOT_INVALID_CREDENTIAL)};
   }
-  const UpgradePathInfo::WifiHotspotCredentials& upgrade_path_info_credentials =
-      upgrade_path_info.wifi_hotspot_credentials();
+  const BandwidthUpgradeNegotiationFrame::UpgradePathInfo::
+      WifiHotspotCredentials& upgrade_path_info_credentials =
+          upgrade_path_info.wifi_hotspot_credentials();
 
   HotspotCredentials hotspot_credentials;
   hotspot_credentials.SetSSID(upgrade_path_info_credentials.ssid());
   hotspot_credentials.SetPassword(upgrade_path_info_credentials.password());
-  hotspot_credentials.SetGateway(upgrade_path_info_credentials.gateway());
-  hotspot_credentials.SetPort(upgrade_path_info_credentials.port());
   hotspot_credentials.SetFrequency(upgrade_path_info_credentials.frequency());
+  std::vector<ServiceAddress> service_addresses;
+  for (const auto& address_candidate :
+       upgrade_path_info_credentials.address_candidates()) {
+    ServiceAddress service_address;
+    if (!ServiceAddressFromProto(address_candidate, service_address)) {
+      LOG(WARNING) << "Failed to parse service address size: "
+                   << address_candidate.ip_address().size();
+      continue;
+    }
+    service_addresses.push_back(std::move(service_address));
+  }
+  // Add gateway and port to address candidates if address candidates is empty.
+  if (service_addresses.empty() &&
+      upgrade_path_info_credentials.has_gateway()) {
+    std::vector<char> address_bytes =
+        GatewayToAddressBytes(upgrade_path_info_credentials.gateway());
+    if (!address_bytes.empty()) {
+      service_addresses.push_back(ServiceAddress{
+          .address = std::move(address_bytes),
+          .port = static_cast<uint16_t>(upgrade_path_info_credentials.port())});
+    }
+  }
+  if (service_addresses.empty()) {
+    LOG(ERROR) << "No service address found.";
+    return {Error(
+        OperationResultCode::CONNECTIVITY_WIFI_HOTSPOT_INVALID_CREDENTIAL)};
+  }
+  hotspot_credentials.SetAddressCandidates(std::move(service_addresses));
 
   LOG(INFO) << "Received Hotspot credential SSID: "
             << hotspot_credentials.GetSSID()
-            << ",  Password:" << hotspot_credentials.GetPassword()
-            << ",  Port:" << hotspot_credentials.GetPort()
-            << ",  Gateway:" << hotspot_credentials.GetGateway()
+            << ",  Password:" << masker::Mask(hotspot_credentials.GetPassword())
             << ",  Frequency:" << hotspot_credentials.GetFrequency();
 
   if (!wifi_hotspot_medium_.ConnectWifiHotspot(hotspot_credentials)) {
     LOG(ERROR) << "Connect to Hotspot failed";
-    return {Error(
-        OperationResultCode::CONNECTIVITY_WIFI_HOTSPOT_INVALID_CREDENTIAL)};
+    return {Error(OperationResultCode::
+                      CONNECTIVITY_WIFI_HOTSPOT_LEGACY_STA_CONNECTION_FAILURE)};
   }
 
   ErrorOr<WifiHotspotSocket> socket_result = wifi_hotspot_medium_.Connect(
-      service_id, hotspot_credentials.GetGateway(),
-      hotspot_credentials.GetPort(), client->GetCancellationFlag(endpoint_id));
+      service_id, hotspot_credentials.GetAddressCandidates(),
+      client->GetCancellationFlag(endpoint_id));
   if (socket_result.has_error()) {
-    LOG(ERROR)
-        << "WifiHotspotBwuHandler failed to connect to the WifiHotspot service("
-        << hotspot_credentials.GetGateway() << ":"
-        << hotspot_credentials.GetPort() << ") for endpoint " << endpoint_id;
+    LOG(ERROR) << "WifiHotspotBwuHandler failed to connect to the WifiHotspot "
+                  "service for endpoint "
+               << endpoint_id;
     return {Error(socket_result.error().operation_result_code().value())};
   }
-
   VLOG(1)
-      << "WifiHotspotBwuHandler successfully connected to WifiHotspot service ("
-      << hotspot_credentials.GetGateway() << ":"
-      << hotspot_credentials.GetPort() << ") while upgrading endpoint "
+      << "WifiHotspotBwuHandler successfully connected to WifiHotspot service "
+         "while upgrading endpoint "
       << endpoint_id;
 
   // Create a new WifiHotspotEndpointChannel.

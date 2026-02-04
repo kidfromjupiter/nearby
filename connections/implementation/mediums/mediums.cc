@@ -13,7 +13,16 @@
 // limitations under the License.
 
 #include "connections/implementation/mediums/mediums.h"
+
 #include "connections/implementation/mediums/awdl.h"
+#include "connections/implementation/mediums/ble.h"
+#include "connections/implementation/mediums/bluetooth_classic.h"
+#include "connections/implementation/mediums/bluetooth_radio.h"
+#include "connections/implementation/mediums/webrtc.h"
+#include "connections/implementation/mediums/wifi.h"
+#include "connections/implementation/mediums/wifi_direct.h"
+#include "connections/implementation/mediums/wifi_hotspot.h"
+#include "connections/implementation/mediums/wifi_lan.h"
 
 namespace nearby {
 namespace connections {
@@ -23,8 +32,6 @@ BluetoothRadio& Mediums::GetBluetoothRadio() { return bluetooth_radio_; }
 BluetoothClassic& Mediums::GetBluetoothClassic() { return bluetooth_classic_; }
 
 Ble& Mediums::GetBle() { return ble_; }
-
-BleV2& Mediums::GetBleV2() { return ble_v2_; }
 
 Wifi& Mediums::GetWifi() { return wifi_; }
 

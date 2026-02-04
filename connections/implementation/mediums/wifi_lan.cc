@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -29,10 +30,12 @@
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/implementation/wifi_utils.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/service_address.h"
 #include "internal/platform/socket.h"
 #include "internal/platform/types.h"
 #include "internal/platform/wifi_lan.h"
@@ -409,6 +412,9 @@ bool WifiLan::StopAcceptingConnectionsLocked(const std::string& service_id) {
   // That may take some time to complete, but there's no particular reason to
   // wait around for it.
   auto item = server_sockets_.extract(it);
+  // ### Note: service_id should no longer be used after this as it was passed
+  // as a reference to the key in the server_sockets_ map.  It is still
+  // available as item.key().
 
   // Store a handle to the WifiLanServerSocket, so we can use it after
   // removing the entry from server_sockets_; making it scoped
@@ -422,7 +428,7 @@ bool WifiLan::StopAcceptingConnectionsLocked(const std::string& service_id) {
   // Finally, close the WifiLanServerSocket.
   if (!listening_socket.Close().Ok()) {
     LOG(INFO) << "Failed to close WifiLan server socket for service_id="
-              << service_id;
+              << item.key();
     return false;
   }
 
@@ -492,7 +498,7 @@ ErrorOr<WifiLanSocket> WifiLan::Connect(const std::string& service_id,
 }
 
 ErrorOr<WifiLanSocket> WifiLan::Connect(const std::string& service_id,
-                                        const std::string& ip_address, int port,
+                                        const ServiceAddress& service_address,
                                         CancellationFlag* cancellation_flag) {
   MutexLock lock(&mutex_);
   // Socket to return. To allow for NRVO to work, it has to be a single object.
@@ -516,22 +522,25 @@ ErrorOr<WifiLanSocket> WifiLan::Connect(const std::string& service_id,
                       CLIENT_CANCELLATION_CANCEL_LAN_OUTGOING_CONNECTION)};
   }
 
-  ExceptionOr<WifiLanSocket> virtual_socket =
-      ConnectWithMultiplexSocketLocked(service_id, ip_address);
+  ExceptionOr<WifiLanSocket> virtual_socket = ConnectWithMultiplexSocketLocked(
+      service_id, std::string(service_address.address.begin(),
+                              service_address.address.end()));
   if (virtual_socket.ok()) {
     return virtual_socket.result();
   }
 
-  socket = medium_.ConnectToService(ip_address, port, cancellation_flag);
+  socket = medium_.ConnectToService(service_address, cancellation_flag);
   if (!socket.IsValid()) {
     LOG(INFO) << "Failed to Connect via WifiLan [service_id=" << service_id
-              << "], [ip_address="
-              << WifiUtils::GetHumanReadableIpAddress(ip_address) << "]";
+              << "], [" << service_address << "]";
     return {Error(
         OperationResultCode::CONNECTIVITY_LAN_CLIENT_SOCKET_CREATION_FAILURE)};
   } else {
     ExceptionOr<WifiLanSocket> virtual_socket =
-        CreateOutgoingMultiplexSocketLocked(socket, service_id, ip_address);
+        CreateOutgoingMultiplexSocketLocked(
+            socket, service_id,
+            std::string(service_address.address.begin(),
+                        service_address.address.end()));
     if (virtual_socket.ok()) {
       LOG(INFO) << "Successfully connected via Multiplex WifiLan [service_id="
                 << service_id << "]";
@@ -603,15 +612,14 @@ ExceptionOr<WifiLanSocket> WifiLan::CreateOutgoingMultiplexSocketLocked(
   return ExceptionOr<WifiLanSocket>(Exception::kFailed);
 }
 
-std::pair<std::string, int> WifiLan::GetCredentials(
+api::UpgradeAddressInfo WifiLan::GetUpgradeAddressCandidates(
     const std::string& service_id) {
   MutexLock lock(&mutex_);
   const auto& it = server_sockets_.find(service_id);
   if (it == server_sockets_.end()) {
-    return std::pair<std::string, int>();
+    return {};
   }
-  return std::pair<std::string, int>(it->second.GetIPAddress(),
-                                     it->second.GetPort());
+  return medium_.GetUpgradeAddressCandidates(it->second);
 }
 
 std::string WifiLan::GenerateServiceType(const std::string& service_id) {

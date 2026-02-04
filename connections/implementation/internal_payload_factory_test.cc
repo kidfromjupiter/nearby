@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "gtest/gtest.h"
+#include "absl/strings/string_view.h"
 #include "connections/implementation/internal_payload.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/payload.h"
@@ -66,7 +67,7 @@ TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromStreamPayload) {
 
 TEST(InternalPayloadFactoryTest, CanCreateInternalPayloadFromFilePayload) {
   Payload::Id payload_id = Payload::GenerateId();
-  InputFile inputFile(payload_id, 512);
+  InputFile inputFile(payload_id);
   ErrorOr<std::unique_ptr<InternalPayload>> result =
       CreateOutgoingInternalPayload(Payload{payload_id, std::move(inputFile)});
   ASSERT_FALSE(result.has_error());
@@ -218,7 +219,8 @@ TEST(InternalPayloadFactoryTest,
   ASSERT_TRUE(result.has_error());
 }
 
-void CreateFileWithContents(Payload::Id payload_id, const ByteArray& contents) {
+void CreateFileWithContents(Payload::Id payload_id,
+                            absl::string_view contents) {
   OutputFile file(payload_id);
   EXPECT_TRUE(file.Write(contents).Ok());
   EXPECT_TRUE(file.Close().Ok());
@@ -226,12 +228,12 @@ void CreateFileWithContents(Payload::Id payload_id, const ByteArray& contents) {
 
 TEST(InternalPayloadFactoryTest,
      SkipToOffset_FilePayloadValidOffset_SkipsOffset) {
-  ByteArray contents("0123456789");
+  absl::string_view contents("0123456789");
   constexpr size_t kOffset = 4;
   size_t size_after_skip = contents.size() - kOffset;
   Payload::Id payload_id = Payload::GenerateId();
   CreateFileWithContents(payload_id, contents);
-  InputFile inputFile(payload_id, contents.size());
+  InputFile inputFile(payload_id);
   ErrorOr<std::unique_ptr<InternalPayload>> internal_payload_result =
       CreateOutgoingInternalPayload(Payload{payload_id, std::move(inputFile)});
   ASSERT_FALSE(internal_payload_result.has_error());
@@ -251,7 +253,7 @@ TEST(InternalPayloadFactoryTest,
 
 TEST(InternalPayloadFactoryTest,
      SkipToOffset_StreamPayloadValidOffset_SkipsOffset) {
-  ByteArray contents("0123456789");
+  absl::string_view contents("0123456789");
   constexpr size_t kOffset = 6;
   auto [input, output] = CreatePipe();
   ErrorOr<std::unique_ptr<InternalPayload>> internal_payload_result =

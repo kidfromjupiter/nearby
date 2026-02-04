@@ -15,11 +15,16 @@
 #ifndef PLATFORM_API_WIFI_DIRECT_H_
 #define PLATFORM_API_WIFI_DIRECT_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "internal/platform/cancellation_flag.h"
+#include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/wifi_credential.h"
@@ -67,11 +72,19 @@ class WifiDirectServerSocket {
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   virtual Exception Close() = 0;
+
+  // Populates the WifiDirect credentials with the server socket's service
+  // addresses and ports.
+  virtual void PopulateWifiDirectCredentials(
+      WifiDirectCredentials& wifi_direct_credentials) = 0;
 };
 
 // Container of operations that can be performed over the WifiLan medium.
 class WifiDirectMedium {
  public:
+  using WifiDirectAuthType =
+      ::location::nearby::proto::connections::WifiDirectAuthType;
+
   virtual ~WifiDirectMedium() = default;
 
   // If the WiFi Adaptor supports to start a WifiDirect interface.
@@ -104,12 +117,16 @@ class WifiDirectMedium {
 
   // Client device connect to a softAP with specified credential.
   virtual bool ConnectWifiDirect(
-      WifiDirectCredentials* wifi_direct_credentials) = 0;
+      const WifiDirectCredentials& wifi_direct_credentials) = 0;
   virtual bool DisconnectWifiDirect() = 0;
 
   // Returns the port range as a pair of min and max port.
   virtual absl::optional<std::pair<std::int32_t, std::int32_t>>
   GetDynamicPortRange() = 0;
+
+  // Returns the supported WifiDirect auth types.
+  virtual std::vector<WifiDirectAuthType> GetSupportedWifiDirectAuthTypes()
+      const = 0;
 };
 
 }  // namespace api

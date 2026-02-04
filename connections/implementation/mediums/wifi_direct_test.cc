@@ -1,5 +1,5 @@
 
-// Copyright 2020 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,11 @@
 
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/feature_flags.h"
 #include "internal/platform/medium_environment.h"
 #include "internal/platform/wifi_credential.h"
 #include "internal/platform/wifi_direct.h"
@@ -42,8 +45,8 @@ constexpr FeatureFlags kTestCases[] = {
 };
 
 constexpr absl::string_view kServiceID{"com.google.location.nearby.apps.test"};
-constexpr absl::string_view kSsid{"Direct-357a2d8c"};
-constexpr absl::string_view kPassword{"12345678"};
+constexpr absl::string_view kServiceName{"NC-WifiDirectTest"};
+constexpr absl::string_view kPin{"12345678"};
 constexpr absl::string_view kIp = "123.234.23.1";
 constexpr const size_t kPort = 20;
 
@@ -51,6 +54,10 @@ class WifiDirectTest : public testing::TestWithParam<FeatureFlags> {
  protected:
   WifiDirectTest() {
     env_.Stop();
+    NearbyFlags::GetInstance().OverrideBoolFlagValue(
+        connections::config_package_nearby::nearby_connections_feature::
+            kEnableWifiDirect,
+        true);
     env_.Start();
   }
   ~WifiDirectTest() override { env_.Stop(); }
@@ -85,11 +92,14 @@ TEST_F(WifiDirectTest, CanStartStopGO) {
 }
 
 TEST_F(WifiDirectTest, GCCanConnectDisconnectGO) {
-  std::string ssid(kSsid);
-  std::string password(kPassword);
+  WifiDirectCredentials wifi_direct_credentials;
+  std::string service_name(kServiceName);
+  std::string pin(kPin);
+  wifi_direct_credentials.SetServiceName(service_name);
+  wifi_direct_credentials.SetPin(pin);
   WifiDirect wifi_direct_a;
 
-  EXPECT_FALSE(wifi_direct_a.ConnectWifiDirect(ssid, password));
+  EXPECT_FALSE(wifi_direct_a.ConnectWifiDirect(wifi_direct_credentials));
   EXPECT_TRUE(wifi_direct_a.DisconnectWifiDirect());
 }
 
@@ -110,9 +120,7 @@ TEST_P(WifiDirectTest, CanStartGOThatOtherConnect) {
   WifiDirectCredentials* wifi_direct_credentials =
       wifi_direct_a.GetCredentials(service_id);
 
-  EXPECT_TRUE(
-      wifi_direct_b.ConnectWifiDirect(wifi_direct_credentials->GetSSID(),
-                                      wifi_direct_credentials->GetPassword()));
+  EXPECT_TRUE(wifi_direct_b.ConnectWifiDirect(*wifi_direct_credentials));
   EXPECT_TRUE(wifi_direct_b.IsConnectedToGO());
 
   WifiDirectSocket socket_client;
@@ -150,9 +158,7 @@ TEST_P(WifiDirectTest, CanStartGOThatOtherCanCancelConnect) {
   WifiDirectCredentials* wifi_direct_credentials =
       wifi_direct_a.GetCredentials(service_id);
 
-  EXPECT_TRUE(
-      wifi_direct_b.ConnectWifiDirect(wifi_direct_credentials->GetSSID(),
-                                      wifi_direct_credentials->GetPassword()));
+  EXPECT_TRUE(wifi_direct_b.ConnectWifiDirect(*wifi_direct_credentials));
 
   WifiDirectSocket socket_client;
   EXPECT_FALSE(socket_client.IsValid());
@@ -180,12 +186,48 @@ TEST_F(WifiDirectTest, CanStartGOTheOtherFailConnect) {
 
   EXPECT_TRUE(wifi_direct_a.StartWifiDirect());
 
-  std::string ssid(kSsid);
-  std::string password(kPassword);
-
-  EXPECT_FALSE(wifi_direct_b.ConnectWifiDirect(ssid, password));
+  WifiDirectCredentials wifi_direct_credentials;
+  std::string service_name(kServiceName);
+  std::string pin(kPin);
+  wifi_direct_credentials.SetServiceName(service_name);
+  wifi_direct_credentials.SetPin(pin);
+  EXPECT_FALSE(wifi_direct_b.ConnectWifiDirect(wifi_direct_credentials));
   EXPECT_TRUE(wifi_direct_b.DisconnectWifiDirect());
   EXPECT_TRUE(wifi_direct_a.StopWifiDirect());
+}
+
+TEST_F(WifiDirectTest, GetSupportedWifiDirectAuthTypes) {
+  WifiDirect wifi_direct;
+  auto supported_types = wifi_direct.GetSupportedWifiDirectAuthTypes();
+  EXPECT_EQ(supported_types.size(), 1);
+  EXPECT_EQ(supported_types[0],
+            WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
+}
+
+TEST_F(WifiDirectTest, GetPreferredWifiDirectAuthType_Default) {
+  WifiDirect wifi_direct;
+  // Default should be the first supported type, which is WIFI_DIRECT_WITH_PIN
+  EXPECT_EQ(wifi_direct.GetPreferredWifiDirectAuthType(),
+            WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
+}
+
+TEST_F(WifiDirectTest, SetPreferredWifiDirectAuthType_Supported) {
+  WifiDirect wifi_direct;
+  // Attempt to set the preferred type to the already default/supported type.
+  EXPECT_TRUE(wifi_direct.SetPreferredWifiDirectAuthType(
+      WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PIN));
+  EXPECT_EQ(wifi_direct.GetPreferredWifiDirectAuthType(),
+            WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
+}
+
+TEST_F(WifiDirectTest, SetPreferredWifiDirectAuthType_Unsupported) {
+  WifiDirect wifi_direct;
+  // Attempt to set an unsupported type.
+  EXPECT_FALSE(wifi_direct.SetPreferredWifiDirectAuthType(
+      WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD));
+  // Preferred type should remain the default.
+  EXPECT_EQ(wifi_direct.GetPreferredWifiDirectAuthType(),
+            WifiDirect::WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
 }
 
 }  // namespace

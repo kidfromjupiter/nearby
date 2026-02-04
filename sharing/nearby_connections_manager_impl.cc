@@ -72,17 +72,14 @@ bool ShouldUseInternet(ConnectivityManager& connectivity_manager,
   // We won't use the internet in a low power mode.
   if (power_level == PowerLevel::kLowPower) return false;
 
-  ConnectivityManager::ConnectionType connection_type =
-      connectivity_manager.GetConnectionType();
-
   // Verify that this network has an internet connection.
-  if (connection_type == ConnectivityManager::ConnectionType::kNone) {
+  if (!connectivity_manager.IsInternetConnected()) {
     VLOG(1) << __func__ << ": No internet connection.";
     return false;
   }
 
   if (data_usage == DataUsage::WIFI_ONLY_DATA_USAGE &&
-      connection_type != ConnectivityManager::ConnectionType::kWifi) {
+      !connectivity_manager.IsLanConnected()) {
     return false;
   }
 
@@ -105,13 +102,7 @@ bool ShouldEnableWifiLan(ConnectivityManager& connectivity_manager) {
     return false;
   }
 
-  ConnectivityManager::ConnectionType connection_type =
-      connectivity_manager.GetConnectionType();
-  bool is_connection_wifi_or_ethernet =
-      connection_type == ConnectivityManager::ConnectionType::kWifi ||
-      connection_type == ConnectivityManager::ConnectionType::kEthernet;
-
-  return is_connection_wifi_or_ethernet;
+  return connectivity_manager.IsLanConnected();
 }
 
 // Temporarily fix to get around wifi hotspot issues for HP Aero with Realtek.
@@ -818,7 +809,7 @@ void NearbyConnectionsManagerImpl::DeleteUnknownFilePayloadAndCancel(
     Payload& payload) {
   if (payload.content.type == PayloadContent::Type::kFile) {
     MutexLock lock(&mutex_);
-    file_paths_to_delete_.insert(payload.content.file_payload.file.path);
+    file_paths_to_delete_.insert(payload.content.file_payload.file_path);
   }
   Cancel(payload.id);
 }
@@ -909,7 +900,7 @@ void NearbyConnectionsManagerImpl::OnPayloadTransferUpdate(
       nearby_connections_service_->CancelPayload(kServiceId, payload->id,
                                                  [](Status status) {});
       ProcessUnknownFilePathsToDelete(update.status, payload->content.type,
-                                      payload->content.file_payload.file.path);
+                                      payload->content.file_payload.file_path);
       return;
     }
   }

@@ -14,7 +14,6 @@
 
 #include "sharing/outgoing_share_session.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -28,6 +27,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/platform/clock.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/analytics/analytics_recorder.h"
@@ -39,7 +39,7 @@
 #include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/nearby_file_handler.h"
+#include "sharing/nearby_sharing_util.h"
 #include "sharing/paired_key_verification_runner.h"
 #include "sharing/payload_tracker.h"
 #include "sharing/share_session.h"
@@ -110,6 +110,19 @@ ConnectionLayerStatus ConvertToConnectionLayerStatus(Status status) {
   }
 }
 
+std::optional<std::vector<uint8_t>> GetBluetoothMacAddressForShareTarget(
+    OutgoingShareSession& session) {
+  const std::optional<NearbyShareDecryptedPublicCertificate>& certificate =
+      session.certificate();
+  if (!certificate) {
+    LOG(ERROR) << __func__ << ": No decrypted public certificate found for "
+               << "share target id: " << session.share_target().id;
+    return std::nullopt;
+  }
+
+  return GetBluetoothMacAddressFromCertificate(*certificate);
+}
+
 }  // namespace
 
 OutgoingShareSession::OutgoingShareSession(
@@ -129,12 +142,16 @@ OutgoingShareSession::~OutgoingShareSession() = default;
 
 void OutgoingShareSession::InvokeTransferUpdateCallback(
     const TransferMetadata& metadata) {
+  if (metadata.is_final_status()) {
+    is_connecting_ = false;
+  }
   transfer_update_callback_(*this, metadata);
 }
 
-void OutgoingShareSession::InitiateSendAttachments(
+bool OutgoingShareSession::InitiateSendAttachments(
     std::unique_ptr<AttachmentContainer> attachment_container) {
   SetAttachmentContainer(std::move(*attachment_container));
+  is_connecting_ = true;
 
   // Set session ID.
   set_session_id(analytics_recorder().GenerateNextId());
@@ -144,6 +161,31 @@ void OutgoingShareSession::InitiateSendAttachments(
                                     /*transfer_position=*/1,
                                     /*concurrent_connections=*/1,
                                     share_target());
+  text_payloads_.clear();
+  wifi_credentials_payloads_.clear();
+  file_payloads_.clear();
+  CreateTextPayloads();
+  CreateWifiCredentialsPayloads();
+  bool success = CreateFilePayloads();
+  // Log analytics event of describing attachments.
+  analytics_recorder().NewDescribeAttachments(this->attachment_container());
+  if (success) {
+    if (text_payloads_.empty() && wifi_credentials_payloads_.empty() &&
+        file_payloads_.empty()) {
+      // Fails in no payloads created.
+      success = false;
+    }
+  }
+  if (!success) {
+    LOG(WARNING) << __func__
+                 << ": Failed to send file to remote ShareTarget. Failed to "
+                    "create payloads.";
+    UpdateTransferMetadata(
+        TransferMetadataBuilder()
+            .set_status(TransferMetadata::Status::kMediaUnavailable)
+            .build());
+  }
+  return success;
 }
 
 bool OutgoingShareSession::ProcessKeyVerificationResult(
@@ -160,25 +202,12 @@ void OutgoingShareSession::OnConnectionDisconnected() {
   }
 }
 
-std::vector<FilePath> OutgoingShareSession::GetFilePaths() const {
-  std::vector<FilePath> file_paths;
-  file_paths.reserve(attachment_container().GetFileAttachments().size());
-  for (const FileAttachment& file_attachment :
-       attachment_container().GetFileAttachments()) {
-    // All file attachments must have a file path.
-    // That is verified in SendAttachments().
-    file_paths.push_back(*file_attachment.file_path());
-  }
-  return file_paths;
-}
-
 void OutgoingShareSession::CreateTextPayloads() {
-  const std::vector<TextAttachment> attachments =
+  const std::vector<TextAttachment>& attachments =
       attachment_container().GetTextAttachments();
   if (attachments.empty()) {
     return;
   }
-  text_payloads_.clear();
   text_payloads_.reserve(attachments.size());
   for (const TextAttachment& attachment : attachments) {
     absl::string_view body = attachment.text_body();
@@ -189,12 +218,11 @@ void OutgoingShareSession::CreateTextPayloads() {
 }
 
 void OutgoingShareSession::CreateWifiCredentialsPayloads() {
-  const std::vector<WifiCredentialsAttachment> attachments =
+  const std::vector<WifiCredentialsAttachment>& attachments =
       attachment_container().GetWifiCredentialsAttachments();
   if (attachments.empty()) {
     return;
   }
-  wifi_credentials_payloads_.clear();
   wifi_credentials_payloads_.reserve(attachments.size());
   for (const WifiCredentialsAttachment& attachment : attachments) {
     nearby::sharing::service::proto::WifiCredentials wifi_credentials;
@@ -210,26 +238,26 @@ void OutgoingShareSession::CreateWifiCredentialsPayloads() {
   }
 }
 
-bool OutgoingShareSession::CreateFilePayloads(
-    const std::vector<NearbyFileHandler::FileInfo>& files) {
-  AttachmentContainer& container = mutable_attachment_container();
-  if (files.size() != container.GetFileAttachments().size()) {
-    return false;
-  }
-  if (files.empty()) {
+bool OutgoingShareSession::CreateFilePayloads() {
+  if (attachment_container().GetFileAttachments().empty()) {
     return true;
   }
-  file_payloads_.clear();
-  file_payloads_.reserve(files.size());
+  AttachmentContainer& container = mutable_attachment_container();
+  file_payloads_.reserve(container.GetFileAttachments().size());
 
-  for (size_t i = 0; i < files.size(); ++i) {
-    const NearbyFileHandler::FileInfo& file_info = files[i];
+  for (int i = 0; i < container.GetFileAttachments().size(); ++i) {
     FileAttachment& attachment = container.GetMutableFileAttachment(i);
-    attachment.set_size(file_info.size);
-    InputFile input_file;
-    input_file.path = file_info.file_path;
-    Payload payload(input_file, attachment.parent_folder());
-    payload.content.file_payload.size = file_info.size;
+    // All file attachments must have a file path.
+    // That is verified in SendAttachments().
+    FilePath file_path = *attachment.file_path();
+    std::optional<uintmax_t> file_size = Files::GetFileSize(file_path);
+    if (!file_size.has_value()) {
+      LOG(WARNING) << "Failed to get file size for file: "
+                   << file_path.ToString();
+      return false;
+    }
+    attachment.set_size(*file_size);
+    Payload payload(file_path, attachment.parent_folder());
     file_payloads_.push_back(std::move(payload));
     SetAttachmentPayloadId(attachment.id(), file_payloads_.back().id);
   }
@@ -499,6 +527,8 @@ bool OutgoingShareSession::UpdateSessionForDedup(
       << "Share target id cannot be changed during deduplication.";
   set_share_target(share_target);
   if (IsConnected()) {
+    LOG(INFO) << __func__ << ": session for share_target.id=" << share_target.id
+              << " is connected, not updating.";
     return false;
   }
   set_endpoint_id(endpoint_id);
@@ -512,15 +542,20 @@ bool OutgoingShareSession::UpdateSessionForDedup(
 
 void OutgoingShareSession::Connect(
     std::vector<uint8_t> endpoint_info,
-    std::optional<std::vector<uint8_t>> bluetooth_mac_address,
     DataUsage data_usage, bool disable_wifi_hotspot,
     std::function<void(absl::string_view endpoint_id,
                        NearbyConnection* connection, Status status)>
         callback) {
+  // Send process initialized successfully, from now on status updated
+  // will be sent out via TransferUpdates.
+  UpdateTransferMetadata(TransferMetadataBuilder()
+                             .set_status(TransferMetadata::Status::kConnecting)
+                             .build());
   connection_start_time_ = clock().Now();
   connections_manager().Connect(
-      std::move(endpoint_info), endpoint_id(), std::move(bluetooth_mac_address),
-      data_usage, GetTransportType(disable_wifi_hotspot), std::move(callback));
+      std::move(endpoint_info), endpoint_id(),
+      GetBluetoothMacAddressForShareTarget(*this), data_usage,
+      GetTransportType(disable_wifi_hotspot), std::move(callback));
 }
 
 bool OutgoingShareSession::OnConnectResult(NearbyConnection* connection,
@@ -547,6 +582,7 @@ bool OutgoingShareSession::OnConnectResult(NearbyConnection* connection,
   }
   set_disconnect_status(TransferMetadata::Status::kFailed);
   SetConnection(connection);
+  is_connecting_ = false;
 
   // Log analytics event of establishing connection.
   analytics_recorder().NewEstablishConnection(

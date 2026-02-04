@@ -89,8 +89,7 @@ constexpr absl::string_view kEndpointId = "ABCD";
 
 std::unique_ptr<Payload> CreateFilePayload(int64_t payload_id,
                                            FilePath file_path) {
-  auto file_payload =
-      std::make_unique<Payload>(InputFile(file_path.ToString()));
+  auto file_payload = std::make_unique<Payload>(file_path);
   file_payload->id = payload_id;
   return file_payload;
 }
@@ -218,7 +217,6 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionNoSupportedPayload) {
 TEST_F(IncomingShareSessionTest, ProcessIntroductionEmptyFile) {
   session_.OnConnected(&connection_);
   IntroductionFrame frame;
-  frame.mutable_file_metadata();
 
   EXPECT_THAT(session_.ProcessIntroduction(frame),
               Eq(TransferMetadata::Status::kUnsupportedAttachmentType));
@@ -243,7 +241,6 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionFilesTooLarge) {
 TEST_F(IncomingShareSessionTest, ProcessIntroductionEmptyText) {
   session_.OnConnected(&connection_);
   IntroductionFrame frame;
-  frame.mutable_text_metadata();
 
   EXPECT_THAT(session_.ProcessIntroduction(frame),
               Eq(TransferMetadata::Status::kUnsupportedAttachmentType));

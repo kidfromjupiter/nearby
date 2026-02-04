@@ -32,7 +32,9 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
+#include "internal/platform/service_address.h"
 
 namespace nearby {
 namespace connections {
@@ -115,7 +117,8 @@ class FakeBwuHandler : public BaseBwuHandler {
   ErrorOr<std::unique_ptr<EndpointChannel>> CreateUpgradedEndpointChannel(
       ClientProxy* client, const std::string& service_id,
       const std::string& endpoint_id,
-      const UpgradePathInfo& upgrade_path_info) final {
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info) final {
     create_calls_.push_back({.client = client,
                              .service_id = service_id,
                              .endpoint_id = endpoint_id});
@@ -145,23 +148,38 @@ class FakeBwuHandler : public BaseBwuHandler {
             /*mac_address=*/mac_address);
       }
       case location::nearby::proto::connections::WIFI_LAN:
-        return parser::ForBwuWifiLanPathAvailable(/*ip_address=*/"ABCD",
-                                                  /*port=*/1234);
+        return parser::ForBwuWifiLanPathAvailable(
+            {ServiceAddress{.address = {'A', 'B', 'C', 'D'}, .port = 1234}});
       case location::nearby::proto::connections::WEB_RTC:
       case location::nearby::proto::connections::WEB_RTC_NON_CELLULAR:
         return parser::ForBwuWebrtcPathAvailable(
             /*peer_id=*/"peer-id",
             location::nearby::connections::LocationHint{});
-      case location::nearby::proto::connections::WIFI_HOTSPOT:
-        return parser::ForBwuWifiHotspotPathAvailable(
-            /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-            /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1",
-            false);
+      case location::nearby::proto::connections::WIFI_HOTSPOT: {
+        location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+            UpgradePathInfo::WifiHotspotCredentials credentials;
+        credentials.set_ssid("Direct-357a2d8c");
+        credentials.set_password("b592f7d3");
+        credentials.set_port(1234);
+        credentials.set_frequency(2412);
+        credentials.set_gateway("123.234.23.1");
+        auto* candidate = credentials.mutable_address_candidates()->Add();
+        candidate->set_ip_address(std::string(
+            "\xfe\x80\x00\x00\x00\x00\x00\x00\x4d\xb2\xb3\x5c\x22\x03\x98\xa1",
+            16));
+        candidate->set_port(1234);
+        candidate = credentials.mutable_address_candidates()->Add();
+        candidate->set_ip_address("\x7b\xea\x17\x01");
+        candidate->set_port(2412);
+        return parser::ForBwuWifiHotspotPathAvailable(std::move(credentials),
+                                                      false);
+      }
       case location::nearby::proto::connections::WIFI_DIRECT:
         return parser::ForBwuWifiDirectPathAvailable(
-            /*ssid=*/"Direct-12345678", /*password=*/"87654321", /*port=*/2143,
+            /*ssid=*/"", /*password=*/"", /*port=*/2143,
             /*frequency=*/2412, /*supports_disabling_encryption=*/false,
-            /*gateway=*/"123.234.23.1");
+            /*gateway=*/"123.234.23.1", /*service_name=*/"NC-WifiDirectTest",
+            /*pin=*/"b592f7d3");
       case location::nearby::proto::connections::UNKNOWN_MEDIUM:
       case location::nearby::proto::connections::MDNS:
       case location::nearby::proto::connections::BLE:

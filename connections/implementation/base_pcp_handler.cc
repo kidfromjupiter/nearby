@@ -29,6 +29,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
@@ -51,6 +52,7 @@
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/pcp.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
+#include "connections/implementation/webrtc_state.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/out_of_band_connection_metadata.h"
@@ -73,6 +75,7 @@
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/future.h"
 #include "internal/platform/implementation/system_clock.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/implementation/wifi.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
@@ -83,8 +86,7 @@
 #include "internal/platform/wifi_lan_connection_info.h"
 #include "proto/connections_enums.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 namespace {
 constexpr int kEndpointCancelAlarmTimeout = 10;
@@ -111,6 +113,7 @@ using ::location::nearby::connections::OsInfo;
 using ::location::nearby::connections::PresenceDevice;
 using ::location::nearby::connections::V1Frame;
 using ::location::nearby::proto::connections::OperationResultCode;
+using ::location::nearby::proto::connections::WifiDirectAuthType;
 using ::securegcm::UKey2Handshake;
 
 BasePcpHandler::BasePcpHandler(Mediums* mediums,
@@ -186,19 +189,30 @@ std::vector<ConnectionInfoVariant> BasePcpHandler::GetConnectionInfoFromResult(
   std::vector<ConnectionInfoVariant> connection_infos;
   for (const auto& medium : result.mediums) {
     if (medium == location::nearby::proto::connections::BLUETOOTH) {
-      BluetoothConnectionInfo info(
-          mediums_->GetBluetoothClassic().GetAddress(), "", {});
+      BluetoothConnectionInfo info(mediums_->GetBluetoothClassic().GetAddress(),
+                                   "", {});
       connection_infos.push_back(info);
     } else if (medium == location::nearby::proto::connections::BLE) {
       // TODO(b/284311319): Add relevant information.
       BleConnectionInfo info("", "", "", {});
       connection_infos.push_back(info);
     } else if (medium == location::nearby::proto::connections::WIFI_LAN) {
-      std::pair<std::string, int> ip_port_pair =
-          mediums_->GetWifiLan().GetCredentials(std::string(service_id));
+      api::UpgradeAddressInfo upgrade_candidates =
+          mediums_->GetWifiLan().GetUpgradeAddressCandidates(
+              std::string(service_id));
+      // Only use IPv4 address.  IPv4 addresses are always at the end of the
+      // list.
+      std::vector<char> ip_address;
+      int port = 0;
+      if (!upgrade_candidates.address_candidates.empty()) {
+        ip_address = upgrade_candidates.address_candidates.back().address;
+        if (ip_address.size() == 4) {
+          port = upgrade_candidates.address_candidates.back().port;
+        }
+      }
       WifiLanConnectionInfo info(
-          ip_port_pair.first,
-          absl::StrCat(absl::Hex(ip_port_pair.second, absl::kZeroPad16)), "",
+          std::string(ip_address.begin(), ip_address.end()),
+          absl::StrCat(absl::Hex(port, absl::kZeroPad16)), "",
           {});
       connection_infos.push_back(info);
     }
@@ -236,21 +250,8 @@ Status BasePcpHandler::StartAdvertising(
         if (compatible_advertising_options.force_new_endpoint_id) {
           client->ClearCachedLocalEndpointId();
         }
-        if (NearbyFlags::GetInstance().GetBoolFlag(
-                connections::config_package_nearby::nearby_connections_feature::
-                    kUseStableEndpointId)) {
-          if (ShouldEnterStableEndpointIdMode(compatible_advertising_options)) {
-            client->EnterStableEndpointIdMode();
-          }
-        } else {
-          // The endpoint id inside of the advertisement is different to high
-          // visibility and low visibility mode. In order to decide if client
-          // should grab the high visibility or low visibility id, it needs to
-          // tell client which one right now, before
-          // client#StartedAdvertising.
-          if (ShouldEnterHighVisibilityMode(compatible_advertising_options)) {
-            client->EnterHighVisibilityMode();
-          }
+        if (ShouldEnterStableEndpointIdMode(compatible_advertising_options)) {
+          client->EnterStableEndpointIdMode();
         }
 
         if (client->IsDctEnabled()) {
@@ -269,13 +270,7 @@ Status BasePcpHandler::StartAdvertising(
             client, service_id, client->GetLocalEndpointId(),
             info.endpoint_info, compatible_advertising_options);
         if (!result.status.Ok()) {
-          if (NearbyFlags::GetInstance().GetBoolFlag(
-                  connections::config_package_nearby::
-                      nearby_connections_feature::kUseStableEndpointId)) {
-            client->ExitStableEndpointIdMode();
-          } else {
-            client->ExitHighVisibilityMode();
-          }
+          client->ExitStableEndpointIdMode();
           response.Set(result.status);
           return;
         }
@@ -420,6 +415,52 @@ BooleanMediumSelector BasePcpHandler::ComputeIntersectionOfSupportedMediums(
             !advertising_options.allowed.web_rtc) {
           // The local client does not allow WebRTC for listening or upgrades,
           // ignore.
+          continue;
+        }
+      }
+      if (my_medium ==
+          location::nearby::proto::connections::Medium::WIFI_DIRECT) {
+        auto remote_supported_wifi_direct_auth_types =
+            pending_connection_info.connection_options.connection_info
+                .supported_wifi_direct_auth_types;
+        LOG(INFO) << "Remote supported WifiDirect auth types: "
+                << absl::StrJoin(
+                       remote_supported_wifi_direct_auth_types, ", ",
+                       [](std::string* out, int auth_type) {
+                         absl::StrAppend(
+                             out,
+                             WifiDirectAuthType_Name(
+                                 static_cast<WifiDirectAuthType>(auth_type)));
+                       });
+        auto local_supported_wifi_direct_auth_types =
+            mediums_->GetWifiDirect().GetSupportedWifiDirectAuthTypes();
+        LOG(INFO) << "Local supported WifiDirect auth types: "
+                << absl::StrJoin(
+                       local_supported_wifi_direct_auth_types, ", ",
+                       [](std::string* out, int auth_type) {
+                         absl::StrAppend(
+                             out,
+                             WifiDirectAuthType_Name(
+                                 static_cast<WifiDirectAuthType>(auth_type)));
+                       });
+        bool found_common_auth_type = false;
+        for (const auto& auth_type : local_supported_wifi_direct_auth_types) {
+          if (auth_type == WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN) {
+            continue;
+          }
+          if (std::find(remote_supported_wifi_direct_auth_types.begin(),
+                        remote_supported_wifi_direct_auth_types.end(),
+                        auth_type) !=
+              remote_supported_wifi_direct_auth_types.end()) {
+            LOG(INFO) << "Found common WifiDirect auth type: "
+                      << WifiDirectAuthType_Name(auth_type);
+            mediums_->GetWifiDirect().SetPreferredWifiDirectAuthType(auth_type);
+            found_common_auth_type = true;
+            break;
+          }
+        }
+        if (!found_common_auth_type) {
+          LOG(INFO) << "No common WifiDirect auth type found, skip WifiDirect.";
           continue;
         }
       }
@@ -640,8 +681,8 @@ void BasePcpHandler::OnEncryptionSuccessRunnableV3(
     ProcessPreConnectionInitiationFailure(
         pending_connection_info.client, pending_connection_info.medium,
         remote_device.GetEndpointId(), pending_connection_info.channel.get(),
-        pending_connection_info.is_incoming, pending_connection_info.start_time,
-        {Status::kEndpointIoError},
+        pending_connection_info.is_incoming, /*log_failure=*/true,
+        pending_connection_info.start_time, {Status::kEndpointIoError},
         OperationResultCode::NEARBY_AUTHENTICATION_FAILURE,
         pending_connection_info.result.lock().get());
     return;
@@ -702,8 +743,8 @@ void BasePcpHandler::OnEncryptionSuccessRunnable(
     ProcessPreConnectionInitiationFailure(
         pending_connection_info.client, pending_connection_info.medium,
         endpoint_id, pending_connection_info.channel.get(),
-        pending_connection_info.is_incoming, pending_connection_info.start_time,
-        {Status::kEndpointIoError},
+        pending_connection_info.is_incoming, /*log_failure=*/true,
+        pending_connection_info.start_time, {Status::kEndpointIoError},
         OperationResultCode::NEARBY_AUTHENTICATION_FAILURE,
         pending_connection_info.result.lock().get());
     return;
@@ -787,8 +828,8 @@ void BasePcpHandler::OnEncryptionFailureRunnable(
   ProcessPreConnectionInitiationFailure(
       pending_connection_info.client, pending_connection_info.medium,
       endpoint_id, pending_connection_info.channel.get(),
-      pending_connection_info.is_incoming, pending_connection_info.start_time,
-      {Status::kEndpointIoError},
+      pending_connection_info.is_incoming, /*log_failure=*/true,
+      pending_connection_info.start_time, {Status::kEndpointIoError},
       OperationResultCode::NEARBY_ENCRYPTION_FAILURE,
       pending_connection_info.result.lock().get());
 }
@@ -807,7 +848,6 @@ ConnectionInfo BasePcpHandler::FillConnectionInfo(
     api::WifiInformation& wifi_info = mediums_->GetWifi().GetInformation();
     connection_info.bssid = wifi_info.bssid;
     connection_info.ap_frequency = wifi_info.ap_frequency;
-    connection_info.ip_address = wifi_info.ip_address_4_bytes;
     if (NearbyFlags::GetInstance().GetBoolFlag(
             config_package_nearby::nearby_connections_feature::
                 kEnableDynamicRoleSwitch) &&
@@ -821,12 +861,21 @@ ConnectionInfo BasePcpHandler::FillConnectionInfo(
     LOG(INFO) << "Query for WIFI information: is_supports_5_ghz="
               << connection_info.supports_5_ghz
               << "; bssid=" << connection_info.bssid
-              << "; ap_frequency=" << connection_info.ap_frequency
-              << "Mhz; ip_address in bytes format="
-              << absl::BytesToHexString(connection_info.ip_address);
+              << "; ap_frequency=" << connection_info.ap_frequency << "Mhz";
   }
   connection_info.supported_mediums =
       GetSupportedConnectionMediumsByPriority(connection_options);
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableWifiDirect)) {
+    connection_info.supported_wifi_direct_auth_types =
+        mediums_->GetWifiDirect().GetSupportedWifiDirectAuthTypes();
+    VLOG(1) << "Set SupportedWifiDirectAuthTypes for WIFI_DIRECT: "
+              << absl::StrJoin(connection_info.supported_wifi_direct_auth_types,
+                               ",");
+  } else {
+    connection_info.supported_wifi_direct_auth_types = {};
+  }
 
   if (!NearbyFlags::GetInstance().GetBoolFlag(
           config_package_nearby::nearby_connections_feature::
@@ -899,7 +948,8 @@ Status BasePcpHandler::RequestConnection(
                     << endpoint_id;
           ProcessPreConnectionInitiationFailure(
               client, channel_medium, endpoint_id, channel.get(),
-              /* is_incoming = */ false, start_time, connect_impl_result.status,
+              /*is_incoming=*/false, /*log_failure=*/true, start_time,
+              connect_impl_result.status,
               connect_impl_result.operation_result_code, result.get());
           return;
         }
@@ -923,7 +973,8 @@ Status BasePcpHandler::RequestConnection(
                     << endpoint_id;
           ProcessPreConnectionInitiationFailure(
               client, channel_medium, endpoint_id, channel.get(),
-              /* is_incoming = */ false, start_time, {Status::kEndpointIoError},
+              /*is_incoming=*/false, /*log_failure=*/true, start_time,
+              {Status::kEndpointIoError},
               client->GetAnalyticsRecorder()
                   .GetChannelIoErrorResultCodeFromMedium(channel_medium),
               result.get());
@@ -1043,7 +1094,8 @@ Status BasePcpHandler::RequestConnectionV3(
                     << endpoint_id;
           ProcessPreConnectionInitiationFailure(
               client, channel_medium, endpoint_id, channel.get(),
-              /* is_incoming = */ false, start_time, connect_impl_result.status,
+              /*is_incoming=*/false, /*log_failure=*/true, start_time,
+              connect_impl_result.status,
               connect_impl_result.operation_result_code, result.get());
           return;
         }
@@ -1068,7 +1120,8 @@ Status BasePcpHandler::RequestConnectionV3(
                     << endpoint_id;
           ProcessPreConnectionInitiationFailure(
               client, channel_medium, endpoint_id, channel.get(),
-              /* is_incoming = */ false, start_time, {Status::kEndpointIoError},
+              /*is_incoming=*/false, /*log_failure=*/true, start_time,
+              {Status::kEndpointIoError},
               client->GetAnalyticsRecorder()
                   .GetChannelIoErrorResultCodeFromMedium(channel_medium),
               result.get());
@@ -1159,12 +1212,7 @@ void BasePcpHandler::StripOutUnavailableMediums(
     allowed.bluetooth = mediums_->GetBluetoothClassic().IsAvailable();
   }
   if (allowed.ble) {
-    if (NearbyFlags::GetInstance().GetBoolFlag(
-            config_package_nearby::nearby_connections_feature::kEnableBleV2)) {
-      allowed.ble = mediums_->GetBleV2().IsAvailable();
-    } else {
-      allowed.ble = mediums_->GetBle().IsAvailable();
-    }
+    allowed.ble = mediums_->GetBle().IsAvailable();
   }
   if (allowed.web_rtc) {
     allowed.web_rtc = mediums_->GetWebRtc().IsAvailable();
@@ -1211,12 +1259,7 @@ void BasePcpHandler::StripOutUnavailableMediums(
     allowed.bluetooth = mediums_->GetBluetoothClassic().IsAvailable();
   }
   if (allowed.ble) {
-    if (NearbyFlags::GetInstance().GetBoolFlag(
-            config_package_nearby::nearby_connections_feature::kEnableBleV2)) {
-      allowed.ble = mediums_->GetBleV2().IsAvailable();
-    } else {
-      allowed.ble = mediums_->GetBle().IsAvailable();
-    }
+    allowed.ble = mediums_->GetBle().IsAvailable();
   }
   if (allowed.web_rtc) {
     allowed.web_rtc = mediums_->GetWebRtc().IsAvailable();
@@ -1378,15 +1421,13 @@ Exception BasePcpHandler::WriteConnectionRequestFrame(
   PresenceDevice presence_device_frame;
   switch (device_type) {
     case NearbyDevice::kConnectionsDevice:
-      if (connections_device_frame.ParseFromString(
-              std::string(device_proto_bytes))) {  // NOLINT
+      if (connections_device_frame.ParseFromString(device_proto_bytes)) {
         return endpoint_channel->Write(parser::ForConnectionRequestConnections(
             connections_device_frame, conection_info));
       }
       return {Exception::kInvalidProtocolBuffer};
     case NearbyDevice::kPresenceDevice:
-      if (presence_device_frame.ParseFromString(
-              std::string(device_proto_bytes))) {  // NOLINT
+      if (presence_device_frame.ParseFromString(device_proto_bytes)) {
         return endpoint_channel->Write(parser::ForConnectionRequestPresence(
             presence_device_frame, conection_info));
       }
@@ -1400,9 +1441,9 @@ Exception BasePcpHandler::WriteConnectionRequestFrame(
 
 void BasePcpHandler::ProcessPreConnectionInitiationFailure(
     ClientProxy* client, Medium medium, const std::string& endpoint_id,
-    EndpointChannel* channel, bool is_incoming, absl::Time start_time,
-    Status status, OperationResultCode operation_result_code,
-    Future<Status>* result) {
+    EndpointChannel* channel, bool is_incoming, bool log_failure,
+    absl::Time start_time, Status status,
+    OperationResultCode operation_result_code, Future<Status>* result) {
   if (channel != nullptr) {
     channel->Close();
   }
@@ -1412,8 +1453,10 @@ void BasePcpHandler::ProcessPreConnectionInitiationFailure(
     result->Set(status);
   }
 
-  LogConnectionAttemptFailure(client, medium, endpoint_id, is_incoming,
-                              start_time, channel, operation_result_code);
+  if (log_failure) {
+    LogConnectionAttemptFailure(client, medium, endpoint_id, is_incoming,
+                                start_time, channel, operation_result_code);
+  }
   // result is hold inside a swapper, and saved in PendingConnectionInfo.
   // PendingConnectionInfo destructor will clear the memory of SettableFuture
   // shared_ptr for result.
@@ -1916,9 +1959,14 @@ Exception BasePcpHandler::OnIncomingConnection(
                  << client->GetClientId() << "; device="
                  << absl::BytesToHexString(remote_endpoint_info.data())
                  << "with error: " << wrapped_frame.exception();
+      // Do not log connection failure if no data is received from the channel.
+      // This prevents logging Wifi connection failure when mDNS client connects
+      // to test the connection.
       ProcessPreConnectionInitiationFailure(
           client, medium, /*endpoint_id=*/"", channel.get(),
-          /*is_incoming=*/true, start_time, {Status::kError},
+          /*is_incoming=*/true,
+          /*log_failure=*/wrapped_frame.exception() != Exception::kNoData,
+          start_time, {Status::kError},
           client->GetAnalyticsRecorder().GetChannelIoErrorResultCodeFromMedium(
               medium),
           nullptr);
@@ -2016,7 +2064,6 @@ Exception BasePcpHandler::OnIncomingConnection(
   connection_info.supports_5_ghz = medium_metadata.supports_5_ghz();
   connection_info.bssid = medium_metadata.bssid();
   connection_info.ap_frequency = medium_metadata.ap_frequency();
-  connection_info.ip_address = medium_metadata.ip_address();
   if (medium_metadata.has_medium_role()) {
     connection_info.medium_role.emplace(medium_metadata.medium_role());
   }
@@ -2026,9 +2073,7 @@ Exception BasePcpHandler::OnIncomingConnection(
         << "'s WIFI information: is_supports_5_ghz="
         << connection_info.supports_5_ghz << "; bssid=" << connection_info.bssid
         << "; ap_frequency=" << connection_info.ap_frequency
-        << "Mhz; ip_address in bytes format="
-        << absl::BytesToHexString(connection_info.ip_address)
-        << "; support_wifi_direct_group_owner="
+        << "Mhz; support_wifi_direct_group_owner="
         << medium_metadata.medium_role().support_wifi_direct_group_owner()
         << "; support_wifi_direct_group_client="
         << medium_metadata.medium_role().support_wifi_direct_group_client()
@@ -2050,9 +2095,21 @@ Exception BasePcpHandler::OnIncomingConnection(
               << connection_info.supports_5_ghz
               << "; bssid=" << connection_info.bssid
               << "; ap_frequency=" << connection_info.ap_frequency
-              << "Mhz; ip_address in bytes format="
-              << absl::BytesToHexString(connection_info.ip_address)
-              << "; has no mediumRole";
+              << "Mhz; has no mediumRole";
+  }
+  connection_info.supported_wifi_direct_auth_types =
+      parser::MediumMetadataWFDAuthTypesToWFDAuthTypes(medium_metadata);
+  if (!connection_info.supported_wifi_direct_auth_types.empty()) {
+    LOG(INFO) << connection_request.endpoint_id()
+              << "'s supported WifiDirect auth types: "
+              << absl::StrJoin(
+                     connection_info.supported_wifi_direct_auth_types, ", ",
+                     [](std::string* out, int auth_type) {
+                       absl::StrAppend(
+                           out,
+                           WifiDirectAuthType_Name(
+                               static_cast<WifiDirectAuthType>(auth_type)));
+                     });
   }
 
   // We've successfully connected to the device, and are now about to jump on to
@@ -2178,8 +2235,8 @@ void BasePcpHandler::ProcessTieBreakLoss(
   ProcessPreConnectionInitiationFailure(
       client, pending_connection_info->medium, endpoint_id,
       pending_connection_info->channel.get(),
-      pending_connection_info->is_incoming, pending_connection_info->start_time,
-      {Status::kEndpointIoError},
+      pending_connection_info->is_incoming, /*log_failure=*/true,
+      pending_connection_info->start_time, {Status::kEndpointIoError},
       OperationResultCode::CLIENT_PROCESS_TIE_BREAK_LOSS,
       pending_connection_info->result.lock().get());
   ProcessPreConnectionResultFailure(client, endpoint_id,
@@ -2188,8 +2245,7 @@ void BasePcpHandler::ProcessTieBreakLoss(
 }
 
 bool BasePcpHandler::AppendRemoteBluetoothMacAddressEndpoint(
-    const std::string& endpoint_id,
-    MacAddress remote_bluetooth_mac_address,
+    const std::string& endpoint_id, MacAddress remote_bluetooth_mac_address,
     const DiscoveryOptions& local_discovery_options) {
   if (!local_discovery_options.allowed.bluetooth) {
     return false;
@@ -2558,5 +2614,4 @@ void BasePcpHandler::PendingConnectionInfo::LocalEndpointRejectedConnection(
   client->LocalEndpointRejectedConnection(endpoint_id);
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

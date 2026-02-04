@@ -63,14 +63,9 @@
 }
 
 - (void)testGetMacAddress {
-  // Currently hardcoded to return "".
-  XCTAssertEqual(_adapter.GetMacAddress(), "");
-}
-
-- (void)testGetAddress {
   // Currently hardcoded to return an empty MacAddress.
   nearby::MacAddress emptyAddress;
-  XCTAssertEqual(_adapter.GetAddress(), emptyAddress);
+  XCTAssertEqual(_adapter.GetMacAddress(), emptyAddress);
 }
 
 @end

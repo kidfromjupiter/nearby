@@ -24,7 +24,7 @@
 #include "absl/base/attributes.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 // #include "internal/platform/implementation/linux/ble_gatt_client.h"
 #include "ble_gatt_client.h"
 #include "bluez_gatt_manager.h"
@@ -39,7 +39,7 @@
 
 namespace nearby {
 namespace linux {
-class BleV2Medium final : public api::ble_v2::BleMedium {
+class BleV2Medium final : public api::ble::BleMedium {
  public:
   BleV2Medium(const BleV2Medium &) = delete;
   BleV2Medium(BleV2Medium &&) = delete;
@@ -50,52 +50,52 @@ class BleV2Medium final : public api::ble_v2::BleMedium {
   ~BleV2Medium() override = default;
 
   bool StartAdvertising(
-      const api::ble_v2::BleAdvertisementData &advertising_data,
-      api::ble_v2::AdvertiseParameters advertise_set_parameters) override
+      const api::ble::BleAdvertisementData &advertising_data,
+      api::ble::AdvertiseParameters advertise_set_parameters) override
       ABSL_LOCKS_EXCLUDED(cur_adv_mutex_);
   std::unique_ptr<AdvertisingSession> StartAdvertising(
-      const api::ble_v2::BleAdvertisementData &advertising_data,
-      api::ble_v2::AdvertiseParameters advertise_set_parameters,
+      const api::ble::BleAdvertisementData &advertising_data,
+      api::ble::AdvertiseParameters advertise_set_parameters,
       AdvertisingCallback callback) ABSL_LOCKS_EXCLUDED(advs_mutex_) override;
   bool StopAdvertising() override ABSL_LOCKS_EXCLUDED(advs_mutex_);
 
   bool StartScanning(const Uuid &service_uuid,
-                     api::ble_v2::TxPowerLevel tx_power_level,
+                     api::ble::TxPowerLevel tx_power_level,
                      ScanCallback callback) override
       ABSL_LOCKS_EXCLUDED(active_adv_monitors_mutex_);
   bool StopScanning() override ABSL_LOCKS_EXCLUDED(active_adv_monitors_mutex_);
 
   std::unique_ptr<ScanningSession> StartScanning(
-      const Uuid &service_uuid, api::ble_v2::TxPowerLevel tx_power_level,
+      const Uuid &service_uuid, api::ble::TxPowerLevel tx_power_level,
       ScanningCallback callback) override;
 
-  std::unique_ptr<api::ble_v2::GattServer> StartGattServer(
-      api::ble_v2::ServerGattConnectionCallback callback) override;
+  std::unique_ptr<api::ble::GattServer> StartGattServer(
+      api::ble::ServerGattConnectionCallback callback) override;
 
-  std::unique_ptr<api::ble_v2::GattClient> ConnectToGattServer(
-      api::ble_v2::BlePeripheral::UniqueId peripheral_id,
-      api::ble_v2::TxPowerLevel tx_power_level,
-      api::ble_v2::ClientGattConnectionCallback callback) override;
+  std::unique_ptr<api::ble::GattClient> ConnectToGattServer(
+      api::ble::BlePeripheral::UniqueId peripheral_id,
+      api::ble::TxPowerLevel tx_power_level,
+      api::ble::ClientGattConnectionCallback callback) override;
 
-  std::unique_ptr<api::ble_v2::BleServerSocket> OpenServerSocket(
+  std::unique_ptr<api::ble::BleServerSocket> OpenServerSocket(
       const std::string &service_id) override;
 
-  std::unique_ptr<api::ble_v2::BleL2capServerSocket> OpenL2capServerSocket(
+  std::unique_ptr<api::ble::BleL2capServerSocket> OpenL2capServerSocket(
       const std::string &service_id) override;
 
-  std::unique_ptr<api::ble_v2::BleSocket> Connect(
-      const std::string &service_id, api::ble_v2::TxPowerLevel tx_power_level,
-      api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+  std::unique_ptr<api::ble::BleSocket> Connect(
+      const std::string &service_id, api::ble::TxPowerLevel tx_power_level,
+      api::ble::BlePeripheral::UniqueId peripheral_id,
       CancellationFlag *cancellation_flag) override;
 
-  std::unique_ptr<api::ble_v2::BleL2capSocket> ConnectOverL2cap(
+  std::unique_ptr<api::ble::BleL2capSocket> ConnectOverL2cap(
       int psm, const std::string &service_id,
-      api::ble_v2::TxPowerLevel tx_power_level,
-      api::ble_v2::BlePeripheral::UniqueId peripheral_id,
+      api::ble::TxPowerLevel tx_power_level,
+      api::ble::BlePeripheral::UniqueId peripheral_id,
       CancellationFlag *cancellation_flag) override;
 
   bool StartMultipleServicesScanning(const std::vector<Uuid> &service_uuids,
-                                     api::ble_v2::TxPowerLevel tx_power_level,
+                                     api::ble::TxPowerLevel tx_power_level,
                                      ScanCallback callback) override;
 
   bool PauseMediumScanning() override;
@@ -107,13 +107,13 @@ class BleV2Medium final : public api::ble_v2::BleMedium {
   void AddAlternateUuidForService(uint16_t uuid,
                                   const std::string &service_id) override;
 
-  std::optional<api::ble_v2::BlePeripheral::UniqueId>
+  std::optional<api::ble::BlePeripheral::UniqueId>
   RetrieveBlePeripheralIdFromNativeId(
       const std::string &ble_peripheral_native_id) override;
 
   // bool GetRemotePeripheral(const std::string &mac_address,
   //                          GetRemotePeripheralCallback callback) override;
-  // bool GetRemotePeripheral(api::ble_v2::BlePeripheral::UniqueId id,
+  // bool GetRemotePeripheral(api::ble::BlePeripheral::UniqueId id,
   //                          GetRemotePeripheralCallback callback) override;
 
  private:

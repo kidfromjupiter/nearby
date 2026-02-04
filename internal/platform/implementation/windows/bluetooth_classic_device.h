@@ -70,8 +70,7 @@ class BluetoothDevice : public api::BluetoothDevice {
   std::string GetName() const override { return name_; }
 
   // Returns BT MAC address assigned to this device.
-  std::string GetMacAddress() const override;
-  MacAddress GetAddress() const override;
+  MacAddress GetMacAddress() const override;
 
   std::string GetId() { return id_; }
 

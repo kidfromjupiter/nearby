@@ -1,6 +1,3 @@
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,10 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -41,6 +42,7 @@ cc_library(
     hdrs = ["account_manager.h"],
     visibility = [
         "//internal/account:__pkg__",
+        "//internal/platform:__pkg__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/test:__subpackages__",
         "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
@@ -89,15 +91,12 @@ cc_library(
         "crypto.h",
         "device_info.h",
         "executor.h",
-        "future.h",
         "input_file.h",
-        "listenable_future.h",
         "log_message.h",
         "mutex.h",
         "output_file.h",
         "preferences_manager.h",
         "scheduled_executor.h",
-        "settable_future.h",
         "submittable_executor.h",
         "system_clock.h",
         "timer.h",
@@ -151,16 +150,16 @@ cc_library(
 cc_library(
     name = "comm",
     hdrs = [
+        "app_lifecycle_monitor.h",
         "awdl.h",
         "ble.h",
-        "ble_v2.h",
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
         "credential_callbacks.h",
         "credential_storage.h",
         "http_loader.h",
         "psk_info.h",
-        "server_sync.h",
+        "upgrade_address_info.h",
         "webrtc.h",
         "wifi.h",
         "wifi_direct.h",
@@ -226,19 +225,14 @@ cc_library(
     name = "platform_impl",
     testonly = True,
     tags = ["keep_dep"],  # Prevent build_cleaner from removing the dependency.
-    visibility = [
-        "//:__subpackages__",
-        "//connections/implementation:__subpackages__",
-        "//location/nearby/analytics/cpp:__subpackages__",
-        "//location/nearby/apps/better_together/plugins/preferences_native:__subpackages__",
-        "//location/nearby/cpp/sharing:__subpackages__",
-    ],
-    deps = [] + select({
-        "@platforms//os:linux": [
-            "//internal/platform/implementation/linux:linux_platform_impl",
-        ],
+    visibility = ["//:__subpackages__"],
+    deps = [
+    ] + select({
         "@platforms//os:windows": [
             "//internal/platform/implementation/windows",
+        ],
+        "@platforms//os:linux": [
+            "//internal/platform/implementation/linux:linux_platform_impl",
         ],
         # Add other platforms as needed
         "//conditions:default": [

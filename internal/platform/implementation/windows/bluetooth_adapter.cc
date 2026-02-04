@@ -314,7 +314,7 @@ void BluetoothAdapter::RestoreRadioNameIfNecessary() {
         nearby::api::ImplementationPlatform::GetAppDataPath(settings_path);
 
     auto settings_file =
-        nearby::api::ImplementationPlatform::CreateInputFile(full_path, 0);
+        nearby::api::ImplementationPlatform::CreateInputFile(full_path);
     if (settings_file == nullptr) {
       LOG(ERROR) << __func__ << ": Failed to create input file.";
       return;
@@ -389,9 +389,7 @@ void BluetoothAdapter::StoreRadioNames(absl::string_view original_radio_name,
     VLOG(1) << __func__
             << ": saved settings: " << encoded_local_settings.dump();
 
-    ByteArray data(encoded_local_settings.dump());
-
-    settings_file->Write(data);
+    settings_file->Write(encoded_local_settings.dump());
     settings_file->Close();
   } catch (const winrt::hresult_error &ex) {
     LOG(ERROR) << __func__ << ": exception:" << ex.code() << ": "
@@ -821,7 +819,7 @@ BluetoothAdapter::GetGenericBluetoothAdapterInstanceID() const {
 }
 
 // Returns BT MAC address assigned to this adapter.
-MacAddress BluetoothAdapter::GetAddress() const {
+MacAddress BluetoothAdapter::GetMacAddress() const {
   if (windows_bluetooth_adapter_ == nullptr) {
     LOG(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
     return MacAddress();
@@ -839,14 +837,6 @@ MacAddress BluetoothAdapter::GetAddress() const {
     LOG(ERROR) << __func__ << ": unknown error.";
   }
   return mac_address;
-}
-
-std::string BluetoothAdapter::GetMacAddress() const {
-  MacAddress address = GetAddress();
-  if (!address.IsSet()) {
-    return "";
-  }
-  return address.ToString();
 }
 
 std::string BluetoothAdapter::GetNameFromRegistry(PHKEY hKey) const {

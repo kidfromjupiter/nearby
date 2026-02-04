@@ -26,7 +26,7 @@ cc_library(
     ],
     visibility = [
         "//internal/account:__subpackages__",
-        "//internal/platform:__pkg__",
+        "//internal/platform:__subpackages__",
         "//internal/test:__pkg__",
         "//sharing:__subpackages__",
     ],
@@ -61,6 +61,16 @@ cc_library(
     name = "compatible_u8_string",
     hdrs = ["compatible_u8_string.h"],
     visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "masker",
+    srcs = ["masker.cc"],
+    hdrs = ["masker.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings:string_view",
+    ],
 )
 
 cc_library(
@@ -125,6 +135,20 @@ cc_test(
     deps = [
         ":file_path",
         ":files",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "masker_test",
+    size = "small",
+    timeout = "short",
+    srcs = [
+        "masker_test.cc",
+    ],
+    deps = [
+        ":masker",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],

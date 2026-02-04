@@ -31,6 +31,7 @@
 #include "absl/random/random.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
@@ -52,15 +53,20 @@
 #include "connections/v3/connections_device_provider.h"
 #include "connections/v3/listeners.h"
 #include "internal/analytics/event_logger.h"
+#include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
+#include "internal/platform/device_info_impl.h"
 #include "internal/platform/error_code_params.h"
 #include "internal/platform/error_code_recorder.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/platform.h"
+#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
 #include "internal/platform/mutex_lock.h"
@@ -68,8 +74,7 @@
 #include "internal/platform/prng.h"
 #include "proto/connections_enums.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 namespace {
 using ::location::nearby::analytics::proto::ConnectionsLog;
@@ -81,16 +86,26 @@ constexpr char kEndpointIdChars[] = {
     'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
     'Y', 'Z', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
 
-bool IsFeatureUseStableEndpointIdEnabled() {
-  return NearbyFlags::GetInstance().GetBoolFlag(
-      connections::config_package_nearby::nearby_connections_feature::
-          kUseStableEndpointId);
-}
+constexpr absl::string_view kPreferencesFilePath = "Google/Nearby/Connections";
+
+constexpr absl::string_view kAdvertisingEndpointId =
+    "nc.advertising.endpoint_id";
+
+constexpr absl::string_view kAdvertisingTimestamp = "nc.advertising.timestamp";
+
+constexpr absl::Duration kAdvertisingKeepAliveDuration = absl::Seconds(30);
+
 }  // namespace
 
 ClientProxy::ClientProxy(::nearby::analytics::EventLogger* event_logger)
     : client_id_(Prng().NextInt64()) {
   VLOG(1) << "ClientProxy ctor event_logger=" << event_logger;
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableNearbyConnectionsPreferences)) {
+    InitializePreferencesManager();
+  }
+
   is_dct_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
       config_package_nearby::nearby_connections_feature::kEnableDct);
   analytics_recorder_ =
@@ -115,6 +130,22 @@ ClientProxy::ClientProxy(::nearby::analytics::EventLogger* event_logger)
   // Generate a 7 bits dedup value.
   absl::BitGen bitgen;
   dct_dedup_ = absl::Uniform(bitgen, 0, 1 << 7);
+
+  // Load advertising info from preferences.
+  LoadClientInfoFromPreferences();
+
+  if (preferences_manager_ != nullptr) {
+    app_lifecycle_monitor_ =
+        api::ImplementationPlatform::CreateAppLifecycleMonitor(
+            [this](api::AppLifecycleMonitor::AppLifecycleState state) {
+              if (state ==
+                      api::AppLifecycleMonitor::AppLifecycleState::kInactive ||
+                  state == api::AppLifecycleMonitor::AppLifecycleState::
+                               kBackground) {
+                SaveClientInfoToPreferences();
+              }
+            });
+  }
 }
 
 ClientProxy::~ClientProxy() { Reset(); }
@@ -172,32 +203,20 @@ std::optional<MacAddress> ClientProxy::GetBluetoothMacAddress(
   return std::nullopt;
 }
 
-void ClientProxy::SetBluetoothMacAddress(
-    const std::string& endpoint_id, MacAddress bluetooth_mac_address) {
+void ClientProxy::SetBluetoothMacAddress(const std::string& endpoint_id,
+                                         MacAddress bluetooth_mac_address) {
   bluetooth_mac_addresses_[endpoint_id] = bluetooth_mac_address;
 }
 
 std::string ClientProxy::GenerateLocalEndpointId() {
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (!cached_endpoint_id_.empty()) {
-      if (stable_endpoint_id_mode_) {
-        LOG(INFO) << "ClientProxy [Local Endpoint Re-using cached "
-                     "endpoint id due to in stable endpoint id mode]: "
-                     "client="
-                  << GetClientId()
-                  << "; cached_endpoint_id_=" << cached_endpoint_id_;
-        return cached_endpoint_id_;
-      }
-    }
-  } else {
-    if (high_vis_mode_) {
-      if (!cached_endpoint_id_.empty()) {
-        LOG(INFO) << "ClientProxy [Local Endpoint Re-using cached "
-                     "endpoint id]: client="
-                  << GetClientId()
-                  << "; cached_endpoint_id_=" << cached_endpoint_id_;
-        return cached_endpoint_id_;
-      }
+  if (!cached_endpoint_id_.empty()) {
+    if (stable_endpoint_id_mode_) {
+      LOG(INFO) << "ClientProxy [Local Endpoint Re-using cached "
+                    "endpoint id due to in stable endpoint id mode]: "
+                    "client="
+                << GetClientId()
+                << "; cached_endpoint_id_=" << cached_endpoint_id_;
+      return cached_endpoint_id_;
     }
   }
   std::string id;
@@ -216,11 +235,7 @@ void ClientProxy::Reset() {
   StoppedAdvertising();
   StoppedDiscovery();
   RemoveAllEndpoints();
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    ExitStableEndpointIdMode();
-  } else {
-    ExitHighVisibilityMode();
-  }
+  ExitStableEndpointIdMode();
 }
 
 void ClientProxy::StartedAdvertising(
@@ -233,23 +248,13 @@ void ClientProxy::StartedAdvertising(
   MutexLock lock(&mutex_);
   LOG(INFO) << "ClientProxy [StartedAdvertising]: client=" << GetClientId();
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (stable_endpoint_id_mode_) {
-      cached_endpoint_id_ = local_endpoint_id_;
-    } else {
-      cached_endpoint_id_.clear();
-    }
-
-    CancelClearCachedEndpointIdAlarm();
+  if (stable_endpoint_id_mode_) {
+    cached_endpoint_id_ = local_endpoint_id_;
   } else {
-    if (high_vis_mode_) {
-      cached_endpoint_id_ = local_endpoint_id_;
-      LOG(INFO)
-          << "ClientProxy [High Visibility Mode Adv, Cache EndpointId]: client="
-          << GetClientId() << "; cached_endpoint_id_=" << cached_endpoint_id_;
-      CancelClearCachedEndpointIdAlarm();
-    }
+    cached_endpoint_id_.clear();
   }
+
+  CancelClearCachedEndpointIdAlarm();
 
   advertising_info_ = {service_id, listener};
   advertising_options_ = advertising_options;
@@ -277,11 +282,7 @@ void ClientProxy::StoppedAdvertising() {
   // advertising_options_ is purposefully not cleared here.
   OnSessionComplete();
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    ExitStableEndpointIdMode();
-  } else {
-    ExitHighVisibilityMode();
-  }
+  ExitStableEndpointIdMode();
 }
 
 bool ClientProxy::IsAdvertising() const {
@@ -604,10 +605,8 @@ void ClientProxy::OnDisconnected(const std::string& endpoint_id, bool notify) {
 
   CancelEndpoint(endpoint_id);
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (!stable_endpoint_id_mode_ && !HasOngoingConnection()) {
-      ScheduleClearCachedEndpointIdAlarm();
-    }
+  if (!stable_endpoint_id_mode_ && !HasOngoingConnection()) {
+    ScheduleClearCachedEndpointIdAlarm();
   }
 }
 
@@ -672,16 +671,6 @@ std::int32_t ClientProxy::GetApFrequency(const std::string& endpoint_id) const {
     return item->first.connection_options.connection_info.ap_frequency;
   }
   return -1;
-}
-
-std::string ClientProxy::GetIPAddress(const std::string& endpoint_id) const {
-  MutexLock lock(&mutex_);
-
-  const ConnectionPair* item = LookupConnection(endpoint_id);
-  if (item != nullptr) {
-    return item->first.connection_options.connection_info.ip_address;
-  }
-  return {};
 }
 
 bool ClientProxy::IsConnectedToEndpoint(const std::string& endpoint_id) const {
@@ -1132,22 +1121,6 @@ v3::ConnectionListeningOptions ClientProxy::GetListeningOptions() const {
   return listening_options_;
 }
 
-void ClientProxy::EnterHighVisibilityMode() {
-  MutexLock lock(&mutex_);
-  LOG(INFO) << "ClientProxy [EnterHighVisibilityMode]: client="
-            << GetClientId();
-
-  high_vis_mode_ = true;
-}
-
-void ClientProxy::ExitHighVisibilityMode() {
-  MutexLock lock(&mutex_);
-  LOG(INFO) << "ClientProxy [ExitHighVisibilityMode]: client=" << GetClientId();
-
-  high_vis_mode_ = false;
-  ScheduleClearCachedEndpointIdAlarm();
-}
-
 void ClientProxy::EnterStableEndpointIdMode() {
   MutexLock lock(&mutex_);
   VLOG(1) << "ClientProxy [EnterStableEndpointIdMode]: client="
@@ -1174,7 +1147,7 @@ void ClientProxy::ScheduleClearCachedEndpointIdAlarm() {
     return;
   }
 
-  if (IsFeatureUseStableEndpointIdEnabled() && HasOngoingConnection()) {
+  if (HasOngoingConnection()) {
     VLOG(1) << "ClientProxy [Handle clearing cached endpoint ID "
                "during disconnection]: client="
             << GetClientId();
@@ -1188,9 +1161,7 @@ void ClientProxy::ScheduleClearCachedEndpointIdAlarm() {
             << GetClientId() << "; cached_endpoint_id_=" << cached_endpoint_id_;
   cached_endpoint_id_alarm_ = std::make_unique<CancelableAlarm>(
       "clear_high_power_endpoint_id_cache",
-      [this]() {
-        ClearCachedLocalEndpointId();
-      },
+      [this]() { ClearCachedLocalEndpointId(); },
       kHighPowerAdvertisementEndpointIdCacheTimeout, &single_thread_executor_);
 }
 
@@ -1348,6 +1319,83 @@ std::optional<std::string> ClientProxy::GetEndpointIdForDct() const {
   return dct_endpoint_id_;
 }
 
+void ClientProxy::InitializePreferencesManager() {
+  LOG(INFO) << "ClientProxy [InitializePreferencesManager]: client="
+            << GetClientId();
+  auto device_info_ = std::make_unique<nearby::DeviceInfoImpl>();
+
+  FilePath preferences_path =
+      device_info_->GetAppDataPath().append(FilePath(kPreferencesFilePath));
+
+  if (!Files::FileExists(preferences_path)) {
+    Files::CreateDirectories(preferences_path);
+  }
+
+  preferences_manager_ = api::ImplementationPlatform::CreatePreferencesManager(
+      preferences_path.ToString());
+
+  if (preferences_manager_ == nullptr) {
+    LOG(ERROR) << "ClientProxy [Failed to initialize preferences manager]: "
+                  "client="
+               << GetClientId();
+  }
+}
+
+void ClientProxy::SaveClientInfoToPreferences() {
+  MutexLock lock(&mutex_);
+  if (preferences_manager_ == nullptr) {
+    return;
+  }
+
+  if (advertising_info_.IsEmpty()) {
+    preferences_manager_->Remove(kAdvertisingEndpointId);
+    preferences_manager_->Remove(kAdvertisingTimestamp);
+    return;
+  }
+
+  preferences_manager_->SetString(kAdvertisingEndpointId, local_endpoint_id_);
+  preferences_manager_->SetTime(kAdvertisingTimestamp,
+                                SystemClock::ElapsedRealtime());
+
+  LOG(INFO) << "ClientProxy [SaveClientInfoToPreferences]: client="
+            << GetClientId() << "; local_endpoint_id_=" << local_endpoint_id_;
+}
+
+void ClientProxy::LoadClientInfoFromPreferences() {
+  MutexLock lock(&mutex_);
+  if (preferences_manager_ == nullptr) {
+    return;
+  }
+
+  absl::Time last_advertising_time = preferences_manager_->GetTime(
+      kAdvertisingTimestamp, absl::InfinitePast());
+  if (SystemClock::ElapsedRealtime() - last_advertising_time <
+      kAdvertisingKeepAliveDuration) {
+    std::string endpoint_id =
+        preferences_manager_->GetString(kAdvertisingEndpointId, "");
+    if (!endpoint_id.empty() && endpoint_id.length() == kEndpointIdLength) {
+      bool is_valid_endpoint_id = true;
+      for (const auto& c : endpoint_id) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+          is_valid_endpoint_id = false;
+          break;
+        }
+      }
+
+      if (is_valid_endpoint_id) {
+        local_endpoint_id_ = endpoint_id;
+        cached_endpoint_id_ = local_endpoint_id_;
+        LOG(INFO) << "ClientProxy [LoadClientInfoFromPreferences]: client="
+                  << GetClientId()
+                  << "; local_endpoint_id_=" << local_endpoint_id_;
+      }
+    }
+  }
+
+  preferences_manager_->Remove(kAdvertisingEndpointId);
+  preferences_manager_->Remove(kAdvertisingTimestamp);
+}
+
 std::string ClientProxy::ToString(PayloadProgressInfo::Status status) const {
   switch (status) {
     case PayloadProgressInfo::Status::kSuccess:
@@ -1367,7 +1415,6 @@ std::string ClientProxy::Dump() {
   sstream << "  Client ID: " << GetClientId() << std::endl;
   sstream << "  Local Endpoint ID: " << GetLocalEndpointId() << std::endl;
   sstream << std::boolalpha;
-  sstream << "  High Visibility Mode: " << high_vis_mode_ << std::endl;
   sstream << "  Is Advertising: " << IsAdvertising() << std::endl;
   sstream << "  Is Discovering: " << IsDiscovering() << std::endl;
   sstream << std::noboolalpha;
@@ -1395,5 +1442,4 @@ std::string ClientProxy::Dump() {
   return sstream.str();
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

@@ -18,14 +18,14 @@
 
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/exception.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_v2_socket.h"
 #include "internal/platform/logging.h"
 
 namespace nearby {
 namespace linux {
 
-std::unique_ptr<api::ble_v2::BleSocket> BleV2ServerSocket::Accept() {
+std::unique_ptr<api::ble::BleSocket> BleV2ServerSocket::Accept() {
   absl::MutexLock lock(&mutex_);
   LOG(INFO) << "BleV2ServerSocket::Accept waiting for connection";
 

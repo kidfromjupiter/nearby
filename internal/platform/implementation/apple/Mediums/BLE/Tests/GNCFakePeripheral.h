@@ -22,6 +22,12 @@ NS_ASSUME_NONNULL_BEGIN
 /** A fake implementation of @c GNCPeripheral to inject for testing. */
 @interface GNCFakePeripheral : NSObject <GNCPeripheral>
 
+/** Initializes the fake peripheral with the given identifier. */
+- (instancetype)initWithIdentifier:(NSUUID *)identifier;
+
+/** The peripheral's delegate. */
+@property(nonatomic, nullable, readwrite) id<CBPeripheralDelegate> delegate;
+
 /**
  * Similates a @c discoverServices: error.
  *
@@ -53,7 +59,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, nullable, readwrite) NSError *readValueForCharacteristicError;
 
 /** Similates a delay in all delegate calls by the specified amount. */
-@property(nonatomic, readwrite) NSTimeInterval delegateDelay;
+@property(readwrite) NSTimeInterval delegateDelay;
 
 /**
  * Similates a @c openL2CAPChannelWithPSM: error.
@@ -63,6 +69,11 @@ NS_ASSUME_NONNULL_BEGIN
  * @c gnc_peripheral:didOpenL2CAPChannel:error: delegate method with the provided error.
  */
 @property(nonatomic, nullable, readwrite) NSError *openL2CAPChannelError;
+
+/** Fake input stream to inject into CBL2CAPChannel. */
+@property(nonatomic, nullable) NSInputStream *channelInputStream;
+/** Fake output stream to inject into CBL2CAPChannel. */
+@property(nonatomic, nullable) NSOutputStream *channelOutputStream;
 
 @end
 

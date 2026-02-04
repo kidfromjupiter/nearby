@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 #include <string>
 #include <utility>
+#include <vector>
+#include <algorithm>
 
 #include "absl/strings/string_view.h"
 #include "internal/platform/cancellation_flag.h"
@@ -27,11 +29,17 @@
 
 namespace nearby {
 namespace connections {
-
 namespace {
 using ::location::nearby::proto::connections::OperationResultCode;
 }  // namespace
 
+WifiDirect::WifiDirect() : is_go_started_(false), is_connected_to_go_(false) {
+  supported_wifi_direct_auth_types_ = medium_.GetSupportedWifiDirectAuthTypes();
+  if (!supported_wifi_direct_auth_types_.empty()) {
+    preferred_wifi_direct_auth_type_ =
+        supported_wifi_direct_auth_types_.front();
+  }
+}
 WifiDirect::~WifiDirect() {
   while (!server_sockets_.empty()) {
     StopAcceptingConnections(server_sockets_.begin()->first);
@@ -102,14 +110,14 @@ bool WifiDirect::IsConnectedToGO() {
   return is_connected_to_go_;
 }
 
-bool WifiDirect::ConnectWifiDirect(const std::string& ssid,
-                                   const std::string& password) {
+bool WifiDirect::ConnectWifiDirect(
+    const WifiDirectCredentials& wifi_direct_credentials) {
   MutexLock lock(&mutex_);
   if (is_connected_to_go_) {
     LOG(INFO) << "No need to connect to GO because it is already connected.";
     return true;
   }
-  is_connected_to_go_ = medium_.ConnectWifiDirect(ssid, password);
+  is_connected_to_go_ = medium_.ConnectWifiDirect(wifi_direct_credentials);
   return is_connected_to_go_;
 }
 
@@ -135,10 +143,7 @@ WifiDirectCredentials* WifiDirect::GetCredentials(
               << ".  Use default credentials";
     return crendential;
   }
-  crendential->SetGateway(it->second.GetIPAddress());
-  crendential->SetIPAddress(it->second.GetIPAddress());
-  crendential->SetPort(it->second.GetPort());
-
+  it->second.PopulateWifiDirectCredentials(*crendential);
   return crendential;
 }
 
@@ -168,7 +173,7 @@ bool WifiDirect::StartAcceptingConnections(
   }
 
   // "port=0" to let the platform to select an available port for the socket
-  WifiDirectServerSocket server_socket = medium_.ListenForService(/*port=*/0);
+  WifiDirectServerSocket server_socket = medium_.ListenForService();
   if (!server_socket.IsValid()) {
     LOG(INFO)
         << "Failed to start to listen on WifiDirect GO server for service_id="
@@ -258,8 +263,6 @@ ErrorOr<WifiDirectSocket> WifiDirect::Connect(
     const std::string& service_id, const std::string& ip_address, int port,
     CancellationFlag* cancellation_flag) {
   MutexLock lock(&mutex_);
-  // Socket to return. To allow for NRVO to work, it has to be a single object.
-  WifiDirectSocket socket;
 
   if (service_id.empty()) {
     LOG(INFO) << "Refusing to create client WifiDirect socket because "
@@ -281,6 +284,8 @@ ErrorOr<WifiDirectSocket> WifiDirect::Connect(
                   CLIENT_CANCELLATION_CANCEL_WIFI_DIRECT_OUTGOING_CONNECTION)};
   }
 
+  // Socket to return. To allow for NRVO to work, it has to be a single object.
+  WifiDirectSocket socket;
   socket = medium_.ConnectToService(ip_address, port, cancellation_flag);
   if (!socket.IsValid()) {
     LOG(INFO) << "Failed to Connect via WifiDirect Server [service_id="
@@ -290,6 +295,16 @@ ErrorOr<WifiDirectSocket> WifiDirect::Connect(
   }
 
   return socket;
+}
+
+bool WifiDirect::SetPreferredWifiDirectAuthType(WifiDirectAuthType auth_type) {
+  if (std::find(supported_wifi_direct_auth_types_.begin(),
+                supported_wifi_direct_auth_types_.end(),
+                auth_type) == supported_wifi_direct_auth_types_.end()) {
+    return false;
+  }
+  preferred_wifi_direct_auth_type_ = auth_type;
+  return true;
 }
 
 }  // namespace connections

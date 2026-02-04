@@ -32,6 +32,7 @@
 #include "connections/implementation/mediums/utils.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/service_id_constants.h"
+#include "internal/base/masker.h"
 #include "internal/platform/awdl.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
@@ -44,6 +45,7 @@ namespace nearby {
 namespace connections {
 
 namespace {
+using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
 using ::location::nearby::proto::connections::OperationResultCode;
 
 constexpr absl::Duration kAwdlDiscoveryTimeout = absl::Seconds(5);
@@ -63,21 +65,21 @@ AwdlBwuHandler::AwdlBwuHandler(
 ErrorOr<std::unique_ptr<EndpointChannel>>
 AwdlBwuHandler::CreateUpgradedEndpointChannel(
     ClientProxy* client, const std::string& service_id,
-    const std::string& endpoint_id, const UpgradePathInfo& upgrade_path_info) {
+    const std::string& endpoint_id,
+    const BandwidthUpgradeNegotiationFrame::UpgradePathInfo&
+        upgrade_path_info) {
   std::string upgrade_service_id = WrapInitiatorUpgradeServiceId(service_id);
   if (!upgrade_path_info.has_awdl_credentials()) {
-    return {
-        Error(OperationResultCode::CONNECTIVITY_AWDL_INVALID_CREDENTIAL)};
+    return {Error(OperationResultCode::CONNECTIVITY_AWDL_INVALID_CREDENTIAL)};
   }
 
-  const UpgradePathInfo::AwdlCredentials& awdl_credentials =
-      upgrade_path_info.awdl_credentials();
+  const BandwidthUpgradeNegotiationFrame::UpgradePathInfo::AwdlCredentials&
+      awdl_credentials = upgrade_path_info.awdl_credentials();
   if (!awdl_credentials.has_service_name() ||
       !awdl_credentials.has_service_type() ||
       !awdl_credentials.has_password()) {
     LOG(ERROR) << "Failed to upgrade AWDL due to invalid credentials.";
-    return {
-        Error(OperationResultCode::CONNECTIVITY_AWDL_INVALID_CREDENTIAL)};
+    return {Error(OperationResultCode::CONNECTIVITY_AWDL_INVALID_CREDENTIAL)};
   }
 
   std::string service_name = awdl_credentials.service_name();
@@ -87,8 +89,8 @@ AwdlBwuHandler::CreateUpgradedEndpointChannel(
   LOG(INFO) << "Attempting to connect to "
             << "AWDL (service_name:" << service_name
             << ", service_type:" << service_type
-            << ", has password:" << (password.empty() ? "false" : "true")
-            << ") for endpoint " << endpoint_id;
+            << ", password:" << masker::Mask(password) << ") for endpoint "
+            << endpoint_id;
 
   NsdServiceInfo nsd_service_info{};
   nsd_service_info.SetServiceName(service_name);
@@ -233,7 +235,7 @@ ByteArray AwdlBwuHandler::HandleInitializeUpgradedMediumForEndpoint(
 
   LOG(INFO) << "Retrieved AWDL credentials. service_name: " << service_name
             << " and service_type: " << service_type
-            << " and has password: " << (password.empty() ? "false" : "true");
+            << " and password: " << masker::Mask(password);
 
   // The AWDL upgraded medium is running under TLS, so we don't need to
   // encryption for it again.

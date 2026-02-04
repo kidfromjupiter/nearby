@@ -46,7 +46,14 @@ class InjectedBluetoothDevice : public api::BluetoothDevice {
   // api::BluetoothDevice:
   std::string GetName() const override { return name_; }
 
-  std::string GetMacAddress() const override { return mac_address_; }
+  MacAddress GetMacAddress() const override {
+    if (mac_address_.empty()) {
+      return MacAddress();
+    }
+    MacAddress address;
+    MacAddress::FromString(mac_address_, address);
+    return address;
+  }
 
  private:
   const std::string name_;
@@ -99,7 +106,7 @@ BluetoothDevice InjectedBluetoothDeviceStore::CreateInjectedBluetoothDevice(
 
 bool InjectedBluetoothDeviceStore::IsInjectedDevice(MacAddress mac_address) {
   for (const auto& device : devices_) {
-    if (device->GetAddress() == mac_address) {
+    if (device->GetMacAddress() == mac_address) {
       return true;
     }
   }

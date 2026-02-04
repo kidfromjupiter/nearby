@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
@@ -29,9 +30,11 @@
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/service_address.h"
 #include "internal/platform/wifi_lan.h"
 
 namespace nearby {
@@ -105,16 +108,15 @@ class WifiLan {
   // bandwidth upgradation.
   // Returns socket instance. On success, WifiLanSocket.IsValid() return true.
   ErrorOr<WifiLanSocket> Connect(const std::string& service_id,
-                                 const std::string& ip_address, int port,
+                                 const ServiceAddress& service_address,
                                  CancellationFlag* cancellation_flag)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
-  // Gets ip address + port for remote services on the network to identify and
-  // connect to this service.
-  //
-  // Credential is for the currently-hosted Wifi ServerSocket (if any).
-  std::pair<std::string, int> GetCredentials(const std::string& service_id)
-      ABSL_LOCKS_EXCLUDED(mutex_);
+  // Returns the list of ip address candidates that can be used to connect to
+  // this device for bandwidth upgrade + port number the service is listening
+  // on.
+  api::UpgradeAddressInfo GetUpgradeAddressCandidates(
+      const std::string& service_id) ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
   struct AdvertisingInfo {

@@ -63,6 +63,8 @@ cc_library(
     hdrs = ["file.h"],
     visibility = ["//internal/platform/implementation:__subpackages__"],
     deps = [
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/platform:base",
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/memory",

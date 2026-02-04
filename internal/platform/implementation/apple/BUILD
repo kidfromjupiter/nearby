@@ -21,6 +21,7 @@ licenses(["notice"])
 package(default_visibility = [
     "//ambient/nearby/testing/connection/mdc/ios:__subpackages__",
     "//connections:__subpackages__",
+    "//connections:partners",
     "//googlemac/iPhone/Nearby:__subpackages__",
     "//internal/platform:__subpackages__",
     "//internal/preferences:__subpackages__",
@@ -61,6 +62,7 @@ objc_library(
         "preferences_manager.mm",
         "scheduled_executor.mm",
         "timer.mm",
+        "webrtc.mm",
         "wifi_hotspot.mm",
         "wifi_lan.mm",
     ],
@@ -69,6 +71,7 @@ objc_library(
         "device_info.h",
         "preferences_manager.h",
         "timer.h",
+        "webrtc.h",
         "wifi.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
@@ -82,6 +85,7 @@ objc_library(
         ":Platform_cc",
         ":Shared",
         ":ble_v2",
+        ":app_lifecycle_monitor",
         ":network_utils",
         # Required Reason API File: third_party/nearby/internal/platform/implementation/apple/preferences_manager.mm
         "//releasetools/apple/privacy/privacymanifests/requiredreasonsapi:user_defaults-user_defaults-read_write_app_data_ca92_1",
@@ -90,6 +94,7 @@ objc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",
         "//third_party/apple_frameworks:CoreBluetooth",
         "//third_party/apple_frameworks:Foundation",
@@ -97,6 +102,19 @@ objc_library(
         "@nlohmann_json//:json",
         "//internal/base:file_path",
         "//internal/base:files",
+        "//internal/base:masker",
+        "//internal/platform/implementation/apple/Mediums/Hotspot",
+        "//internal/account",
+        "//internal/crypto_cros",
+        "//internal/platform/implementation:account_manager",
+        "//internal/platform:comm",
+        "//internal/platform:logging",
+        "//internal/platform:types",
+        "//internal/proto:tachyon_cc_proto",
+        "//third_party/webrtc/files/stable/webrtc/api/task_queue:default_task_queue_factory",
+        "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
+        "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
+        "//third_party/webrtc/files/stable/webrtc/rtc_base:checks",
         "//internal/platform:base",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
@@ -106,6 +124,38 @@ objc_library(
         "//internal/platform/implementation/shared:file",
         "//internal/platform/implementation/apple/Log:GNCLogger",
         "//internal/platform:cancellation_flag",
+    ] + select({
+        "@platforms//os:platform_ios": [
+            "//third_party/apple_frameworks:UIKit",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+objc_library(
+    name = "GNCNotificationCenter",
+    hdrs = ["GNCNotificationCenter.h"],
+    deps = [
+        "//third_party/apple_frameworks:Foundation",
+    ],
+)
+
+objc_library(
+    name = "app_lifecycle_monitor",
+    srcs = [
+        "app_lifecycle_monitor.mm",
+    ],
+    hdrs = [
+        "app_lifecycle_monitor.h",
+    ],
+    # Prevent Objective-C++ headers from being pulled into swift.
+    aspect_hints = ["//tools/build_defs/swift:no_module"],
+    deps = [
+        ":GNCNotificationCenter",
+        "//internal/platform:base",
+        "//internal/platform/implementation:comm",
+        "//internal/platform/implementation/apple/Log:GNCLogger",
+        "//third_party/apple_frameworks:Foundation",
     ] + select({
         "@platforms//os:platform_ios": [
             "//third_party/apple_frameworks:UIKit",
@@ -144,6 +194,7 @@ objc_library(
     # Prevent Objective-C++ headers from being pulled into swift.
     aspect_hints = ["//tools/build_defs/swift:no_module"],
     deps = [
+        ":Shared",
         ":bluetooth_adapter_v2",
         ":comm",
         "//internal/platform:base",
@@ -225,7 +276,9 @@ objc_library(
     # Prevent Objective-C++ headers from being pulled into swift.
     aspect_hints = ["//tools/build_defs/swift:no_module"],
     deps = [
-        "//internal/platform:logging",
+        "//third_party/apple_frameworks:os",
+        "@com_google_absl//absl/log:log_entry",
+        "@com_google_absl//absl/log:log_sink",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -242,7 +295,7 @@ objc_library(
     aspect_hints = ["//tools/build_defs/swift:no_module"],
     deps = [
         ":os_log_sink",
-        "//internal/platform:logging",
+        "@com_google_absl//absl/log:log_sink_registry",
     ],
 )
 
@@ -295,6 +348,7 @@ cc_test(
         ":Platform_cc",
         "//internal/platform/implementation/g3:crypto",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
