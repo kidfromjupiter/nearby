@@ -33,12 +33,11 @@ class BleL2capInputStream final : public InputStream {
   explicit BleL2capInputStream(int fd);
   ~BleL2capInputStream() override;
 
-  ExceptionOr<ByteArray> Read(std::int64_t size) override;
+ ExceptionOr<ByteArray> Read(std::int64_t size) override;
   Exception Close() override;
 
  private:
   std::atomic<int> fd_{-1};
-  std::string pending_;  // holds unread bytes from full SDUs
   };
 
 class BleL2capOutputStream final : public OutputStream {

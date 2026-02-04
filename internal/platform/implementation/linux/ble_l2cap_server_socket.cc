@@ -49,17 +49,14 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleL2capServerSocket::Accept() {
   psm_ = 0x80 + (prng.NextUint32() % 0x80);
 
   server_fd_ = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
-  int rcv = 1 << 20;  // 1 MiB (kernel may clamp)
-  int snd = 1 << 20;
-  int err2 = setsockopt(server_fd_, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
-  int err3 = setsockopt(server_fd_, SOL_SOCKET, SO_SNDBUF, &snd, sizeof(snd));
-
-  LOG(INFO) << __func__ << ": Using server_fd: " << server_fd_;
-  if (server_fd_ < 0 or err2 == -1  or err3 == -1) {
+  if (server_fd_ < 0) {
     LOG(ERROR) << "Failed to create L2CAP server socket: "
                << std::strerror(errno);
     return nullptr;
   }
+
+
+  LOG(INFO) << __func__ << ": Using server_fd: " << server_fd_;
 
   struct sockaddr_l2 addr;
   std::memset(&addr, 0, sizeof(addr));
@@ -75,6 +72,15 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleL2capServerSocket::Accept() {
     close(server_fd_);
     server_fd_ = -1;
     return nullptr;
+  }
+
+  struct l2cap_options opts;
+  opts.omtu = 0;
+  opts.imtu = 672;
+
+  if (setsockopt(server_fd_, SOL_BLUETOOTH, BT_RCVMTU, &opts.imtu,
+							sizeof(opts.imtu)) < 0) {
+    LOG(ERROR) << "Failed to set socket options on L2CAP server socket" ;
   }
 
   if (listen(server_fd_, 5) < 0) {

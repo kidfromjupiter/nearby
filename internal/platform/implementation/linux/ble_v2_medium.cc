@@ -551,6 +551,9 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
     return nullptr;
   }
 
+  // Set receive MTU before connect (for LE CoC)
+
+
   struct sockaddr_l2 addr;
   std::memset(&addr, 0, sizeof(addr));
   addr.l2_family = AF_BLUETOOTH;
@@ -561,6 +564,17 @@ std::unique_ptr<api::ble_v2::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
     addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
   }
 
+  if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+    LOG(INFO) << "Failed to bind L2CAP socket";
+  }
+
+  struct l2cap_options opts;
+  opts.omtu = 0;
+  opts.imtu = 672;
+  if (setsockopt(fd, SOL_BLUETOOTH, BT_RCVMTU, &opts.imtu, sizeof(opts.imtu)) < 0) {
+    LOG(WARNING) << __func__ << ": Failed to set BT_RCVMTU: "
+                 << std::strerror(errno);
+  }
   std::string mac_addr = device->GetMacAddress();
   if (str2ba(mac_addr.c_str(), &addr.l2_bdaddr) < 0) {
     LOG(ERROR) << __func__ << ": Invalid Bluetooth address: " << mac_addr;

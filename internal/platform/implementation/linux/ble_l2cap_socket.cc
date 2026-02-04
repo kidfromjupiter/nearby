@@ -23,13 +23,13 @@
 #include <cerrno>
 #include <cstring>
 #include <bluetooth/bluetooth.h>
+#include <sys/ioctl.h>
 
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/logging.h"
-#include <sys/ioctl.h>
 
 #include "bluetooth_classic_socket.h"
 
@@ -107,7 +107,6 @@ static size_t GetBleCocRcvMtu(int fd) {
   if (getsockopt(fd, SOL_BLUETOOTH, BT_RCVMTU, &mtu, &len) == 0 && mtu > 0)
     return mtu;
 
-  // Fallback ONLY (avoid 23 unless you're sure; 23 causes truncation if peer sends bigger SDUs).
   return 512;
 }
 
@@ -125,19 +124,9 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   if (size <= 0) {
     return ExceptionOr<ByteArray>(ByteArray{});
   }
+  LOG(INFO) << "Reading";
 
-  // Serve any buffered bytes first.
-  if (!pending_.empty()) {
-    size_t to_return = std::min(static_cast<size_t>(size), pending_.size());
-    std::string out = pending_.substr(0, to_return);
-    pending_.erase(0, to_return);
-    LOG(INFO) << __func__ << ": returning " << to_return
-              << " bytes from pending buffer, data=0x"
-              << HexPreview(out.data(), out.size());
-    return ExceptionOr<ByteArray>(ByteArray(std::move(out)));
-  }
-
-  auto poller = Poller::CreateInputPoller(fd);
+  auto poller = Poller::CreateOutputPoller(fd);
 
   while (true) {
     if (fd_.load() != fd) return {Exception::kIo};
@@ -145,32 +134,17 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
     if (result.Raised()) return result;
     if (fd_.load() != fd) return {Exception::kIo};
 
-    // Peek the next message length without consuming it.
-    // For seqpacket/dgram, MSG_TRUNC makes recv() return the *full* message length
-    // even if the buffer is smaller.
-    ssize_t msg_len = ::recv(fd, nullptr, 0, MSG_PEEK | MSG_TRUNC);
-    if (msg_len < 0) {
-      if (errno == EINTR) continue;
-      if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-      if (errno == EBADF) {
-        LOG(INFO) << __func__ << ": socket was closed during read";
-        return {Exception::kIo};
-      }
-      LOG(ERROR) << __func__ << ": error peeking message length: "
-                 << std::strerror(errno);
-      return {Exception::kIo};
-    }
-    if (msg_len == 0) {
-      LOG(INFO) << __func__ << ": socket closed (EOF)";
-      return {Exception::kIo};
-    }
-
-    size_t want = static_cast<size_t>(msg_len);
+    // Read one SDU (kernel gives one per recv on SOCK_SEQPACKET).
+    // Always allocate a buffer up to the receive MTU since the kernel may
+    // deliver a complete SDU that's larger than the requested size.
+    // We'll trim to the requested size afterwards.
+    size_t recv_mtu = GetBleCocRcvMtu(fd);
     std::string buffer;
-    buffer.resize(want);
+    buffer.resize(recv_mtu);
 
     if (fd_.load() != fd) return {Exception::kIo};
-    ssize_t n = ::recv(fd, buffer.data(), want, 0);
+    ssize_t n = ::recv(fd, buffer.data(), buffer.size(), 0);
+    LOG(INFO)<< "Received something";
     if (n < 0) {
       if (errno == EINTR) continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
@@ -182,63 +156,22 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
                  << std::strerror(errno);
       return {Exception::kIo};
     }
-    if (n == 0) {
-      LOG(INFO) << __func__ << ": socket closed (EOF)";
-      return {Exception::kIo};
-    }
+    // if (n == 0) {
+    //   LOG(INFO) << __func__ << ": socket closed (EOF)";
+    //   return {Exception::kIo};
+    // }
+    LOG(INFO)<< "Got this many "<< static_cast<size_t>(n);
 
     buffer.resize(static_cast<size_t>(n));
 
-    // Swallow BLE L2CAP control packets used to switch to data connection.
-    // Android sends length-prefixed 0x03 on the L2CAP channel before the
-    // ConnectionRequestFrame. Respond with length-prefixed 0x17 and continue.
-    if (buffer.size() == 5 &&
-        static_cast<unsigned char>(buffer[0]) == 0x00 &&
-        static_cast<unsigned char>(buffer[1]) == 0x00 &&
-        static_cast<unsigned char>(buffer[2]) == 0x00 &&
-        static_cast<unsigned char>(buffer[3]) == 0x01 &&
-        static_cast<unsigned char>(buffer[4]) == 0x03) {
-      char reply[5] = {0x00, 0x00, 0x00, 0x01,
-                       static_cast<char>(0x17)};
-      ssize_t wrote = ::send(fd, reply, sizeof(reply),
-#ifdef MSG_NOSIGNAL
-                             MSG_NOSIGNAL
-#else
-                             0
-#endif
-      );
-      if (wrote < 0) {
-        LOG(WARNING) << __func__
-                     << ": failed to send data-connection-ready reply: "
-                     << std::strerror(errno);
-      }
-      continue;
+    if (buffer.size() != static_cast<size_t>(size)) {
+      LOG(WARNING) << __func__ << ": size mismatch recv=" << buffer.size()
+                   << " expected=" << size;
     }
-
-    if (buffer.size() == 1 &&
-        static_cast<unsigned char>(buffer[0]) == 0x03) {
-      char reply = static_cast<char>(0x17);
-      ssize_t wrote = ::send(fd, &reply, sizeof(reply),
-#ifdef MSG_NOSIGNAL
-                             MSG_NOSIGNAL
-#else
-                             0
-#endif
-      );
-      if (wrote < 0) {
-        LOG(WARNING) << __func__
-                     << ": failed to send data-connection-ready reply: "
-                     << std::strerror(errno);
-      }
-      continue;
-    }
-
-    // If the packet is larger than requested size, buffer the remainder.
+    // If the packet is larger than requested size, drop the remainder to stay
+    // close to l2test semantics (one recv consumes one frame).
     size_t to_return = std::min(static_cast<size_t>(size), buffer.size());
     std::string out = buffer.substr(0, to_return);
-    if (buffer.size() > to_return) {
-      pending_.assign(buffer.data() + to_return, buffer.size() - to_return);
-    }
     LOG(INFO) << __func__ << ": returning " << to_return
               << " bytes from SDU size " << buffer.size() << ", data=0x"
               << HexPreview(out.data(), out.size());
@@ -263,39 +196,31 @@ Exception BleL2capOutputStream::Write(const ByteArray& data) {
 
   auto poller = Poller::CreateOutputPoller(fd);
 
-  size_t total_wrote = 0;
-
   if (data.Empty()) {
     return {Exception::kSuccess};
   }
+
   size_t max_chunk_size = GetL2capOutputMtu(fd);
   if (max_chunk_size == 0) {
     max_chunk_size = kDefaultBleL2capMtu;
   }
+
   LOG(INFO) << "BleL2capOutputStream::Write bytes=" << data.size()
-            << " mtu=" << max_chunk_size << " data=0x"
-            << HexPreview(data.data(), data.size());
- while (total_wrote < data.size()) {
+            << " mtu=" << max_chunk_size
+            << " data=0x" << HexPreview(data.data(), data.size());
+
+  size_t offset = 0;
+  while (offset < data.size()) {
     if (fd_.load() != fd) return {Exception::kIo};
-    auto result = poller.Ready();  // should wait for POLLOUT/EPOLLOUT
+    auto result = poller.Ready();  // wait for POLLOUT/EPOLLOUT
     if (result.Raised()) return result;
     if (fd_.load() != fd) return {Exception::kIo};
 
-    const char *buf = data.data();
-    size_t remaining = data.size() - total_wrote;
+    size_t chunk = std::min(max_chunk_size, data.size() - offset);
 
-    size_t to_write = remaining;
-    {
-      // For SEQPACKET/DGRAM, one send() == one packet.
-      // Cap to discovered “MTU-like” limit to avoid EMSGSIZE.
-      absl::MutexLock lock(&fd_mutex_);
-      to_write = std::min(to_write, max_chunk_size);
-    }
-
-    // Prefer send() to avoid SIGPIPE (MSG_NOSIGNAL is Linux).
     ssize_t wrote = ::send(fd,
-                           buf + total_wrote,
-                           to_write,
+                           data.data() + offset,
+                           chunk,
 #ifdef MSG_NOSIGNAL
                            MSG_NOSIGNAL
 #else
@@ -303,25 +228,14 @@ Exception BleL2capOutputStream::Write(const ByteArray& data) {
 #endif
     );
 
-    // If send() isn’t appropriate in your environment, you can swap back to write().
-    // ssize_t wrote = ::write(fd_.get(), buf + total_wrote, to_write);
-
     if (wrote < 0) {
       if (errno == EINTR) continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
 
       if (errno == EMSGSIZE) {
-        // Our packet is too large; shrink max_chunk_ and retry.
-        {
-          absl::MutexLock lock(&fd_mutex_);
-          if (max_chunk_size > 1) {
-            max_chunk_size = std::max<size_t>(1, max_chunk_size / 2);
-            LOG(INFO) << __func__ << ": EMSGSIZE; reducing max_chunk_ to "
-                      << max_chunk_size;
-            continue;  // retry with smaller chunk
-          }
-        }
-        LOG(ERROR) << __func__ << ": EMSGSIZE even at 1 byte";
+        LOG(ERROR) << __func__
+                   << ": EMSGSIZE sending " << chunk
+                   << " bytes; peer MTU " << max_chunk_size;
         return {Exception::kIo};
       }
 
@@ -337,12 +251,17 @@ Exception BleL2capOutputStream::Write(const ByteArray& data) {
     }
 
     if (wrote == 0) {
-      // For sockets, 0 usually means peer closed.
       LOG(INFO) << __func__ << ": peer closed during write";
       return {Exception::kIo};
     }
 
-    total_wrote += static_cast<size_t>(wrote);
+    if (static_cast<size_t>(wrote) != chunk) {
+      LOG(ERROR) << __func__ << ": partial packet write ("
+                 << wrote << "/" << chunk << ")";
+      return {Exception::kIo};
+    }
+
+    offset += static_cast<size_t>(wrote);
   }
 
   return {Exception::kSuccess};
