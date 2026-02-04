@@ -54,7 +54,7 @@ namespace linux {
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   : system_bus_(adapter.GetConnection()),
     adapter_(adapter),
-    // gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
+    gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
@@ -431,11 +431,11 @@ bool BleV2Medium::StopScanning() {
 
 std::unique_ptr<api::ble_v2::GattServer> BleV2Medium::StartGattServer(
   api::ble_v2::ServerGattConnectionCallback callback) {
-  (void)callback;
-  return nullptr;
+  // (void)callback;
+  // return nullptr;
 
   return std::make_unique<GattServer>(
-    *system_bus_, adapter_, devices_,std::move(callback)
+  *system_bus_, adapter_, devices_,std::move(callback)
   );
 }
 

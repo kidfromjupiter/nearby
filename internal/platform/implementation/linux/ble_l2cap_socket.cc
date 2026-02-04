@@ -122,78 +122,128 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   int fd = fd_.load();
   if (fd < 0) return Exception{Exception::kIo};
 
+  if (size <= 0) {
+    return ExceptionOr<ByteArray>(ByteArray{});
+  }
+
+  // Serve any buffered bytes first.
+  if (!pending_.empty()) {
+    size_t to_return = std::min(static_cast<size_t>(size), pending_.size());
+    std::string out = pending_.substr(0, to_return);
+    pending_.erase(0, to_return);
+    LOG(INFO) << __func__ << ": returning " << to_return
+              << " bytes from pending buffer, data=0x"
+              << HexPreview(out.data(), out.size());
+    return ExceptionOr<ByteArray>(ByteArray(std::move(out)));
+  }
+
   auto poller = Poller::CreateInputPoller(fd);
 
-    // Wait for readability
-    while (true) {
-      if (fd_.load() != fd) return {Exception::kIo};
-      auto result = poller.Ready();
-      if (result.Raised()) return result;
-      if (fd_.load() != fd) return {Exception::kIo};
+  while (true) {
+    if (fd_.load() != fd) return {Exception::kIo};
+    auto result = poller.Ready();
+    if (result.Raised()) return result;
+    if (fd_.load() != fd) return {Exception::kIo};
 
-      // Peek the next message length without consuming it.
-      // For seqpacket/dgram, MSG_TRUNC makes recv() return the *full* message length
-      // even if the buffer is smaller.
-      ssize_t msg_len = ::recv(fd, nullptr, 0, MSG_PEEK | MSG_TRUNC);
-      if (msg_len < 0) {
-        if (errno == EINTR) continue;
-        if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-        if (errno == EBADF) {
-          LOG(INFO) << __func__ << ": socket was closed during read";
-          return {Exception::kIo};
-        }
-        LOG(ERROR) << __func__ << ": error peeking message length: "
-                   << std::strerror(errno);
+    // Peek the next message length without consuming it.
+    // For seqpacket/dgram, MSG_TRUNC makes recv() return the *full* message length
+    // even if the buffer is smaller.
+    ssize_t msg_len = ::recv(fd, nullptr, 0, MSG_PEEK | MSG_TRUNC);
+    if (msg_len < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+      if (errno == EBADF) {
+        LOG(INFO) << __func__ << ": socket was closed during read";
         return {Exception::kIo};
       }
-      if (msg_len == 0) {
-        LOG(INFO) << __func__ << ": socket closed (EOF)";
-        return {Exception::kIo};
-      }
-
-      // Decide how much we will actually read/return.
-      // If caller asked for 'size', cap to that.
-      size_t want = static_cast<size_t>(msg_len);
-      size_t cap  = static_cast<size_t>(size);
-      size_t to_read = std::min(want, cap);
-
-      std::string buffer;
-      buffer.resize(to_read);
-
-      // Now read/consume the message. If the message is larger than to_read,
-      // the remainder will be discarded by the kernel for seqpacket/dgram.
-      // We can detect that and treat it as an error (or choose a different policy).
-      if (fd_.load() != fd) return {Exception::kIo};
-      ssize_t n = ::recv(fd, buffer.data(), to_read, 0);
-      if (n < 0) {
-        if (errno == EINTR) continue;
-        if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-        if (errno == EBADF) {
-          LOG(INFO) << __func__ << ": socket was closed during read";
-          return {Exception::kIo};
-        }
-        LOG(ERROR) << __func__ << ": error reading data on bluetooth socket: "
-                   << std::strerror(errno);
-        return {Exception::kIo};
-      }
-      if (n == 0) {
-        LOG(INFO) << __func__ << ": socket closed (EOF)";
-        return {Exception::kIo};
-      }
-
-      buffer.resize(static_cast<size_t>(n));
-
-      // Detect truncation: if msg_len > size, we truncated/discarded remainder.
-      if (want > cap) {
-        LOG(ERROR) << __func__
-                   << ": incoming packet (" << want
-                   << " bytes) exceeds requested size (" << cap
-                   << "). Packet truncated.";
-        return {Exception::kIo};
-      }
-
-      return ExceptionOr{ByteArray(std::move(buffer))};
+      LOG(ERROR) << __func__ << ": error peeking message length: "
+                 << std::strerror(errno);
+      return {Exception::kIo};
     }
+    if (msg_len == 0) {
+      LOG(INFO) << __func__ << ": socket closed (EOF)";
+      return {Exception::kIo};
+    }
+
+    size_t want = static_cast<size_t>(msg_len);
+    std::string buffer;
+    buffer.resize(want);
+
+    if (fd_.load() != fd) return {Exception::kIo};
+    ssize_t n = ::recv(fd, buffer.data(), want, 0);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+      if (errno == EBADF) {
+        LOG(INFO) << __func__ << ": socket was closed during read";
+        return {Exception::kIo};
+      }
+      LOG(ERROR) << __func__ << ": error reading data on bluetooth socket: "
+                 << std::strerror(errno);
+      return {Exception::kIo};
+    }
+    if (n == 0) {
+      LOG(INFO) << __func__ << ": socket closed (EOF)";
+      return {Exception::kIo};
+    }
+
+    buffer.resize(static_cast<size_t>(n));
+
+    // Swallow BLE L2CAP control packets used to switch to data connection.
+    // Android sends length-prefixed 0x03 on the L2CAP channel before the
+    // ConnectionRequestFrame. Respond with length-prefixed 0x17 and continue.
+    if (buffer.size() == 5 &&
+        static_cast<unsigned char>(buffer[0]) == 0x00 &&
+        static_cast<unsigned char>(buffer[1]) == 0x00 &&
+        static_cast<unsigned char>(buffer[2]) == 0x00 &&
+        static_cast<unsigned char>(buffer[3]) == 0x01 &&
+        static_cast<unsigned char>(buffer[4]) == 0x03) {
+      char reply[5] = {0x00, 0x00, 0x00, 0x01,
+                       static_cast<char>(0x17)};
+      ssize_t wrote = ::send(fd, reply, sizeof(reply),
+#ifdef MSG_NOSIGNAL
+                             MSG_NOSIGNAL
+#else
+                             0
+#endif
+      );
+      if (wrote < 0) {
+        LOG(WARNING) << __func__
+                     << ": failed to send data-connection-ready reply: "
+                     << std::strerror(errno);
+      }
+      continue;
+    }
+
+    if (buffer.size() == 1 &&
+        static_cast<unsigned char>(buffer[0]) == 0x03) {
+      char reply = static_cast<char>(0x17);
+      ssize_t wrote = ::send(fd, &reply, sizeof(reply),
+#ifdef MSG_NOSIGNAL
+                             MSG_NOSIGNAL
+#else
+                             0
+#endif
+      );
+      if (wrote < 0) {
+        LOG(WARNING) << __func__
+                     << ": failed to send data-connection-ready reply: "
+                     << std::strerror(errno);
+      }
+      continue;
+    }
+
+    // If the packet is larger than requested size, buffer the remainder.
+    size_t to_return = std::min(static_cast<size_t>(size), buffer.size());
+    std::string out = buffer.substr(0, to_return);
+    if (buffer.size() > to_return) {
+      pending_.assign(buffer.data() + to_return, buffer.size() - to_return);
+    }
+    LOG(INFO) << __func__ << ": returning " << to_return
+              << " bytes from SDU size " << buffer.size() << ", data=0x"
+              << HexPreview(out.data(), out.size());
+    return ExceptionOr<ByteArray>(ByteArray(std::move(out)));
+  }
 }
 
 Exception BleL2capInputStream::Close() {
