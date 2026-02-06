@@ -16,15 +16,12 @@
 #define PLATFORM_IMPL_LINUX_BLE_L2CAP_SERVER_SOCKET_H_
 
 #include <memory>
-#include <sdbus-c++/Types.h>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/linux/ble_l2cap_socket.h"
-#include "absl/container/flat_hash_map.h"
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
@@ -39,22 +36,25 @@ class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
 
   int GetPSM() const override { return psm_; }
   void SetPSM(int psm);
-  void AcceptPoll(int &client_fd, sockaddr_l2 &client_addr,
-                  socklen_t &client_len);
 
-  std::unique_ptr<api::ble::BleL2capSocket> Accept() override;
-  Exception Close() override ;
+  std::unique_ptr<api::ble::BleL2capSocket> Accept() override
+      ABSL_LOCKS_EXCLUDED(mutex_);
+  Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
 
-  void SetCloseNotifier(absl::AnyInvocable<void()> notifier);
+  void SetCloseNotifier(absl::AnyInvocable<void()> notifier)
+      ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
-  absl::Mutex mutex_;
-  int psm_ = 0;
-  int server_fd_ = -1;
-  int stop_pipe_[2] = {-1, -1};   // read end [0], write end [1]
+  bool InitializeServerSocketLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void AcceptPoll(int server_fd, int stop_fd, int& client_fd,
+                  sockaddr_l2& client_addr, socklen_t& client_len);
 
-  // <server_fd, <client_fd, peripheral_id>>
-  absl::flat_hash_map<int, std::pair<int,api::ble::BlePeripheral::UniqueId>> accepted_fds_;
+  absl::Mutex mutex_;
+  bool closed_ ABSL_GUARDED_BY(mutex_) = false;
+  absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
+  int psm_ = 0;
+  int server_fd_ ABSL_GUARDED_BY(mutex_) = -1;
+  int stop_pipe_[2] ABSL_GUARDED_BY(mutex_) = {-1, -1};  // read [0], write [1]
 };
 
 }  // namespace linux
