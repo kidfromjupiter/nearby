@@ -32,7 +32,7 @@ ThreadPool::ThreadPool(size_t max_pool_size)
 ThreadPool::~ThreadPool() { ShutDown(); }
 
 bool ThreadPool::Start() {
-  shut_down_.store(false, std::memory_order_acquire);
+  shut_down_.store(false, std::memory_order_release);
 
   auto runner = [this]() {
     while (true) {
@@ -87,7 +87,7 @@ bool ThreadPool::Run(Runnable &&task) {
 void ThreadPool::ShutDown() {
   {
     absl::MutexLock l(&tasks_mutex_);
-    shut_down_.store(true, std::memory_order_acquire);
+    shut_down_.store(true, std::memory_order_relaxed);
   }
   {
     absl::ReaderMutexLock l(&threads_mutex_);
