@@ -158,6 +158,8 @@ class BleV2Medium final : public api::ble::BleMedium {
 
   std::unique_ptr<bluez::LEAdvertisementManager> adv_manager_;
 
+    int psm_;
+
   absl::Mutex cur_adv_mutex_;
   std::unique_ptr<bluez::LEAdvertisement> cur_adv_
       ABSL_GUARDED_BY(cur_adv_mutex_);

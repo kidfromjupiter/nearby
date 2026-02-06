@@ -48,8 +48,7 @@ class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
   void SetCloseNotifier(absl::AnyInvocable<void()> notifier);
 
  private:
-  mutable absl::Mutex mutex_;
-  absl::CondVar cond_;
+  absl::Mutex mutex_;
   int psm_ = 0;
   int server_fd_ = -1;
   int stop_pipe_[2] = {-1, -1};   // read end [0], write end [1]

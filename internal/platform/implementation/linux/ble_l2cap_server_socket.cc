@@ -72,12 +72,13 @@ void BleL2capServerSocket::AcceptPoll(int& client_fd, sockaddr_l2& client_addr, 
     }
 
     // Stop requested
-if (fds[1].revents & POLLIN) {
-  DrainFd(stop_pipe_[0]);
-  client_fd = -1;
-  errno = EINTR;              // optional: helps caller treat as "interrupted"
-  return;                     // <-- THIS is the key
-}
+    if (fds[1].revents & POLLIN) {
+      absl::MutexLock l(&mutex_);
+      DrainFd(stop_pipe_[0]);
+      client_fd = -1;
+      errno = EINTR;              // optional: helps caller treat as "interrupted"
+      return;                     // <-- THIS is the key
+    }
 
     // Listen socket error/hangup
     if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
@@ -106,10 +107,13 @@ if (fds[1].revents & POLLIN) {
   }
 }
 std::unique_ptr<api::ble::BleL2capSocket> BleL2capServerSocket::Accept() {
-    Prng prng;
-    psm_ = 0x80 + (prng.NextUint32() % 0x80);
+  // blocking accept until the previous server_fd_ is closed.
+  // We need to keep accepting connections on the same psm. That's why we do this
+  absl::MutexLock lock(&mutex_);
+  auto idle = [this] {return server_fd_ == -1;};
+  mutex_.Await(absl::Condition(&idle));
 
-    server_fd_ = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+  server_fd_ = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
     if (server_fd_ < 0) {
       LOG(ERROR) << "Failed to create L2CAP server socket: "
                  << std::strerror(errno);
@@ -220,6 +224,7 @@ Exception BleL2capServerSocket::Close() {
   LOG(ERROR) << __func__ << ": l2cap server socket closed";
   return {Exception::kSuccess};
 }
+
 
 
 }  // namespace linux

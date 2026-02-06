@@ -65,6 +65,11 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
     adv_manager_(std::make_unique<bluez::LEAdvertisementManager>(*system_bus_,
                                                                  adapter)),
     cur_adv_(nullptr) {
+
+  // generating psm value for l2cap socket
+  Prng prng;
+  psm_ = 0x80 + (prng.NextUint32() % 0x80);
+
   if (adv_monitor_manager_) {
     LOG(INFO)
         << __func__
@@ -464,9 +469,7 @@ BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
   LOG(INFO) << __func__ << ": Opening L2CAP server socket for service "
             << service_id;
 
-  Prng prng;
-  auto psm = 0x80 + (prng.NextUint32() % 0x80);
-  auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm);
+  auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm_);
 
   return server_socket;
 }
