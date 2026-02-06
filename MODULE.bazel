@@ -118,28 +118,33 @@ filegroup(
 )
 
 # Create a repo that exposes system-installed sdbus-c++ and libsystemd to Bazel.
+#
+# Important portability note:
+# Avoid hardcoding distro-specific library directories (for example
+# /usr/lib/x86_64-linux-gnu vs /usr/lib64). Instead, link by soname and let the
+# system linker/search path resolve the actual shared object location.
 new_local_repository = use_repo_rule(
     "@bazel_tools//tools/build_defs/repo:local.bzl",
     "new_local_repository",
 )
 
-# Fedora/RHEL layout (lib64); see Ubuntu/Debian variant below
 new_local_repository(
     name = "sdbus_cpp",
     path = "/usr",
     build_file_content = """
 package(default_visibility = ["//visibility:public"])
 
-cc_import(
+load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(
     name = "sdbus_cpp",
-    shared_library = "lib/x86_64-linux-gnu/libsdbus-c++.so",
     hdrs = glob(["include/sdbus-c++/**/*.h*"]),
     includes = ["include"],
+    linkopts = ["-lsdbus-c++"],
 )
 
-cc_import(
+cc_library(
     name = "libsystemd",
-    shared_library = "lib/x86_64-linux-gnu/libsystemd.so",
+    linkopts = ["-lsystemd"],
 )
 """,
 )

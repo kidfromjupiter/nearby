@@ -13,6 +13,7 @@
 # limitations under the License.
 licenses(["notice"])
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 cc_library(
     name = "types",
     textual_hdrs = glob(["**/*.h"]),

@@ -16,6 +16,7 @@
 
 licenses(["notice"])
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 #refresh_compile_commands(
 #    name = "refresh_compile_commands",
 #

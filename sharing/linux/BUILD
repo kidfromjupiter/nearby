@@ -13,6 +13,30 @@
 # limitations under the License.
 
 licenses(["notice"])
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
+cc_library(
+    name = "nearby_connections_service_linux",
+    srcs = ["nearby_connections_service_linux.cc"],
+    hdrs = [
+        "nearby_connections_service_linux.h",
+        "//sharing:nearby_connections_service.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//connections:core",
+        "//connections:core_types",
+        "//internal/base:file_path",
+        "//internal/platform:base",
+        "//internal/platform:logging",
+        "//internal/platform:mac_address",
+        "//sharing:connection_types",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
+    ],
+)
 
 cc_library(
     name = "nearby_sharing_service_linux",
