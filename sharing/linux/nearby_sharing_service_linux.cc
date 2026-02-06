@@ -356,10 +356,10 @@ void NearbySharingServiceLinux::SendAttachments(
   }
 
   TransferState transfer_state;
-  transfer_state.attachments = *attachment_container;
+  transfer_state.attachments = std::move(*attachment_container);
   transfer_state.callback = callback;
   transfer_state.is_incoming = false;
-  active_transfers_[*endpoint_id] = transfer_state;
+  active_transfers_[*endpoint_id] = std::move(transfer_state);
 
   TransferMetadata metadata =
       TransferMetadataBuilder().set_status(TransferMetadata::Status::kConnecting)
@@ -368,7 +368,8 @@ void NearbySharingServiceLinux::SendAttachments(
               attachment_container->GetAttachmentCount())
           .build();
   if (auto share_target = GetShareTarget(*endpoint_id)) {
-    NotifyTransferUpdate(*share_target, transfer_state, metadata);
+    NotifyTransferUpdate(*share_target, active_transfers_[*endpoint_id],
+                         metadata);
   }
 
   connections::ConnectionOptions options;
@@ -903,13 +904,13 @@ void NearbySharingServiceLinux::HandleIncomingConnectionInitiated(
   transfer_state.attachments = AttachmentContainer();
   transfer_state.callback = PickReceiveTransferCallback();
   transfer_state.is_incoming = true;
-  active_transfers_[endpoint_id] = transfer_state;
+  active_transfers_[endpoint_id] = std::move(transfer_state);
 
   TransferMetadata metadata = TransferMetadataBuilder()
                                   .set_status(TransferMetadata::Status::kAwaitingLocalConfirmation)
                                   .set_progress(0)
                                   .build();
-  NotifyTransferUpdate(target, transfer_state, metadata);
+  NotifyTransferUpdate(target, active_transfers_[endpoint_id], metadata);
 }
 
 void NearbySharingServiceLinux::HandleOutgoingConnectionInitiated(
@@ -965,7 +966,7 @@ void NearbySharingServiceLinux::HandleConnectionAccepted(
       const auto& file_attachment = attachments.GetFileAttachments()[0];
       if (file_attachment.file_path().has_value()) {
         std::string file_path = file_attachment.file_path()->ToString();
-        nearby::InputFile input_file(file_path, file_attachment.size());
+        nearby::InputFile input_file(file_path);
         payload = std::make_unique<connections::Payload>(
             std::string(file_attachment.parent_folder()),
             std::string(file_attachment.file_name()), std::move(input_file));

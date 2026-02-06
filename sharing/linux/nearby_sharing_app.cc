@@ -258,8 +258,6 @@ class NearbySharingApp {
       return;
     }
     
-    auto attachment_container = std::make_unique<AttachmentContainer>();
-    
     // Use the constructor that accepts size
     std::string file_name = path.GetFileName().ToString();
     std::string mime_type = "";  // Will be auto-detected from extension
@@ -277,8 +275,11 @@ class NearbySharingApp {
     
     // Set the file path after construction
     file_attachment.set_file_path(path);
-    
-    attachment_container->AddFileAttachment(std::move(file_attachment));
+
+    auto attachment_container = AttachmentContainer::Builder()
+                                    .AddFileAttachment(
+                                        std::move(file_attachment))
+                                    .Build();
     
     service_->SendAttachments(
         target_id,
@@ -298,14 +299,15 @@ class NearbySharingApp {
     std::cout << "Target ID: " << target_id << std::endl;
     std::cout << "Text: " << text << std::endl;
     
-    auto attachment_container = std::make_unique<AttachmentContainer>();
-    
-    attachment_container->AddTextAttachment(TextAttachment(
-        nearby::sharing::service::proto::TextMetadata::TEXT,
-        text,
-        std::nullopt, // text_title
-        std::nullopt  // mime_type
-    ));
+    auto attachment_container = AttachmentContainer::Builder()
+                                    .AddTextAttachment(TextAttachment(
+                                        nearby::sharing::service::proto::
+                                            TextMetadata::TEXT,
+                                        text,
+                                        std::nullopt,  // text_title
+                                        std::nullopt   // mime_type
+                                        ))
+                                    .Build();
     
     service_->SendAttachments(
         target_id,
