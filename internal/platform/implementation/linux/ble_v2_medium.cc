@@ -468,8 +468,6 @@ BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
   auto psm = 0x80 + (prng.NextUint32() % 0x80);
   auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm);
 
-  LOG(INFO) << __func__ << ": L2CAP server socket created with PSM: "
-            << server_socket->GetPSM();
   return server_socket;
 }
 

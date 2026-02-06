@@ -124,8 +124,6 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   if (size <= 0) {
     return ExceptionOr<ByteArray>(ByteArray{});
   }
-  LOG(INFO) << "Reading";
-
   auto poller = Poller::CreateOutputPoller(fd);
 
   while (true) {
@@ -144,12 +142,10 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
 
     if (fd_.load() != fd) return {Exception::kIo};
     ssize_t n = ::recv(fd, buffer.data(), buffer.size(), 0);
-    LOG(INFO)<< "Received something";
     if (n < 0) {
       if (errno == EINTR) continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
       if (errno == EBADF) {
-        LOG(INFO) << __func__ << ": socket was closed during read";
         return {Exception::kIo};
       }
       LOG(ERROR) << __func__ << ": error reading data on bluetooth socket: "
@@ -160,7 +156,6 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
     //   LOG(INFO) << __func__ << ": socket closed (EOF)";
     //   return {Exception::kIo};
     // }
-    LOG(INFO)<< "Got this many "<< static_cast<size_t>(n);
 
     buffer.resize(static_cast<size_t>(n));
 
@@ -172,9 +167,6 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
     // close to l2test semantics (one recv consumes one frame).
     size_t to_return = std::min(static_cast<size_t>(size), buffer.size());
     std::string out = buffer.substr(0, to_return);
-    LOG(INFO) << __func__ << ": returning " << to_return
-              << " bytes from SDU size " << buffer.size() << ", data=0x"
-              << HexPreview(out.data(), out.size());
     return ExceptionOr<ByteArray>(ByteArray(std::move(out)));
   }
 }
@@ -204,10 +196,6 @@ Exception BleL2capOutputStream::Write(absl::string_view data) {
   if (max_chunk_size == 0) {
     max_chunk_size = kDefaultBleL2capMtu;
   }
-
-  LOG(INFO) << "BleL2capOutputStream::Write bytes=" << data.size()
-            << " mtu=" << max_chunk_size
-            << " data=0x" << HexPreview(data.data(), data.size());
 
   size_t offset = 0;
   while (offset < data.size()) {
@@ -280,9 +268,6 @@ BleL2capSocket::BleL2capSocket(int fd,
       input_stream_(std::make_unique<BleL2capInputStream>(fd)),
       output_stream_(std::make_unique<BleL2capOutputStream>(fd))
 {
-  LOG(INFO) << "fd_ " << fd;
-  LOG(INFO) << "input_stream_ :" << input_stream_.get();
-  LOG(INFO) << "output_stream_ :" << output_stream_.get();
   struct l2cap_options opts;
   size_t snd_mtu = GetSocketMtu(fd, BT_SNDMTU);
   size_t rcv_mtu = GetSocketMtu(fd, BT_RCVMTU);
