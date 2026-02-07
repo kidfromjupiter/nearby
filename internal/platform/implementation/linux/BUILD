@@ -153,6 +153,10 @@ cc_library(
         "crypto.cc",
     ],
     visibility = ["//visibility:public"],
+#    linkopts= [
+#        '-lssl',
+#        "-lcrypto"
+#    ],
     deps = [
         "//internal/platform:base",
         "//internal/platform/implementation:types",

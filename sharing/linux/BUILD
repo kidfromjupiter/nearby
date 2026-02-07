@@ -30,6 +30,9 @@ cc_library(
         "//internal/platform:base",
         "//internal/platform:logging",
         "//internal/platform:mac_address",
+        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation/linux",
+#        "//internal/platform/implementation/linux:crypto",
         "//sharing:connection_types",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings:string_view",
@@ -38,6 +41,52 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "nearby_connections_qt_facade",
+    srcs = ["nearby_connections_qt_facade.cc"],
+    hdrs = ["nearby_connections_qt_facade.h"],
+    alwayslink = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":nearby_connections_service_linux",
+        "//internal/base:file_path",
+    ],
+)
+
+cc_binary(
+    name = "nearby_connections_service_linux_shared",
+    linkshared = True,
+    srcs = [
+        "nearby_connections_qt_facade.cc",
+        "nearby_connections_qt_facade.h",
+    ],
+    visibility = ["//visibility:public"],
+    linkopts = [
+        "-Wl,--exclude-libs,ALL",
+    ],
+    deps = [
+        ":nearby_connections_service_linux",
+        "//internal/base:file_path",
+        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation/linux",
+    ],
+)
+
+
+cc_binary(
+    name = "app",
+    srcs = [
+        "qml_tray_app/main.cpp",
+        "qml_tray_app/nearby_tray_controller.cc"
+            ],
+    copts = [
+        "-I/usr/include/qt6",
+        "-I/usr/include/qt6/QtCore",
+    ],
+    linkopts = [
+        "-lQt6Core",
+    ],
+)
 cc_library(
     name = "nearby_sharing_service_linux",
     srcs = [
@@ -86,6 +135,10 @@ cc_library(
         "//sharing/local_device_data:nearby_share_local_device_data_manager.h",
     ],
     visibility = ["//visibility:public"],
+    linkopts=[
+        "-lssl",
+        "-lcrypto"
+    ],
     deps = [
         "//connections:core",
         "//connections:core_types",
@@ -98,7 +151,7 @@ cc_library(
         "//sharing:attachments",
         "//sharing:types",
         "//sharing/proto:share_cc_proto",
-        "@boringssl//:crypto",
+#        "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
     ],
 )
