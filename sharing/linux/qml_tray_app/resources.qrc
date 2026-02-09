@@ -2,4 +2,8 @@
   <qresource prefix="/qml">
     <file>Main.qml</file>
   </qresource>
+  <qresource prefix="/icons">
+    <file>tray_icon.png</file>
+    <file alias="tray_icon-symbolic.svg">tray_icon-symbolic.svg</file>
+  </qresource>
 </RCC>

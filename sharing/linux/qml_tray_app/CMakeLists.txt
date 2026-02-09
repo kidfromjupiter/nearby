@@ -9,6 +9,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2)
+include(GNUInstallDirs)
 
 set(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../..")
 get_filename_component(REPO_ROOT "${REPO_ROOT}" ABSOLUTE)
@@ -128,5 +129,24 @@ add_dependencies(nearby_qml_tray_app bazel_nearby_connections_service_linux)
 
 set_target_properties(nearby_qml_tray_app PROPERTIES
   BUILD_RPATH "${BAZEL_BIN_DIR}/sharing/linux"
-  INSTALL_RPATH "${BAZEL_BIN_DIR}/sharing/linux"
+  INSTALL_RPATH "$ORIGIN"
 )
+
+install(TARGETS nearby_qml_tray_app
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+
+install(FILES "${BAZEL_NEARBY_SO}"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+
+qt_generate_deploy_qml_app_script(
+  TARGET nearby_qml_tray_app
+  OUTPUT_SCRIPT nearby_qml_tray_app_deploy_script
+)
+install(SCRIPT "${nearby_qml_tray_app_deploy_script}")
+
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_NAME "nearby_qml_tray_app")
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+include(CPack)

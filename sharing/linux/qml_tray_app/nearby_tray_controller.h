@@ -26,6 +26,7 @@ class NearbyTrayController : public QObject {
   Q_PROPERTY(bool wifiLanEnabled READ wifiLanEnabled WRITE setWifiLanEnabled NOTIFY wifiLanEnabledChanged)
   Q_PROPERTY(bool wifiHotspotEnabled READ wifiHotspotEnabled WRITE setWifiHotspotEnabled NOTIFY wifiHotspotEnabledChanged)
   Q_PROPERTY(bool webRtcEnabled READ webRtcEnabled WRITE setWebRtcEnabled NOTIFY webRtcEnabledChanged)
+  Q_PROPERTY(bool autoAcceptIncoming READ autoAcceptIncoming WRITE setAutoAcceptIncoming NOTIFY autoAcceptIncomingChanged)
   Q_PROPERTY(QString connectionStrategy READ connectionStrategy WRITE setConnectionStrategy NOTIFY connectionStrategyChanged)
   Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
   Q_PROPERTY(bool running READ running NOTIFY runningChanged)
@@ -67,6 +68,9 @@ class NearbyTrayController : public QObject {
   bool webRtcEnabled() const { return web_rtc_enabled_; }
   void setWebRtcEnabled(bool enabled);
 
+  bool autoAcceptIncoming() const { return auto_accept_incoming_; }
+  void setAutoAcceptIncoming(bool enabled);
+
   QString connectionStrategy() const { return connection_strategy_; }
   void setConnectionStrategy(const QString& strategy);
 
@@ -105,6 +109,7 @@ class NearbyTrayController : public QObject {
   void wifiLanEnabledChanged();
   void wifiHotspotEnabledChanged();
   void webRtcEnabledChanged();
+  void autoAcceptIncomingChanged();
   void connectionStrategyChanged();
   void statusMessageChanged();
   void runningChanged();
@@ -122,6 +127,8 @@ class NearbyTrayController : public QObject {
  private:
   void startSendMode();
   void startReceiveMode();
+  void LoadSettings();
+  void SaveSettings() const;
 
   std::vector<uint8_t> BuildEndpointInfo() const;
 
@@ -186,6 +193,7 @@ class NearbyTrayController : public QObject {
   bool wifi_lan_enabled_ = true;
   bool wifi_hotspot_enabled_ = true;
   bool web_rtc_enabled_ = false;
+  bool auto_accept_incoming_ = false;
 
   QString log_path_ = QStringLiteral("/tmp/nearby_qml_tray.log");
   QFile log_file_;

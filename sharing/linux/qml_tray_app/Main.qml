@@ -185,6 +185,14 @@ ApplicationWindow {
                         onActivated: nearbyController.mode = currentText
                     }
 
+                    Label { text: "Incoming" }
+                    CheckBox {
+                        id: autoAcceptIncomingCheckbox
+                        text: "Auto accept"
+                        checked: nearbyController.autoAcceptIncoming
+                        onCheckedChanged: nearbyController.autoAcceptIncoming = checked
+                    }
+
                     ColumnLayout {
                         anchors.leftMargin: 30
                         anchors.rightMargin: 30

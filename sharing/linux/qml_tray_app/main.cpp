@@ -27,7 +27,20 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  QIcon tray_icon = QIcon::fromTheme(QStringLiteral("network-wireless"));
+  // Try custom symbolic icon first (will auto-theme if available)
+  QIcon tray_icon = QIcon(QStringLiteral(":/icons/tray_icon-symbolic.svg"));
+  
+  // Fallback to system themed icon
+  if (tray_icon.isNull()) {
+    tray_icon = QIcon::fromTheme(QStringLiteral("network-wireless-symbolic"));
+  }
+  
+  // Fallback to custom PNG icon
+  if (tray_icon.isNull()) {
+    tray_icon = QIcon(QStringLiteral(":/icons/tray_icon.png"));
+  }
+  
+  // Final fallback
   if (tray_icon.isNull()) {
     tray_icon = app.windowIcon();
   }

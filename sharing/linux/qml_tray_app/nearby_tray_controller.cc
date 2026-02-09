@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QSettings>
 #include <QSysInfo>
 #include <QTextStream>
 
@@ -91,6 +92,7 @@ NearbyTrayController::NearbyTrayController(QObject* parent) : QObject(parent) {
   if (!host.isEmpty()) {
     device_name_ = host;
   }
+  LoadSettings();
   ReopenLogFile();
   LogLine(QStringLiteral("Started Nearby tray controller"));
 }
@@ -100,6 +102,84 @@ NearbyTrayController::~NearbyTrayController() {
   if (log_file_.isOpen()) {
     log_file_.close();
   }
+}
+
+void NearbyTrayController::LoadSettings() {
+  QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlTrayApp"));
+
+  const QString stored_mode =
+      settings.value(QStringLiteral("mode"), mode_).toString();
+  mode_ = stored_mode.trimmed().toLower() == QStringLiteral("send")
+              ? QStringLiteral("Send")
+              : QStringLiteral("Receive");
+
+  const QString stored_device_name =
+      settings.value(QStringLiteral("deviceName"), device_name_)
+          .toString()
+          .trimmed();
+  if (!stored_device_name.isEmpty()) {
+    device_name_ = stored_device_name;
+  }
+
+  const QString stored_service_id =
+      settings
+          .value(QStringLiteral("serviceId"),
+                 QString::fromStdString(service_id_))
+          .toString()
+          .trimmed();
+  if (!stored_service_id.isEmpty()) {
+    service_id_ = stored_service_id.toStdString();
+  }
+
+  mediums_mode_ = NormalizeMediumsMode(
+      settings.value(QStringLiteral("mediumsMode"), mediums_mode_).toString());
+  bluetooth_enabled_ = settings
+                           .value(QStringLiteral("bluetoothEnabled"),
+                                  bluetooth_enabled_)
+                           .toBool();
+  ble_enabled_ = settings.value(QStringLiteral("bleEnabled"), ble_enabled_).toBool();
+  wifi_lan_enabled_ = settings
+                          .value(QStringLiteral("wifiLanEnabled"),
+                                 wifi_lan_enabled_)
+                          .toBool();
+  wifi_hotspot_enabled_ = settings
+                              .value(QStringLiteral("wifiHotspotEnabled"),
+                                     wifi_hotspot_enabled_)
+                              .toBool();
+  web_rtc_enabled_ =
+      settings.value(QStringLiteral("webRtcEnabled"), web_rtc_enabled_).toBool();
+  auto_accept_incoming_ = settings
+                              .value(QStringLiteral("autoAcceptIncoming"),
+                                     auto_accept_incoming_)
+                              .toBool();
+  connection_strategy_ = NormalizeConnectionStrategy(
+      settings
+          .value(QStringLiteral("connectionStrategy"), connection_strategy_)
+          .toString());
+
+  const QString stored_log_path =
+      settings.value(QStringLiteral("logPath"), log_path_).toString().trimmed();
+  if (!stored_log_path.isEmpty()) {
+    log_path_ = stored_log_path;
+  }
+}
+
+void NearbyTrayController::SaveSettings() const {
+  QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlTrayApp"));
+  settings.setValue(QStringLiteral("mode"), mode_);
+  settings.setValue(QStringLiteral("deviceName"), device_name_);
+  settings.setValue(QStringLiteral("serviceId"),
+                    QString::fromStdString(service_id_));
+  settings.setValue(QStringLiteral("mediumsMode"), mediums_mode_);
+  settings.setValue(QStringLiteral("bluetoothEnabled"), bluetooth_enabled_);
+  settings.setValue(QStringLiteral("bleEnabled"), ble_enabled_);
+  settings.setValue(QStringLiteral("wifiLanEnabled"), wifi_lan_enabled_);
+  settings.setValue(QStringLiteral("wifiHotspotEnabled"), wifi_hotspot_enabled_);
+  settings.setValue(QStringLiteral("webRtcEnabled"), web_rtc_enabled_);
+  settings.setValue(QStringLiteral("autoAcceptIncoming"), auto_accept_incoming_);
+  settings.setValue(QStringLiteral("connectionStrategy"), connection_strategy_);
+  settings.setValue(QStringLiteral("logPath"), log_path_);
+  settings.sync();
 }
 
 void NearbyTrayController::setMode(const QString& mode) {
@@ -112,6 +192,7 @@ void NearbyTrayController::setMode(const QString& mode) {
   }
   mode_ = normalized;
   emit modeChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Mode changed to %1").arg(mode_));
   if (running_) {
     stop();
@@ -126,6 +207,7 @@ void NearbyTrayController::setDeviceName(const QString& device_name) {
   }
   device_name_ = trimmed;
   emit deviceNameChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Device name changed to %1").arg(device_name_));
 }
 
@@ -136,6 +218,7 @@ void NearbyTrayController::setServiceId(const QString& service_id) {
   }
   service_id_ = value;
   emit serviceIdChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Service ID changed to %1")
               .arg(QString::fromStdString(service_id_)));
 }
@@ -147,6 +230,7 @@ void NearbyTrayController::setMediumsMode(const QString& mode) {
   }
   mediums_mode_ = normalized;
   emit mediumsModeChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Mediums mode changed to %1").arg(mediums_mode_));
   if (running_) {
     stop();
@@ -160,6 +244,7 @@ void NearbyTrayController::setBluetoothEnabled(bool enabled) {
   }
   bluetooth_enabled_ = enabled;
   emit bluetoothEnabledChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Bluetooth %1").arg(enabled ? "enabled" : "disabled"));
   if (running_) {
     stop();
@@ -173,6 +258,7 @@ void NearbyTrayController::setBleEnabled(bool enabled) {
   }
   ble_enabled_ = enabled;
   emit bleEnabledChanged();
+  SaveSettings();
   LogLine(QStringLiteral("BLE %1").arg(enabled ? "enabled" : "disabled"));
   if (running_) {
     stop();
@@ -186,6 +272,7 @@ void NearbyTrayController::setWifiLanEnabled(bool enabled) {
   }
   wifi_lan_enabled_ = enabled;
   emit wifiLanEnabledChanged();
+  SaveSettings();
   LogLine(QStringLiteral("WiFi LAN %1").arg(enabled ? "enabled" : "disabled"));
   if (running_) {
     stop();
@@ -199,6 +286,7 @@ void NearbyTrayController::setWifiHotspotEnabled(bool enabled) {
   }
   wifi_hotspot_enabled_ = enabled;
   emit wifiHotspotEnabledChanged();
+  SaveSettings();
   LogLine(QStringLiteral("WiFi Hotspot %1").arg(enabled ? "enabled" : "disabled"));
   if (running_) {
     stop();
@@ -212,11 +300,23 @@ void NearbyTrayController::setWebRtcEnabled(bool enabled) {
   }
   web_rtc_enabled_ = enabled;
   emit webRtcEnabledChanged();
+  SaveSettings();
   LogLine(QStringLiteral("WebRTC %1").arg(enabled ? "enabled" : "disabled"));
   if (running_) {
     stop();
     start();
   }
+}
+
+void NearbyTrayController::setAutoAcceptIncoming(bool enabled) {
+  if (auto_accept_incoming_ == enabled) {
+    return;
+  }
+  auto_accept_incoming_ = enabled;
+  emit autoAcceptIncomingChanged();
+  SaveSettings();
+  LogLine(QStringLiteral("Auto-accept incoming connections %1")
+              .arg(enabled ? "enabled" : "disabled"));
 }
 
 void NearbyTrayController::setConnectionStrategy(const QString& strategy) {
@@ -226,6 +326,7 @@ void NearbyTrayController::setConnectionStrategy(const QString& strategy) {
   }
   connection_strategy_ = normalized;
   emit connectionStrategyChanged();
+  SaveSettings();
   LogLine(QStringLiteral("Connection strategy changed to %1")
               .arg(connection_strategy_));
   if (running_) {
@@ -241,6 +342,7 @@ void NearbyTrayController::setLogPath(const QString& path) {
   }
   log_path_ = trimmed;
   emit logPathChanged();
+  SaveSettings();
   ReopenLogFile();
   LogLine(QStringLiteral("Log path changed to %1").arg(log_path_));
 }
@@ -562,6 +664,9 @@ NearbyTrayController::BuildConnectionListener() {
                 AddPendingConnection(endpoint);
                 SetStatus(
                     QStringLiteral("Incoming connection from %1").arg(peer));
+                if (auto_accept_incoming_) {
+                  acceptIncoming(endpoint);
+                }
               } else {
                 acceptIncoming(endpoint);
               }

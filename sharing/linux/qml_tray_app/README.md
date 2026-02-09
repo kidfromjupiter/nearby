@@ -72,3 +72,41 @@ If you already have Bazel + Qt 6 dev dependencies installed:
 ```bash
 ./sharing/linux/qml_tray_app/build.sh
 ```
+
+## Bundle `libnearby_connections_service_linux_shared.so` with the app
+
+From `sharing/linux/qml_tray_app`:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/dist"
+cmake --build build -j
+cmake --install build
+```
+
+Bundle output:
+
+- `dist/bin/nearby_qml_tray_app`
+- `dist/bin/libnearby_connections_service_linux_shared.so`
+
+The app is installed with `INSTALL_RPATH=$ORIGIN`, so it resolves the Nearby
+shared library from the same folder in the bundle.
+
+## Build a distributable `.zip` (includes runtime dependencies)
+
+From `sharing/linux/qml_tray_app`:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+cpack --config build/CPackConfig.cmake -G ZIP
+```
+
+Output:
+
+- `build/nearby_qml_tray_app-Linux-x86_64.zip`
+
+This zip is created from the CMake install tree and includes:
+
+- `nearby_qml_tray_app`
+- `libnearby_connections_service_linux_shared.so`
+- Qt runtime libs/plugins/QML imports discovered by Qt deploy tooling
