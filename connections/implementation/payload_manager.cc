@@ -188,10 +188,14 @@ bool PayloadManager::SendPayloadLoop(
     for (const auto& endpoint_id : available_endpoint_ids) {
       if (std::find(failed_endpoint_ids.begin(), failed_endpoint_ids.end(),
                     endpoint_id) == failed_endpoint_ids.end()) {
-        if (!WaitForReceivedAck(client, endpoint_id, pending_payload,
-                                payload_header, next_chunk_offset,
-                                is_last_chunk)) {
-          continue;
+        const bool should_wait_for_received_ack =
+            is_last_chunk && client->IsPayloadReceivedAckEnabled(endpoint_id);
+        if (should_wait_for_received_ack) {
+          if (!WaitForReceivedAck(client, endpoint_id, pending_payload,
+                                  payload_header, next_chunk_offset,
+                                  is_last_chunk)) {
+            continue;
+          }
         }
 
         HandleSuccessfulOutgoingChunk(
