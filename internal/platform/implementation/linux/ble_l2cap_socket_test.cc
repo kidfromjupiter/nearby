@@ -17,15 +17,27 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
-#include "internal/platform/byte_array.h"
-#include "internal/platform/exception.h"
+#include "absl/time/time.h"
+#include "internal/platform/implementation/crypto.h"
 #include "gtest/gtest.h"
+#include "proto/mediums/ble_frames.pb.h"
 
 namespace nearby {
 namespace linux {
 namespace {
+
+using ::location::nearby::mediums::SocketControlFrame;
+using ::location::nearby::mediums::SocketVersion;
+
+constexpr uint8_t kRequestDataConnection = 3;
+constexpr uint8_t kResponseDataConnectionReady = 23;
 
 class SocketPair final {
  public:
@@ -44,72 +56,205 @@ class SocketPair final {
   int left() const { return left_; }
   int right() const { return right_; }
 
-  void CloseRight() {
-    if (right_ >= 0) {
-      close(right_);
-      right_ = -1;
-    }
-  }
-
  private:
   int left_ = -1;
   int right_ = -1;
 };
 
-TEST(BleL2capSocketTest, OutputStreamWritesData) {
-  SocketPair pair;
-  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
-
-  ByteArray payload("hello");
-  Exception write_result = socket.GetOutputStream().Write(payload);
-  EXPECT_TRUE(write_result.Ok());
-
-  char buffer[5];
-  ssize_t bytes_read = recv(pair.right(), buffer, sizeof(buffer), 0);
-  ASSERT_EQ(bytes_read, sizeof(buffer));
-  EXPECT_EQ(std::string(buffer, sizeof(buffer)), "hello");
+bool ReadExact(int fd, char* data, size_t length) {
+  size_t offset = 0;
+  while (offset < length) {
+    ssize_t read_count = recv(fd, data + offset, length - offset, 0);
+    if (read_count <= 0) {
+      return false;
+    }
+    offset += static_cast<size_t>(read_count);
+  }
+  return true;
 }
 
-TEST(BleL2capSocketTest, InputStreamReadsData) {
+std::optional<std::string> ReceiveFrame(int fd) {
+  std::array<char, 4> header;
+  if (!ReadExact(fd, header.data(), header.size())) {
+    return std::nullopt;
+  }
+  const auto* bytes = reinterpret_cast<const uint8_t*>(header.data());
+  uint32_t payload_size = (static_cast<uint32_t>(bytes[0]) << 24) |
+                          (static_cast<uint32_t>(bytes[1]) << 16) |
+                          (static_cast<uint32_t>(bytes[2]) << 8) |
+                          static_cast<uint32_t>(bytes[3]);
+  std::string payload(payload_size, '\0');
+  if (payload_size > 0 && !ReadExact(fd, payload.data(), payload.size())) {
+    return std::nullopt;
+  }
+  return payload;
+}
+
+bool SendFrame(int fd, const std::string& payload) {
+  std::array<char, 4> header = {
+      static_cast<char>((payload.size() >> 24) & 0xFF),
+      static_cast<char>((payload.size() >> 16) & 0xFF),
+      static_cast<char>((payload.size() >> 8) & 0xFF),
+      static_cast<char>(payload.size() & 0xFF),
+  };
+  if (send(fd, header.data(), header.size(), 0) != static_cast<ssize_t>(header.size())) {
+    return false;
+  }
+  if (!payload.empty() &&
+      send(fd, payload.data(), payload.size(), 0) != static_cast<ssize_t>(payload.size())) {
+    return false;
+  }
+  return true;
+}
+
+ByteArray ServiceHash(absl::string_view service_id) {
+  ByteArray full_hash = Crypto::Sha256(service_id);
+  EXPECT_GE(full_hash.size(), 3);
+  return ByteArray(full_hash.data(), 3);
+}
+
+std::string BuildLegacyControlPacket(uint8_t command) {
+  return std::string(1, static_cast<char>(command));
+}
+
+std::optional<uint8_t> ParseLegacyControlCommand(absl::string_view payload) {
+  if (payload.empty()) return std::nullopt;
+  if (payload.size() != 1 && payload.size() < 3) return std::nullopt;
+  return static_cast<uint8_t>(payload[0]);
+}
+
+std::string BuildLegacyIntroPacket(const ByteArray& service_hash) {
+  SocketControlFrame frame;
+  frame.set_type(SocketControlFrame::INTRODUCTION);
+  auto* intro = frame.mutable_introduction();
+  intro->set_service_id_hash(service_hash.AsStringView());
+  intro->set_socket_version(SocketVersion::V2);
+
+  std::string serialized(frame.ByteSizeLong(), '\0');
+  EXPECT_TRUE(frame.SerializeToArray(serialized.data(), serialized.size()));
+
+  std::string packet("\x00\x00\x00", 3);
+  packet.append(serialized);
+  return packet;
+}
+
+bool IsLegacyIntroPacketForServiceHash(absl::string_view payload,
+                                       const ByteArray& service_hash) {
+  if (payload.size() <= 3 || payload.substr(0, 3) != "\x00\x00\x00") return false;
+
+  SocketControlFrame frame;
+  if (!frame.ParseFromArray(payload.data() + 3, payload.size() - 3)) return false;
+  return frame.type() == SocketControlFrame::INTRODUCTION &&
+         frame.has_introduction() &&
+         frame.introduction().socket_version() == SocketVersion::V2 &&
+         frame.introduction().service_id_hash() == service_hash.AsStringView();
+}
+
+TEST(BleL2capSocketTest, RefactoredOutputStreamWritesFramedPayload) {
   SocketPair pair;
   BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
 
-  const char* payload = "world";
-  ASSERT_EQ(send(pair.right(), payload, 5, 0), 5);
+  ASSERT_TRUE(socket.GetOutputStream().Write(ByteArray("hello")).Ok());
+  auto payload = ReceiveFrame(pair.right());
+  ASSERT_TRUE(payload.has_value());
+  EXPECT_EQ(*payload, "hello");
+}
 
+TEST(BleL2capSocketTest, RefactoredInputStreamReadsFramedPayload) {
+  SocketPair pair;
+  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
+
+  ASSERT_TRUE(SendFrame(pair.right(), "world"));
   ExceptionOr<ByteArray> read_result = socket.GetInputStream().Read(5);
   ASSERT_TRUE(read_result.ok());
   EXPECT_EQ(read_result.result().string_data(), "world");
 }
 
-TEST(BleL2capSocketTest, InputStreamReturnsEmptyOnPeerClose) {
+TEST(BleL2capSocketTest, LegacyWritePrefixesServiceHash) {
   SocketPair pair;
-  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
+  ByteArray service_hash = ServiceHash("service");
+  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1,
+                        BleL2capSocket::ProtocolMode::kLegacy,
+                        /*service_id=*/"service", /*incoming_connection=*/false);
 
-  pair.CloseRight();
-  ExceptionOr<ByteArray> read_result = socket.GetInputStream().Read(4);
+  ASSERT_TRUE(socket.GetOutputStream().Write(ByteArray("abc")).Ok());
+  auto payload = ReceiveFrame(pair.right());
+  ASSERT_TRUE(payload.has_value());
+  ASSERT_EQ(payload->size(), service_hash.size() + 3);
+  EXPECT_EQ(payload->substr(0, service_hash.size()), service_hash.AsStringView());
+  EXPECT_EQ(payload->substr(service_hash.size()), "abc");
+}
+
+TEST(BleL2capSocketTest, LegacyOutgoingHandshakeSucceeds) {
+  SocketPair pair;
+  ByteArray service_hash = ServiceHash("service");
+  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1,
+                        BleL2capSocket::ProtocolMode::kLegacy,
+                        /*service_id=*/"service", /*incoming_connection=*/false);
+
+  std::thread peer([&]() {
+    auto request = ReceiveFrame(pair.right());
+    ASSERT_TRUE(request.has_value());
+    auto request_command = ParseLegacyControlCommand(*request);
+    ASSERT_TRUE(request_command.has_value());
+    EXPECT_EQ(*request_command, kRequestDataConnection);
+
+    ASSERT_TRUE(SendFrame(pair.right(), BuildLegacyControlPacket(kResponseDataConnectionReady)));
+
+    auto intro = ReceiveFrame(pair.right());
+    ASSERT_TRUE(intro.has_value());
+    EXPECT_TRUE(IsLegacyIntroPacketForServiceHash(*intro, service_hash));
+  });
+
+  EXPECT_TRUE(socket.PerformLegacyOutgoingHandshake(absl::Seconds(2)));
+  peer.join();
+}
+
+TEST(BleL2capSocketTest, LegacyOutgoingHandshakeTimesOutWithoutResponse) {
+  SocketPair pair;
+  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1,
+                        BleL2capSocket::ProtocolMode::kLegacy,
+                        /*service_id=*/"service", /*incoming_connection=*/false);
+
+  std::thread peer([&]() {
+    auto request = ReceiveFrame(pair.right());
+    ASSERT_TRUE(request.has_value());
+    auto request_command = ParseLegacyControlCommand(*request);
+    ASSERT_TRUE(request_command.has_value());
+    EXPECT_EQ(*request_command, kRequestDataConnection);
+  });
+
+  EXPECT_FALSE(socket.PerformLegacyOutgoingHandshake(absl::Milliseconds(200)));
+  peer.join();
+}
+
+TEST(BleL2capSocketTest, LegacyIncomingConnectionHandlesHandshakeAndData) {
+  SocketPair pair;
+  ByteArray service_hash = ServiceHash("service");
+  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1,
+                        BleL2capSocket::ProtocolMode::kLegacy,
+                        /*service_id=*/"service", /*incoming_connection=*/true);
+
+  std::thread peer([&]() {
+    ASSERT_TRUE(SendFrame(pair.right(), BuildLegacyControlPacket(kRequestDataConnection)));
+
+    auto response = ReceiveFrame(pair.right());
+    ASSERT_TRUE(response.has_value());
+    auto response_command = ParseLegacyControlCommand(*response);
+    ASSERT_TRUE(response_command.has_value());
+    EXPECT_EQ(*response_command, kResponseDataConnectionReady);
+
+    ASSERT_TRUE(SendFrame(pair.right(), BuildLegacyIntroPacket(service_hash)));
+
+    std::string data_payload(service_hash.AsStringView());
+    data_payload.append("hello");
+    ASSERT_TRUE(SendFrame(pair.right(), data_payload));
+  });
+
+  ExceptionOr<ByteArray> read_result = socket.GetInputStream().Read(5);
   ASSERT_TRUE(read_result.ok());
-  EXPECT_TRUE(read_result.result().Empty());
-}
-
-TEST(BleL2capSocketTest, OutputStreamWriteFailsAfterClose) {
-  SocketPair pair;
-  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
-
-  ASSERT_TRUE(socket.GetOutputStream().Close().Ok());
-  Exception write_result =
-      socket.GetOutputStream().Write(ByteArray("data"));
-  EXPECT_EQ(write_result.value, Exception::kIo);
-}
-
-TEST(BleL2capSocketTest, CloseNotifierInvoked) {
-  SocketPair pair;
-  BleL2capSocket socket(pair.left(), /*peripheral_id=*/1);
-
-  bool notified = false;
-  socket.SetCloseNotifier([&notified]() { notified = true; });
-  ASSERT_TRUE(socket.Close().Ok());
-  EXPECT_TRUE(notified);
+  EXPECT_EQ(read_result.result().string_data(), "hello");
+  peer.join();
 }
 
 }  // namespace

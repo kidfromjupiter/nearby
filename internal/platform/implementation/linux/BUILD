@@ -241,6 +241,8 @@ cc_library(
         "//internal/platform/implementation/linux/generated:types",
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/shared:file",
+        "//proto/mediums:ble_frames_cc_proto",
+        "//connections/implementation/flags:connections_flags",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",

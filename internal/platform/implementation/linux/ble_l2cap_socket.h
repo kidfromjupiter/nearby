@@ -17,9 +17,13 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
+#include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/input_stream.h"
@@ -28,21 +32,23 @@
 namespace nearby {
 namespace linux {
 
+class BleL2capSocket;
+
 class BleL2capInputStream final : public InputStream {
  public:
-  explicit BleL2capInputStream(int fd);
+  explicit BleL2capInputStream(BleL2capSocket* owner);
   ~BleL2capInputStream() override;
 
- ExceptionOr<ByteArray> Read(std::int64_t size) override;
+  ExceptionOr<ByteArray> Read(std::int64_t size) override;
   Exception Close() override;
 
  private:
-  std::atomic<int> fd_{-1};
-  };
+  BleL2capSocket* owner_ = nullptr;
+};
 
 class BleL2capOutputStream final : public OutputStream {
  public:
-  explicit BleL2capOutputStream(int fd);
+  explicit BleL2capOutputStream(BleL2capSocket* owner);
   ~BleL2capOutputStream() override;
 
   Exception Write(absl::string_view data) override;
@@ -50,13 +56,19 @@ class BleL2capOutputStream final : public OutputStream {
   Exception Close() override;
 
  private:
-  mutable absl::Mutex fd_mutex_;
-  std::atomic<int> fd_{-1};
+  BleL2capSocket* owner_ = nullptr;
 };
 
 class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
-  BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id);
+  enum class ProtocolMode {
+    kRefactored,
+    kLegacy,
+  };
+
+  BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
+                 ProtocolMode protocol_mode = ProtocolMode::kRefactored,
+                 std::string service_id = "", bool incoming_connection = false);
   ~BleL2capSocket() override;
 
   InputStream& GetInputStream() override { return *input_stream_; }
@@ -69,16 +81,71 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   }
 
   bool IsClosed() const ABSL_LOCKS_EXCLUDED(mutex_);
+  bool PerformLegacyOutgoingHandshake(absl::Duration timeout);
 
  private:
+  friend class BleL2capInputStream;
+  friend class BleL2capOutputStream;
+
+  enum class LegacyControlCommand : uint8_t {
+    kRequestAdvertisement = 1,
+    kRequestAdvertisementFinish = 2,
+    kRequestDataConnection = 3,
+    kResponseAdvertisement = 21,
+    kResponseServiceIdNotFound = 22,
+    kResponseDataConnectionReady = 23,
+    kResponseDataConnectionFailure = 24,
+  };
+
+  struct ParsedLegacyControlPacket {
+    LegacyControlCommand command;
+    ByteArray data;
+  };
+
+  ExceptionOr<ByteArray> ReadFromSocket(std::int64_t size)
+      ABSL_LOCKS_EXCLUDED(io_mutex_);
+  Exception WriteToSocket(absl::string_view data) ABSL_LOCKS_EXCLUDED(io_mutex_);
+  Exception CloseIo() ABSL_LOCKS_EXCLUDED(io_mutex_);
+
+  bool ReadNextFrame(std::string& payload, std::optional<absl::Duration> timeout)
+      ABSL_LOCKS_EXCLUDED(io_mutex_);
+  bool SendFrame(absl::string_view payload) ABSL_LOCKS_EXCLUDED(io_mutex_);
+  bool SendLegacyControlPacket(LegacyControlCommand command,
+                               const ByteArray& data) ABSL_LOCKS_EXCLUDED(io_mutex_);
+  bool SendLegacyIntroductionPacket() ABSL_LOCKS_EXCLUDED(io_mutex_);
+  bool SendLegacyPacketAckPacket(int received_size) ABSL_LOCKS_EXCLUDED(io_mutex_);
+  std::optional<ParsedLegacyControlPacket> ParseLegacyControlPacket(
+      absl::string_view payload) const;
+  std::optional<ByteArray> ParseLegacyIntroductionPacket(
+      absl::string_view payload) const;
+  bool HandleLegacyIncomingPayload(absl::string_view payload, bool& produced_payload)
+      ABSL_LOCKS_EXCLUDED(io_mutex_);
+
+  static bool IsSupportedLegacyControlCommand(uint8_t command);
+  static const char* LegacyControlCommandToString(LegacyControlCommand command);
+  static ByteArray BuildLegacyControlPacket(LegacyControlCommand command,
+                                            const ByteArray& data);
+
+  bool PollReady(short events, std::optional<absl::Duration> timeout) const;
   void DoClose() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   mutable absl::Mutex mutex_;
+  mutable absl::Mutex io_mutex_;
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
   std::unique_ptr<BleL2capInputStream> input_stream_;
   std::unique_ptr<BleL2capOutputStream> output_stream_;
   api::ble::BlePeripheral::UniqueId peripheral_id_;
   absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
+  std::atomic<int> fd_{-1};
+
+  const ProtocolMode protocol_mode_;
+  const bool incoming_connection_;
+  ByteArray service_id_hash_;
+
+  bool intro_packet_validated_ = false;
+  bool request_data_connection_handled_ = false;
+  std::string wire_buffer_;
+  std::string read_buffer_;
 };
 
 }  // namespace linux

@@ -31,7 +31,9 @@
 // #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "internal/platform/implementation/linux/ble_v2_medium.h"
 
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "absl/types/span.h"
+#include "absl/time/time.h"
 #include "ble_gatt_client.h"
 #include "ble_gatt_server.h"
 #include "ble_l2cap_server_socket.h"
@@ -48,9 +50,21 @@
 #include "internal/platform/implementation/linux/generated/dbus/bluez/le_advertisement_manager_client.h"
 #include "internal/platform/mac_address.h"
 #include "internal/platform/prng.h"
+#include "internal/flags/nearby_flags.h"
 
 namespace nearby {
 namespace linux {
+
+namespace {
+using nearby::connections::config_package_nearby::nearby_connections_feature::kRefactorBleL2cap;
+
+BleL2capSocket::ProtocolMode GetL2capProtocolMode() {
+  const bool refactor_enabled = NearbyFlags::GetInstance().GetBoolFlag(kRefactorBleL2cap);
+  return refactor_enabled ? BleL2capSocket::ProtocolMode::kRefactored
+                          : BleL2capSocket::ProtocolMode::kLegacy;
+}
+}  // namespace
+
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   : system_bus_(adapter.GetConnection()),
     adapter_(adapter),
@@ -469,7 +483,8 @@ BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
   LOG(INFO) << __func__ << ": Opening L2CAP server socket for service "
             << service_id;
 
-  auto server_socket = std::make_unique<linux::BleL2capServerSocket>(psm_);
+  auto server_socket = std::make_unique<linux::BleL2capServerSocket>(
+      psm_, GetL2capProtocolMode(), service_id);
 
   return server_socket;
 }
@@ -591,7 +606,17 @@ std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
   }
 
   LOG(INFO) << __func__ << ": Successfully connected to L2CAP socket";
-  return std::make_unique<BleL2capSocket>(fd, peripheral_id);
+  auto protocol_mode = GetL2capProtocolMode();
+  auto socket = std::make_unique<BleL2capSocket>(
+      fd, peripheral_id, protocol_mode, service_id,
+      /*incoming_connection=*/false);
+  if (protocol_mode == BleL2capSocket::ProtocolMode::kLegacy &&
+      !socket->PerformLegacyOutgoingHandshake(absl::Seconds(5))) {
+    LOG(ERROR) << __func__ << ": Legacy L2CAP handshake failed.";
+    socket->Close();
+    return nullptr;
+  }
+  return socket;
 }
 
 bool BleV2Medium::StartMultipleServicesScanning(
