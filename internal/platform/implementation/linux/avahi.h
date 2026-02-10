@@ -29,6 +29,16 @@
 namespace nearby {
 namespace linux {
 namespace avahi {
+namespace {
+api::WifiLanMedium::DiscoveredServiceCallback MakeNoopDiscoveredServiceCallback() {
+  api::WifiLanMedium::DiscoveredServiceCallback cb{};
+
+  cb.service_discovered_cb = [](NsdServiceInfo) {};
+  cb.service_lost_cb       = [](NsdServiceInfo) {};
+
+  return cb;
+}
+} // namespace
 class Server final
     : public sdbus::ProxyInterfaces<org::freedesktop::Avahi::Server2_proxy> {
  public:
@@ -40,8 +50,12 @@ class Server final
     registerProxy();
   }
   Server(sdbus::IConnection& system_bus)
-    : Server(system_bus, {}) {}
+    : Server(system_bus, MakeNoopDiscoveredServiceCallback()) {}
   ~Server() { unregisterProxy(); }
+  void SetDiscoveryCallback(
+      api::WifiLanMedium::DiscoveredServiceCallback callback) {
+    discovery_cb_ = std::move(callback);
+  }
   api::WifiLanMedium::DiscoveredServiceCallback discovery_cb_;
  protected:
   void onStateChanged(const int32_t &state, const std::string &error) override {
@@ -88,7 +102,6 @@ class ServiceBrowser final
  public:
   ServiceBrowser(sdbus::IConnection &system_bus,
                  const sdbus::ObjectPath &service_browser_object_path,
-                 api::WifiLanMedium::DiscoveredServiceCallback callback,
                  std::shared_ptr<Server> avahi_server)
       : ProxyInterfaces(system_bus, "org.freedesktop.Avahi",
                         service_browser_object_path),
