@@ -111,6 +111,7 @@
     </method>
 
     <method name="ResolveService">
+      <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
       <arg name="interface" type="i" direction="in"/>
       <arg name="protocol" type="i" direction="in"/>
       <arg name="name" type="s" direction="in"/>
@@ -298,6 +299,7 @@
     </method>
 
     <method name="ResolveService">
+      <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
       <arg name="interface" type="i" direction="in"/>
       <arg name="protocol" type="i" direction="in"/>
       <arg name="name" type="s" direction="in"/>

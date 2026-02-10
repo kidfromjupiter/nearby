@@ -32,15 +32,27 @@ namespace avahi {
 class Server final
     : public sdbus::ProxyInterfaces<org::freedesktop::Avahi::Server2_proxy> {
  public:
-  Server(sdbus::IConnection &system_bus)
-      : ProxyInterfaces(system_bus, "org.freedesktop.Avahi", "/") {
+  Server(sdbus::IConnection &system_bus,
+  api::WifiLanMedium::DiscoveredServiceCallback callback)
+      : ProxyInterfaces(system_bus, "org.freedesktop.Avahi", "/"),
+        discovery_cb_(std::move(callback))
+  {
     registerProxy();
   }
+  Server(sdbus::IConnection& system_bus)
+    : Server(system_bus, {}) {}
   ~Server() { unregisterProxy(); }
-
+  api::WifiLanMedium::DiscoveredServiceCallback discovery_cb_;
  protected:
   void onStateChanged(const int32_t &state, const std::string &error) override {
   }
+  void onResolveServiceReply(const int32_t& interface,
+    const int32_t& protocol, const std::string& name,
+    const std::string& type, const std::string& domain,
+    const std::string& host, const int32_t& aprotocol,
+    const std::string& address, const uint16_t& port,
+    const std::vector<std::vector<uint8_t>>& txt, const uint32_t& flags,
+    const sdbus::Error* error) override;
 };
 
 class EntryGroup final
@@ -80,7 +92,6 @@ class ServiceBrowser final
                  std::shared_ptr<Server> avahi_server)
       : ProxyInterfaces(system_bus, "org.freedesktop.Avahi",
                         service_browser_object_path),
-        discovery_cb_(std::move(callback)),
         server_(avahi_server) {
     registerProxy();
   }
@@ -117,7 +128,6 @@ class ServiceBrowser final
     kAvahiLookupResultStatic = 32,
   };
 
-  api::WifiLanMedium::DiscoveredServiceCallback discovery_cb_;
   std::shared_ptr<Server> server_;
 };
 }  // namespace avahi

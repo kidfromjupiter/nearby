@@ -20,6 +20,32 @@
 namespace nearby {
 namespace linux {
 namespace avahi {
+void Server::onResolveServiceReply(const int32_t& interface,
+    const int32_t& protocol, const std::string& name,
+    const std::string& type, const std::string& domain,
+    const std::string& host, const int32_t& aprotocol,
+    const std::string& address, const uint16_t& port,
+    const std::vector<std::vector<uint8_t>>& txt, const uint32_t& flags,
+    const sdbus::Error* error) {
+
+  NsdServiceInfo info;
+
+  info.SetServiceName(name);
+  info.SetIPAddress(address);
+  info.SetPort(port);
+  info.SetServiceType(type + "."); // discovery callback expects an extra period at t
+  for (auto &attr : txt) {
+    auto attr_str = std::string(attr.begin(), attr.end());
+    size_t pos = attr_str.find('=');
+    if (pos == 0 || pos == std::string::npos || pos == attr_str.size() - 1) {
+      LOG(WARNING) << " found invalid text attribute: " << attr_str;
+      continue;
+    }
+
+    info.SetTxtRecord(attr_str.substr(0, pos), attr_str.substr(pos + 1));
+  }
+  discovery_cb_.service_discovered_cb(std::move(info));
+};
 void ServiceBrowser::onItemNew(const int32_t &interface,
                                const int32_t &protocol, const std::string &name,
                                const std::string &type,
@@ -36,75 +62,57 @@ void ServiceBrowser::onItemNew(const int32_t &interface,
     return;
   }
 
-  NsdServiceInfo info;
   try {
-    auto [r_iface, r_protocol, r_name, r_type, r_domain, r_host, r_aprotocol,
-          r_address, r_port, r_txt, r_flags] =
-        server_->ResolveService(interface, protocol, name, type, domain,
-                                0,  // AVAHI_PROTO_INET
-                                0);
-    info.SetServiceName(r_name);
-    info.SetIPAddress(r_address);
-    info.SetPort(r_port);
-    info.SetServiceType(r_type + "."); // discovery callback expects an extra period at t
-    for (auto &attr : r_txt) {
-      auto attr_str = std::string(attr.begin(), attr.end());
-      size_t pos = attr_str.find('=');
-      if (pos == 0 || pos == std::string::npos || pos == attr_str.size() - 1) {
-        LOG(WARNING) << " found invalid text attribute: " << attr_str;
-	continue;
-      }
-
-      info.SetTxtRecord(attr_str.substr(0, pos), attr_str.substr(pos + 1));
-    }
+    server_->ResolveService(interface, protocol, name, type, domain,
+                            0,  // AVAHI_PROTO_INET
+                            0);
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(server_, "ResolveService", e);
   }
 
-  discovery_cb_.service_discovered_cb(std::move(info));
 }
 
 void ServiceBrowser::onItemRemove(
     const int32_t &interface, const int32_t &protocol, const std::string &name,
     const std::string &type, const std::string &domain, const uint32_t &flags) {
-  // TODO: Can we even resolve removed items?
-  LOG(INFO) << __func__ << ": " << getObjectPath()
-                       << ": Item removed through the ServiceBrowser: "
-                       << "interface: " << interface << ", protocol: "
-                       << protocol << ", name: '" << name << "', type: '"
-                       << type << "', domain: '" << domain
-                       << "', flags: " << flags;
-  if (flags & kAvahiLookupResultLocal) {
-    LOG(INFO) << __func__ << ": Ignoring local service.";
-    return;
-  }
-
-  NsdServiceInfo info;
-  try {
-    auto [r_iface, r_protocol, r_name, r_type, r_domain, r_host, r_aprotocol,
-          r_address, r_port, r_txt, r_flags] =
-        server_->ResolveService(interface, protocol, name, type, domain,
-                                0,  // AVAHI_PROTO_INET
-                                flags);
-    info.SetServiceName(r_name);
-    info.SetIPAddress(r_address);
-    info.SetPort(r_port);
-    info.SetServiceType(r_type);
-    for (auto &attr : r_txt) {
-      auto attr_str = std::string(attr.begin(), attr.end());
-      size_t pos = attr_str.find('=');
-      if (pos == 0 || pos == std::string::npos || pos == attr_str.size() - 1) {
-        LOG(WARNING) << " found invalid text attribute: " << attr_str;
-	continue;
-      }
-
-      info.SetTxtRecord(attr_str.substr(0, pos), attr_str.substr(pos + 1));
-    }
-  } catch (const sdbus::Error &e) {
-    DBUS_LOG_METHOD_CALL_ERROR(server_, "ResolveService", e);
-  }
-
-  discovery_cb_.service_lost_cb(std::move(info));
+  // // TODO: Can we even resolve removed items?
+  // LOG(INFO) << __func__ << ": " << getObjectPath()
+  //                      << ": Item removed through the ServiceBrowser: "
+  //                      << "interface: " << interface << ", protocol: "
+  //                      << protocol << ", name: '" << name << "', type: '"
+  //                      << type << "', domain: '" << domain
+  //                      << "', flags: " << flags;
+  // if (flags & kAvahiLookupResultLocal) {
+  //   LOG(INFO) << __func__ << ": Ignoring local service.";
+  //   return;
+  // }
+  //
+  // NsdServiceInfo info;
+  // try {
+  //   auto [r_iface, r_protocol, r_name, r_type, r_domain, r_host, r_aprotocol,
+  //         r_address, r_port, r_txt, r_flags] =
+  //       server_->ResolveService(interface, protocol, name, type, domain,
+  //                               0,  // AVAHI_PROTO_INET
+  //                               flags);
+  //   info.SetServiceName(r_name);
+  //   info.SetIPAddress(r_address);
+  //   info.SetPort(r_port);
+  //   info.SetServiceType(r_type);
+  //   for (auto &attr : r_txt) {
+  //     auto attr_str = std::string(attr.begin(), attr.end());
+  //     size_t pos = attr_str.find('=');
+  //     if (pos == 0 || pos == std::string::npos || pos == attr_str.size() - 1) {
+  //       LOG(WARNING) << " found invalid text attribute: " << attr_str;
+	 //      continue;
+  //     }
+  //
+  //     info.SetTxtRecord(attr_str.substr(0, pos), attr_str.substr(pos + 1));
+  //   }
+  // } catch (const sdbus::Error &e) {
+  //   DBUS_LOG_METHOD_CALL_ERROR(server_, "ResolveService", e);
+  // }
+  //
+  // // discovery_cb_.service_lost_cb(std::move(info));
 }
 
 void ServiceBrowser::onFailure(const std::string &error) {
