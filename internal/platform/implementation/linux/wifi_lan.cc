@@ -197,6 +197,8 @@ bool WifiLanMedium::StartDiscovery(
     }
   }
 
+  avahi_->SetDiscoveryCallback(std::move(callback));
+
   try {
     sdbus::ObjectPath browser_object_path =
         avahi_->ServiceBrowserPrepare(-1,  // AVAHI_IF_UNSPEC
@@ -211,7 +213,7 @@ bool WifiLanMedium::StartDiscovery(
     service_browsers_.emplace(
         service_type,
         std::make_unique<avahi::ServiceBrowser>(
-            *system_bus_, browser_object_path, std::move(callback), avahi_));
+            *system_bus_, browser_object_path, avahi_));
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(avahi_, "ServiceBrowserPrepare", e);
     return false;

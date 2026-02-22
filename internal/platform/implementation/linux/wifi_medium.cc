@@ -39,7 +39,8 @@ api::WifiCapability &NetworkManagerWifiMedium::GetCapability() {
     auto cap_mask = WirelessCapabilities();
     // https://networkmanager.dev/docs/api/latest/nm-dbus-types.html#NMDeviceWifiCapabilities
     capability_.supports_5_ghz = (cap_mask & 0x00000400) != 0;
-    capability_.supports_6_ghz = false;
+    // Check for 6 GHz support (NM_WIFI_DEVICE_CAP_FREQ_6GHZ = 0x00008000)
+    capability_.supports_6_ghz = (cap_mask & 0x00008000) != 0;
     capability_.support_wifi_direct = true;
   } catch (const sdbus::Error &e) {
     DBUS_LOG_PROPERTY_GET_ERROR(&getProxy(), "WirelessCapabilities", e);
