@@ -3,11 +3,13 @@
 #include <atomic>
 #include <utility>
 
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/base/file_path.h"
+#include "internal/flags/nearby_flags.h"
 #include "sharing/linux/nearby_connections_service_linux.h"
 #include "sharing/nearby_connections_types.h"
 
-namespace nearby::sharing::linux {
+namespace nearby::sharing {
 
 namespace {
 
@@ -345,7 +347,7 @@ std::unique_ptr<nearby::sharing::Payload> ToNativePayload(Facade::Payload payloa
 
 class NearbyConnectionsQtFacade::Impl {
  public:
-  NearbyConnectionsServiceLinux service;
+  linux::NearbyConnectionsServiceLinux service;
 };
 
 NearbyConnectionsQtFacade::NearbyConnectionsQtFacade()
@@ -358,6 +360,18 @@ NearbyConnectionsQtFacade::NearbyConnectionsQtFacade(
 
 NearbyConnectionsQtFacade& NearbyConnectionsQtFacade::operator=(
     NearbyConnectionsQtFacade&&) noexcept = default;
+
+void NearbyConnectionsQtFacade::SetBleL2capFlagOverrides(
+    bool enable_ble_l2cap, bool refactor_ble_l2cap) {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kEnableBleL2cap,
+      enable_ble_l2cap);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kRefactorBleL2cap,
+      refactor_ble_l2cap);
+}
 
 NearbyConnectionsQtFacade::Payload NearbyConnectionsQtFacade::CreateBytesPayload(
     std::vector<uint8_t> bytes) const {

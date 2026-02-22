@@ -1,5 +1,6 @@
 #include <QAction>
 #include <QApplication>
+#include <QFileDialog>
 #include <QIcon>
 #include <QMenu>
 #include <QPainter>
@@ -10,7 +11,7 @@
 #include <QStyleHints>
 #include <QSystemTrayIcon>
 
-#include "nearby_tray_controller.h"
+#include "file_share_tray_controller.h"
 
 namespace {
 
@@ -45,17 +46,21 @@ QIcon BuildTintedSymbolicIcon(const QString& source, const QColor& color) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  nearby::sharing::NearbyConnectionsQtFacade::SetBleL2capFlagOverrides(
+      true, false);
+
   QApplication app(argc, argv);
   app.setQuitOnLastWindowClosed(false);
 
-  NearbyTrayController controller;
+  FileShareTrayController controller;
 
   QQmlApplicationEngine engine;
-  engine.rootContext()->setContextProperty("nearbyController", &controller);
-  engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+  engine.rootContext()->setContextProperty("fileShareController", &controller);
+  engine.load(QUrl(QStringLiteral("qrc:/qml/FileShareTray.qml")));
   if (engine.rootObjects().isEmpty()) {
     return 1;
   }
+
 
   auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
   if (window == nullptr) {
@@ -63,53 +68,72 @@ int main(int argc, char* argv[]) {
   }
 
   const auto resolve_tray_icon = [&app]() {
-    // Render the bundled symbolic icon with palette text color so it adapts to light/dark themes.
     const QColor symbolic_color = app.palette().color(QPalette::WindowText);
     QIcon tray_icon = BuildTintedSymbolicIcon(
         QStringLiteral(":/icons/tray_icon-symbolic.svg"), symbolic_color);
-
-    // Fallback to system themed icon.
     if (tray_icon.isNull()) {
       tray_icon = QIcon::fromTheme(QStringLiteral("network-wireless-symbolic"));
     }
-
-    // Fallback to custom PNG icon.
     if (tray_icon.isNull()) {
       tray_icon = QIcon(QStringLiteral(":/icons/tray_icon.png"));
     }
-
-    // Final fallback.
     if (tray_icon.isNull()) {
       tray_icon = app.windowIcon();
     }
     return tray_icon;
   };
 
-  QIcon tray_icon = resolve_tray_icon();
-  QSystemTrayIcon tray(tray_icon);
-  tray.setToolTip(QStringLiteral("Nearby QML Tray"));
+  QSystemTrayIcon tray(resolve_tray_icon());
+  tray.setToolTip(QStringLiteral("Nearby File Tray"));
 
   QMenu tray_menu;
+  QAction* send_action = tray_menu.addAction(QStringLiteral("Send"));
+  QAction* receive_action = tray_menu.addAction(QStringLiteral("Receive"));
+  tray_menu.addSeparator();
   QAction* show_action = tray_menu.addAction(QStringLiteral("Show"));
   QAction* hide_action = tray_menu.addAction(QStringLiteral("Hide"));
   tray_menu.addSeparator();
   QAction* quit_action = tray_menu.addAction(QStringLiteral("Quit"));
+
+  QObject::connect(send_action, &QAction::triggered, window,
+                   [&controller, window]() {
+                     const QString file = QFileDialog::getOpenFileName(
+                         nullptr, QStringLiteral("Select file to send"));
+                     if (file.isEmpty()) {
+                       return;
+                     }
+                     controller.switchToSendModeWithFile(file);
+                     window->show();
+                     window->raise();
+                     window->requestActivate();
+                   });
+
+  QObject::connect(receive_action, &QAction::triggered,
+                   [&controller, window]() {
+                     controller.switchToReceiveMode();
+                     window->show();
+                     window->raise();
+                     window->requestActivate();
+                   });
 
   QObject::connect(show_action, &QAction::triggered, window, [window]() {
     window->show();
     window->raise();
     window->requestActivate();
   });
+
   QObject::connect(hide_action, &QAction::triggered, window, [window]() {
     window->hide();
   });
-  QObject::connect(quit_action, &QAction::triggered, &app, [&controller, &app]() {
-    controller.stop();
-    app.quit();
-  });
+
+  QObject::connect(quit_action, &QAction::triggered, &app,
+                   [&controller, &app]() {
+                     controller.stop();
+                     app.quit();
+                   });
 
   QObject::connect(&tray, &QSystemTrayIcon::activated, window,
-                   [&tray, window](QSystemTrayIcon::ActivationReason reason) {
+                   [window](QSystemTrayIcon::ActivationReason reason) {
                      if (reason != QSystemTrayIcon::Trigger &&
                          reason != QSystemTrayIcon::DoubleClick) {
                        return;
@@ -123,10 +147,10 @@ int main(int argc, char* argv[]) {
                      }
                    });
 
-  QObject::connect(&controller, &NearbyTrayController::requestTrayMessage, &tray,
-                   [&tray](const QString& title, const QString& body) {
+  QObject::connect(&controller, &FileShareTrayController::requestTrayMessage,
+                   &tray, [&tray](const QString& title, const QString& body) {
                      tray.showMessage(title, body, QSystemTrayIcon::Information,
-                                      3000);
+                                      4000);
                    });
 
   QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller,
@@ -138,6 +162,8 @@ int main(int argc, char* argv[]) {
 
   tray.setContextMenu(&tray_menu);
   tray.show();
+
+  controller.switchToReceiveMode();
 
   return app.exec();
 }

@@ -243,7 +243,14 @@ ApplicationWindow {
                         id: strategyCombo
                         Layout.preferredWidth: 170
                         model: ["P2pCluster", "P2pStar", "P2pPointToPoint"]
-                        currentIndex: Math.max(0, find(nearbyController.connectionStrategy))
+                        currentIndex: {
+                            var strategy = String(nearbyController.connectionStrategy)
+                            if (strategy === "P2pStar")
+                                return 1
+                            if (strategy === "P2pPointToPoint")
+                                return 2
+                            return 0
+                        }
                         onActivated: nearbyController.connectionStrategy = currentText
                     }
 

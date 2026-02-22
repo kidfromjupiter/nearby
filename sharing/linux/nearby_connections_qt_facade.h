@@ -19,10 +19,10 @@
 #undef linux
 #endif
 
-namespace nearby::sharing::linux {
-
+namespace nearby {
+namespace sharing {
 class NearbyConnectionsQtFacade {
- public:
+public:
   enum class Status {
     kSuccess = 0,
     kError = 1,
@@ -141,84 +141,88 @@ class NearbyConnectionsQtFacade {
   };
 
   struct ConnectionListener {
-    std::function<void(const std::string&, const ConnectionInfo&)> initiated_cb;
-    std::function<void(const std::string&)> accepted_cb;
-    std::function<void(const std::string&, Status)> rejected_cb;
-    std::function<void(const std::string&)> disconnected_cb;
-    std::function<void(const std::string&, Medium)> bandwidth_changed_cb;
+    std::function<void(const std::string &, const ConnectionInfo &)>
+        initiated_cb;
+    std::function<void(const std::string &)> accepted_cb;
+    std::function<void(const std::string &, Status)> rejected_cb;
+    std::function<void(const std::string &)> disconnected_cb;
+    std::function<void(const std::string &, Medium)> bandwidth_changed_cb;
   };
 
   struct DiscoveryListener {
-    std::function<void(const std::string&, const DiscoveredEndpointInfo&)>
+    std::function<void(const std::string &, const DiscoveredEndpointInfo &)>
         endpoint_found_cb;
-    std::function<void(const std::string&)> endpoint_lost_cb;
-    std::function<void(const std::string&, DistanceInfo)>
+    std::function<void(const std::string &)> endpoint_lost_cb;
+    std::function<void(const std::string &, DistanceInfo)>
         endpoint_distance_changed_cb;
   };
 
   struct PayloadListener {
-    std::function<void(const std::string&, Payload)> payload_cb;
-    std::function<void(const std::string&, const PayloadTransferUpdate&)>
+    std::function<void(const std::string &, Payload)> payload_cb;
+    std::function<void(const std::string &, const PayloadTransferUpdate &)>
         payload_progress_cb;
   };
 
   NearbyConnectionsQtFacade();
   ~NearbyConnectionsQtFacade();
 
-  NearbyConnectionsQtFacade(const NearbyConnectionsQtFacade&) = delete;
-  NearbyConnectionsQtFacade& operator=(const NearbyConnectionsQtFacade&) =
-      delete;
-  NearbyConnectionsQtFacade(NearbyConnectionsQtFacade&&) noexcept;
-  NearbyConnectionsQtFacade& operator=(
-      NearbyConnectionsQtFacade&&) noexcept;
+  NearbyConnectionsQtFacade(const NearbyConnectionsQtFacade &) = delete;
+  NearbyConnectionsQtFacade &
+  operator=(const NearbyConnectionsQtFacade &) = delete;
+  NearbyConnectionsQtFacade(NearbyConnectionsQtFacade &&) noexcept;
+  NearbyConnectionsQtFacade &operator=(NearbyConnectionsQtFacade &&) noexcept;
+
+  // Sets global Nearby flag overrides for BLE L2CAP.
+  static void SetBleL2capFlagOverrides(bool enable_ble_l2cap,
+                                       bool refactor_ble_l2cap);
 
   Payload CreateBytesPayload(std::vector<uint8_t> bytes) const;
 
-  void StartAdvertising(const std::string& service_id,
-                        const std::vector<uint8_t>& endpoint_info,
-                        const AdvertisingOptions& advertising_options,
+  void StartAdvertising(const std::string &service_id,
+                        const std::vector<uint8_t> &endpoint_info,
+                        const AdvertisingOptions &advertising_options,
                         ConnectionListener advertising_listener,
                         std::function<void(Status)> callback);
-  void StopAdvertising(const std::string& service_id,
+  void StopAdvertising(const std::string &service_id,
                        std::function<void(Status)> callback);
 
-  void StartDiscovery(const std::string& service_id,
-                      const DiscoveryOptions& discovery_options,
+  void StartDiscovery(const std::string &service_id,
+                      const DiscoveryOptions &discovery_options,
                       DiscoveryListener discovery_listener,
                       std::function<void(Status)> callback);
-  void StopDiscovery(const std::string& service_id,
+  void StopDiscovery(const std::string &service_id,
                      std::function<void(Status)> callback);
 
-  void RequestConnection(const std::string& service_id,
-                         const std::vector<uint8_t>& endpoint_info,
-                         const std::string& endpoint_id,
-                         const ConnectionOptions& connection_options,
+  void RequestConnection(const std::string &service_id,
+                         const std::vector<uint8_t> &endpoint_info,
+                         const std::string &endpoint_id,
+                         const ConnectionOptions &connection_options,
                          ConnectionListener connection_listener,
                          std::function<void(Status)> callback);
 
-  void DisconnectFromEndpoint(const std::string& service_id,
-                              const std::string& endpoint_id,
+  void DisconnectFromEndpoint(const std::string &service_id,
+                              const std::string &endpoint_id,
                               std::function<void(Status)> callback);
 
-  void SendPayload(const std::string& service_id,
-                   const std::vector<std::string>& endpoint_ids, Payload payload,
-                   std::function<void(Status)> callback);
-  void InitiateBandwidthUpgrade(const std::string& service_id,
-                                const std::string& endpoint_id,
+  void SendPayload(const std::string &service_id,
+                   const std::vector<std::string> &endpoint_ids,
+                   Payload payload, std::function<void(Status)> callback);
+  void InitiateBandwidthUpgrade(const std::string &service_id,
+                                const std::string &endpoint_id,
                                 std::function<void(Status)> callback);
 
-  void AcceptConnection(const std::string& service_id,
-                        const std::string& endpoint_id,
+  void AcceptConnection(const std::string &service_id,
+                        const std::string &endpoint_id,
                         PayloadListener payload_listener,
                         std::function<void(Status)> callback);
 
   void StopAllEndpoints(std::function<void(Status)> callback);
 
- private:
+private:
   class Impl;
   std::unique_ptr<Impl> impl_;
 };
+} // namespace sharing
+} // namespace nearby
 
-}  // namespace nearby::sharing::linux
-
-#endif  // SHARING_LINUX_NEARBY_CONNECTIONS_QT_FACADE_H_
+#endif // SHARING_LINUX_NEARBY_CONNECTIONS_QT_FACADE_H_

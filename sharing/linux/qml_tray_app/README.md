@@ -32,45 +32,24 @@ This folder contains a Qt/QML tray application backend and UI wired to:
 - Transfers are shown with endpoint, direction, status, progress, and medium.
 - Logs are appended to `/tmp/nearby_qml_tray.log`.
 
-## Building (host stays clean)
+## Building
 
-This app now has a Bazel target:
+This CMake app links against the installed Nearby shared library and header:
 
-- `//sharing/linux/qml_tray_app:nearby_qml_tray_app`
+- `libnearby_connections_service_linux_shared.so`
+- `sharing/linux/nearby_connections_qt_facade.h`
 
-Qt compiler and linker flags are resolved through `pkg-config` at build time.
-
-### Recommended: build in container
-
-From repo root:
+Install them first (repo root):
 
 ```bash
-./sharing/linux/qml_tray_app/build_in_container.sh
+./sharing/linux/install_nearby_connections_service.sh
 ```
 
-This command:
-
-- builds an image from `sharing/linux/qml_tray_app/container/Dockerfile`
-- installs Bazel + Qt 6 dev packages inside that image
-- runs the Bazel build in the container
-- keeps Bazel cache in a Docker volume (`nearby_qml_tray_bazel_cache`)
-
-Useful overrides:
+Then build the app (from `sharing/linux/qml_tray_app`):
 
 ```bash
-# Use podman instead of docker.
-CONTAINER_RUNTIME=podman ./sharing/linux/qml_tray_app/build_in_container.sh
-
-# Pin a custom image tag.
-QML_TRAY_IMAGE_TAG=nearby-qml-tray-builder:v1 ./sharing/linux/qml_tray_app/build_in_container.sh
-```
-
-### Build in an already-provisioned environment
-
-If you already have Bazel + Qt 6 dev dependencies installed:
-
-```bash
-./sharing/linux/qml_tray_app/build.sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEARBY_INSTALL_PREFIX=/usr/local
+cmake --build build -j
 ```
 
 ## Bundle `libnearby_connections_service_linux_shared.so` with the app

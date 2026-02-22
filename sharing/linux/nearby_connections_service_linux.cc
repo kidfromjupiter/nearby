@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <string>
@@ -127,6 +128,17 @@ NcStrategy ConvertStrategy(Strategy strategy) {
   return NcStrategy::kP2pPointToPoint;
 }
 
+void SetUpgradeMediumEnv(const nearby::sharing::MediumSelection& mediums) {
+  setenv("NEARBY_ALLOW_UPGRADE_BLUETOOTH", mediums.bluetooth ? "1" : "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_BLE", mediums.ble ? "1" : "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_WEB_RTC", mediums.web_rtc ? "1" : "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_WIFI_LAN", mediums.wifi_lan ? "1" : "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_WIFI_HOTSPOT",
+         mediums.wifi_hotspot ? "1" : "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_WIFI_DIRECT", "0", 1);
+  setenv("NEARBY_ALLOW_UPGRADE_AWDL", "0", 1);
+}
+
 ConnectionInfo ConvertConnectionInfo(const ConnectionResponseInfo& info) {
   ConnectionInfo connection_info;
   connection_info.authentication_token = info.authentication_token;
@@ -158,9 +170,11 @@ void NearbyConnectionsServiceLinux::StartAdvertising(
     ConnectionListener advertising_listener,
     std::function<void(Status status)> callback) {
   advertising_listener_ = std::move(advertising_listener);
+  SetUpgradeMediumEnv(advertising_options.allowed_mediums);
 
   NcAdvertisingOptions options{};
   options.strategy = ConvertStrategy(advertising_options.strategy);
+  options.allowed.SetAll(false);
   options.allowed.ble = advertising_options.allowed_mediums.ble;
   options.allowed.bluetooth = advertising_options.allowed_mediums.bluetooth;
   options.allowed.web_rtc = advertising_options.allowed_mediums.web_rtc;
@@ -217,6 +231,7 @@ void NearbyConnectionsServiceLinux::StartDiscovery(
     DiscoveryListener discovery_listener,
     std::function<void(Status status)> callback) {
   discovery_listener_ = std::move(discovery_listener);
+  SetUpgradeMediumEnv(discovery_options.allowed_mediums);
 
   NcDiscoveryOptions options{};
   options.strategy = ConvertStrategy(discovery_options.strategy);
@@ -274,8 +289,10 @@ void NearbyConnectionsServiceLinux::RequestConnection(
     std::function<void(Status status)> callback) {
   static_cast<void>(service_id);
   connection_listener_ = std::move(connection_listener);
+  SetUpgradeMediumEnv(connection_options.allowed_mediums);
 
   NcConnectionOptions options{};
+  options.allowed.SetAll(false);
   options.allowed.ble = connection_options.allowed_mediums.ble;
   options.allowed.bluetooth = connection_options.allowed_mediums.bluetooth;
   options.allowed.web_rtc = connection_options.allowed_mediums.web_rtc;

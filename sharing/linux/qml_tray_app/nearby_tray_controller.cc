@@ -1,4 +1,4 @@
-#include "sharing/linux/qml_tray_app/nearby_tray_controller.h"
+#include "nearby_tray_controller.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -13,7 +13,7 @@
 namespace {
 
 using NearbyConnectionsQtFacade =
-    nearby::sharing::linux::NearbyConnectionsQtFacade;
+    nearby::sharing::NearbyConnectionsQtFacade;
 
 QString NormalizeMediumsMode(QString mode) {
   mode = mode.trimmed().toLower();
