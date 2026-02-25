@@ -6,6 +6,7 @@
     <file>components/AnimatedBlob.qml</file>
     <file>components/DeviceCard.qml</file>
     <file>components/TransferCard.qml</file>
+    <file>components/SettingsPanel.qml</file>
   </qresource>
   <qresource prefix="/icons">
     <file>tray_icon.png</file>

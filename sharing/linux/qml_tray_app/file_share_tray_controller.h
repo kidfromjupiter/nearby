@@ -30,6 +30,15 @@ class FileShareTrayController : public QObject {
   Q_PROPERTY(QStringList connectedDevices READ connectedDevices NOTIFY connectedDevicesChanged)
   Q_PROPERTY(QVariantMap endpointMediums READ endpointMediums NOTIFY endpointMediumsChanged)
   Q_PROPERTY(QVariantList transfers READ transfers NOTIFY transfersChanged)
+  Q_PROPERTY(bool autoAcceptIncoming READ autoAcceptIncoming WRITE setAutoAcceptIncoming NOTIFY autoAcceptIncomingChanged)
+  Q_PROPERTY(bool bluetoothEnabled READ bluetoothEnabled WRITE setBluetoothEnabled NOTIFY bluetoothEnabledChanged)
+  Q_PROPERTY(bool bleEnabled READ bleEnabled WRITE setBleEnabled NOTIFY bleEnabledChanged)
+  Q_PROPERTY(bool wifiLanEnabled READ wifiLanEnabled WRITE setWifiLanEnabled NOTIFY wifiLanEnabledChanged)
+  Q_PROPERTY(bool wifiHotspotEnabled READ wifiHotspotEnabled WRITE setWifiHotspotEnabled NOTIFY wifiHotspotEnabledChanged)
+  Q_PROPERTY(bool webRtcEnabled READ webRtcEnabled WRITE setWebRtcEnabled NOTIFY webRtcEnabledChanged)
+  Q_PROPERTY(QString connectionStrategy READ connectionStrategy WRITE setConnectionStrategy NOTIFY connectionStrategyChanged)
+  Q_PROPERTY(QString serviceId READ serviceId WRITE setServiceId NOTIFY serviceIdChanged)
+  Q_PROPERTY(QString logPath READ logPath WRITE setLogPath NOTIFY logPathChanged)
 
  public:
   explicit FileShareTrayController(QObject* parent = nullptr);
@@ -50,6 +59,33 @@ class FileShareTrayController : public QObject {
   QStringList connectedDevices() const { return connected_devices_; }
   QVariantMap endpointMediums() const { return endpoint_mediums_; }
   QVariantList transfers() const { return transfers_; }
+
+  bool autoAcceptIncoming() const { return auto_accept_incoming_; }
+  void setAutoAcceptIncoming(bool enabled);
+
+  bool bluetoothEnabled() const { return bluetooth_enabled_; }
+  void setBluetoothEnabled(bool enabled);
+
+  bool bleEnabled() const { return ble_enabled_; }
+  void setBleEnabled(bool enabled);
+
+  bool wifiLanEnabled() const { return wifi_lan_enabled_; }
+  void setWifiLanEnabled(bool enabled);
+
+  bool wifiHotspotEnabled() const { return wifi_hotspot_enabled_; }
+  void setWifiHotspotEnabled(bool enabled);
+
+  bool webRtcEnabled() const { return web_rtc_enabled_; }
+  void setWebRtcEnabled(bool enabled);
+
+  QString connectionStrategy() const { return connection_strategy_; }
+  void setConnectionStrategy(const QString& strategy);
+
+  QString serviceId() const { return QString::fromStdString(service_id_); }
+  void setServiceId(const QString& service_id);
+
+  QString logPath() const { return log_path_; }
+  void setLogPath(const QString& path);
 
   Q_INVOKABLE void start();
   Q_INVOKABLE void stop();
@@ -72,6 +108,15 @@ class FileShareTrayController : public QObject {
   void connectedDevicesChanged();
   void endpointMediumsChanged();
   void transfersChanged();
+  void autoAcceptIncomingChanged();
+  void bluetoothEnabledChanged();
+  void bleEnabledChanged();
+  void wifiLanEnabledChanged();
+  void wifiHotspotEnabledChanged();
+  void webRtcEnabledChanged();
+  void connectionStrategyChanged();
+  void serviceIdChanged();
+  void logPathChanged();
 
   void requestTrayMessage(const QString& title, const QString& body);
 
@@ -129,9 +174,18 @@ class FileShareTrayController : public QObject {
 
   QString mode_ = QStringLiteral("Receive");
   QString device_name_ = QStringLiteral("NearbyQtFile");
-  const std::string service_id_ = "com.nearby.qml.tray";
+  std::string service_id_ = "com.nearby.qml.tray";
   QString status_message_ = QStringLiteral("Idle");
   bool running_ = false;
+
+  bool auto_accept_incoming_ = true;
+  bool bluetooth_enabled_ = true;
+  bool ble_enabled_ = true;
+  bool wifi_lan_enabled_ = true;
+  bool wifi_hotspot_enabled_ = true;
+  bool web_rtc_enabled_ = false;
+  QString connection_strategy_ = QStringLiteral("P2pPointToPoint");
+  QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
 
   QString pending_send_file_path_;
   QString pending_send_file_name_;
@@ -153,7 +207,6 @@ class FileShareTrayController : public QObject {
   QHash<qlonglong, QString> outgoing_file_payload_to_name_;
   QSet<qlonglong> send_terminal_notified_;
 
-  QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
   QFile log_file_;
 };
 

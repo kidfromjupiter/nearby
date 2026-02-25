@@ -21,11 +21,17 @@ ApplicationWindow {
         fileShareController.hideToTray()
     }
 
+    SettingsPanel {
+        id: settingsPanel
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        AppHeader {}
+        AppHeader {
+            onSettingsRequested: settingsPanel.open()
+        }
 
         // ── Body ─────────────────────────────────────────────────────────
         RowLayout {

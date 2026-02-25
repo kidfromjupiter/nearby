@@ -23,6 +23,30 @@ bool IsTerminalPayloadStatus(NearbyConnectionsQtFacade::PayloadStatus status) {
          status == NearbyConnectionsQtFacade::PayloadStatus::kCanceled;
 }
 
+QString NormalizeConnectionStrategy(const QString& strategy) {
+  const QString token = strategy.trimmed().toLower();
+  if (token == QStringLiteral("p2pstar") || token == QStringLiteral("star")) {
+    return QStringLiteral("P2pStar");
+  }
+  if (token == QStringLiteral("p2ppointtopoint") ||
+      token == QStringLiteral("pointtopoint") ||
+      token == QStringLiteral("point_to_point")) {
+    return QStringLiteral("P2pPointToPoint");
+  }
+  return QStringLiteral("P2pCluster");
+}
+
+NearbyConnectionsQtFacade::Strategy StrategyFromName(
+    const QString& normalized_strategy) {
+  if (normalized_strategy == QStringLiteral("P2pStar")) {
+    return NearbyConnectionsQtFacade::Strategy::kP2pStar;
+  }
+  if (normalized_strategy == QStringLiteral("P2pPointToPoint")) {
+    return NearbyConnectionsQtFacade::Strategy::kP2pPointToPoint;
+  }
+  return NearbyConnectionsQtFacade::Strategy::kP2pCluster;
+}
+
 }  // namespace
 
 FileShareTrayController::FileShareTrayController(QObject* parent)
@@ -54,11 +78,49 @@ void FileShareTrayController::LoadSettings() {
   if (!stored_device_name.isEmpty()) {
     device_name_ = stored_device_name;
   }
+
+  auto_accept_incoming_ =
+      settings.value(QStringLiteral("autoAcceptIncoming"), auto_accept_incoming_)
+          .toBool();
+  bluetooth_enabled_ =
+      settings.value(QStringLiteral("bluetoothEnabled"), bluetooth_enabled_).toBool();
+  ble_enabled_ =
+      settings.value(QStringLiteral("bleEnabled"), ble_enabled_).toBool();
+  wifi_lan_enabled_ =
+      settings.value(QStringLiteral("wifiLanEnabled"), wifi_lan_enabled_).toBool();
+  wifi_hotspot_enabled_ =
+      settings.value(QStringLiteral("wifiHotspotEnabled"), wifi_hotspot_enabled_).toBool();
+  web_rtc_enabled_ =
+      settings.value(QStringLiteral("webRtcEnabled"), web_rtc_enabled_).toBool();
+  connection_strategy_ = NormalizeConnectionStrategy(
+      settings.value(QStringLiteral("connectionStrategy"), connection_strategy_)
+          .toString());
+
+  const QString stored_service_id =
+      settings.value(QStringLiteral("serviceId"), serviceId()).toString().trimmed();
+  if (!stored_service_id.isEmpty()) {
+    service_id_ = stored_service_id.toStdString();
+  }
+
+  const QString stored_log_path =
+      settings.value(QStringLiteral("logPath"), log_path_).toString().trimmed();
+  if (!stored_log_path.isEmpty()) {
+    log_path_ = stored_log_path;
+  }
 }
 
 void FileShareTrayController::SaveSettings() const {
   QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlFileTrayApp"));
   settings.setValue(QStringLiteral("deviceName"), device_name_);
+  settings.setValue(QStringLiteral("autoAcceptIncoming"), auto_accept_incoming_);
+  settings.setValue(QStringLiteral("bluetoothEnabled"), bluetooth_enabled_);
+  settings.setValue(QStringLiteral("bleEnabled"), ble_enabled_);
+  settings.setValue(QStringLiteral("wifiLanEnabled"), wifi_lan_enabled_);
+  settings.setValue(QStringLiteral("wifiHotspotEnabled"), wifi_hotspot_enabled_);
+  settings.setValue(QStringLiteral("webRtcEnabled"), web_rtc_enabled_);
+  settings.setValue(QStringLiteral("connectionStrategy"), connection_strategy_);
+  settings.setValue(QStringLiteral("serviceId"), serviceId());
+  settings.setValue(QStringLiteral("logPath"), log_path_);
   settings.sync();
 }
 
@@ -77,6 +139,73 @@ void FileShareTrayController::setDeviceName(const QString& device_name) {
     stop();
     start();
   }
+}
+
+void FileShareTrayController::setAutoAcceptIncoming(bool enabled) {
+  if (auto_accept_incoming_ == enabled) return;
+  auto_accept_incoming_ = enabled;
+  emit autoAcceptIncomingChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setBluetoothEnabled(bool enabled) {
+  if (bluetooth_enabled_ == enabled) return;
+  bluetooth_enabled_ = enabled;
+  emit bluetoothEnabledChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setBleEnabled(bool enabled) {
+  if (ble_enabled_ == enabled) return;
+  ble_enabled_ = enabled;
+  emit bleEnabledChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setWifiLanEnabled(bool enabled) {
+  if (wifi_lan_enabled_ == enabled) return;
+  wifi_lan_enabled_ = enabled;
+  emit wifiLanEnabledChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setWifiHotspotEnabled(bool enabled) {
+  if (wifi_hotspot_enabled_ == enabled) return;
+  wifi_hotspot_enabled_ = enabled;
+  emit wifiHotspotEnabledChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setWebRtcEnabled(bool enabled) {
+  if (web_rtc_enabled_ == enabled) return;
+  web_rtc_enabled_ = enabled;
+  emit webRtcEnabledChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setConnectionStrategy(const QString& strategy) {
+  const QString normalized = NormalizeConnectionStrategy(strategy);
+  if (connection_strategy_ == normalized) return;
+  connection_strategy_ = normalized;
+  emit connectionStrategyChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setServiceId(const QString& service_id) {
+  const QString trimmed = service_id.trimmed();
+  if (trimmed.isEmpty() || trimmed.toStdString() == service_id_) return;
+  service_id_ = trimmed.toStdString();
+  emit serviceIdChanged();
+  SaveSettings();
+}
+
+void FileShareTrayController::setLogPath(const QString& path) {
+  const QString trimmed = path.trimmed();
+  if (trimmed.isEmpty() || trimmed == log_path_) return;
+  log_path_ = trimmed;
+  emit logPathChanged();
+  SaveSettings();
+  ReopenLogFile();
 }
 
 void FileShareTrayController::start() {
@@ -327,10 +456,13 @@ FileShareTrayController::BuildConnectionListener() {
 
           if (incoming) {
             SetStatus(QStringLiteral("Incoming connection from %1").arg(peer));
+            if (auto_accept_incoming_) {
+              acceptIncomingInternal(endpoint);
+            }
+          } else {
+            // Always accept outgoing connections (initiated by us for send).
+            acceptIncomingInternal(endpoint);
           }
-
-          // Always auto-accept connections for this app.
-          acceptIncomingInternal(endpoint);
         },
         Qt::QueuedConnection);
   };
@@ -576,18 +708,18 @@ FileShareTrayController::BuildPayloadListener() {
 NearbyConnectionsQtFacade::MediumSelection
 FileShareTrayController::BuildMediumSelection() const {
   NearbyConnectionsQtFacade::MediumSelection selection;
-  selection.bluetooth = true;
-  selection.ble = true;
-  selection.wifi_lan = true;
-  selection.wifi_hotspot = true;
-  selection.web_rtc = false;
+  selection.bluetooth = bluetooth_enabled_;
+  selection.ble = ble_enabled_;
+  selection.wifi_lan = wifi_lan_enabled_;
+  selection.wifi_hotspot = wifi_hotspot_enabled_;
+  selection.web_rtc = web_rtc_enabled_;
   return selection;
 }
 
 NearbyConnectionsQtFacade::AdvertisingOptions
 FileShareTrayController::BuildAdvertisingOptions() const {
   NearbyConnectionsQtFacade::AdvertisingOptions options;
-  options.strategy = NearbyConnectionsQtFacade::Strategy::kP2pPointToPoint;
+  options.strategy = StrategyFromName(connection_strategy_);
   options.allowed_mediums = BuildMediumSelection();
   options.auto_upgrade_bandwidth = true;
   options.enable_bluetooth_listening = true;
@@ -598,7 +730,7 @@ FileShareTrayController::BuildAdvertisingOptions() const {
 NearbyConnectionsQtFacade::DiscoveryOptions
 FileShareTrayController::BuildDiscoveryOptions() const {
   NearbyConnectionsQtFacade::DiscoveryOptions options;
-  options.strategy = NearbyConnectionsQtFacade::Strategy::kP2pPointToPoint;
+  options.strategy = StrategyFromName(connection_strategy_);
   options.allowed_mediums = BuildMediumSelection();
   return options;
 }
