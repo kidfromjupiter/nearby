@@ -1,2 +1,0 @@
-set(__QT_DEPLOY_TARGET_nearby_qml_tray_app_FILE /home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/nearby_qml_tray_app)
-set(__QT_DEPLOY_TARGET_nearby_qml_tray_app_TYPE EXECUTABLE)

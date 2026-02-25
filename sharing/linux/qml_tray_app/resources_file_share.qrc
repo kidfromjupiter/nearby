@@ -1,6 +1,11 @@
 <RCC>
   <qresource prefix="/qml">
     <file>FileShareTray.qml</file>
+    <file>components/AppHeader.qml</file>
+    <file>components/SideBar.qml</file>
+    <file>components/AnimatedBlob.qml</file>
+    <file>components/DeviceCard.qml</file>
+    <file>components/TransferCard.qml</file>
   </qresource>
   <qresource prefix="/icons">
     <file>tray_icon.png</file>

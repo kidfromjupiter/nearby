@@ -1,5 +1,0 @@
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/CMakeFiles/bazel_nearby_connections_service_linux.dir
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/CMakeFiles/nearby_qml_tray_app.dir
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/CMakeFiles/nearby_qml_tray_app_qmlimportscan.dir
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/CMakeFiles/edit_cache.dir
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/sharing/linux/qml_tray_app/cmake-build-debug/CMakeFiles/rebuild_cache.dir
