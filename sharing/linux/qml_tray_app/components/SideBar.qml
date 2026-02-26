@@ -45,7 +45,9 @@ Item {
 
                     Label {
                         Layout.fillWidth: true
-                        text: fileShareController.mode === "Send" ? "Discovering" : "Always visible"
+                        text: !fileShareController.running
+                              ? "Inactive"
+                              : fileShareController.mode === "Send" ? "Discovering" : "Always visible"
                         font.weight: Font.Medium
                         color: textPrimary
                     }
@@ -63,7 +65,9 @@ Item {
                 Layout.leftMargin: 12
                 Layout.topMargin: 8
                 Layout.rightMargin: 12
-                text: fileShareController.mode === "Send"
+                text: !fileShareController.running
+                    ? "The service is not running. Start it to discover or receive files."
+                    : fileShareController.mode === "Send"
                     ? "Discovering nearby devices. Select a device below to send your file."
                     : "Nearby devices can share files with you. You'll be notified and must approve each transfer."
                 wrapMode: Text.WordWrap

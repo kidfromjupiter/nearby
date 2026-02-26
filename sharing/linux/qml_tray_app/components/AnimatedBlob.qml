@@ -9,6 +9,7 @@ Item {
 
     Label {
         x: 48; y: 48
+        visible: fileShareController.running
         text: "Ready to receive" + (fileShareController.pendingSendFilePath.length > 0 ? " / send" : "")
         font.pixelSize: 20
         font.weight: Font.Medium

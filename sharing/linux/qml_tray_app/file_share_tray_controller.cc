@@ -929,6 +929,10 @@ void FileShareTrayController::AddDiscoveredDevice(const QString& endpoint_id) {
   if (discovered_devices_.contains(endpoint_id)) {
     return;
   }
+  // Skip ourselves – the peer name is set before this is called.
+  if (PeerLabelForEndpoint(endpoint_id).trimmed() == device_name_.trimmed()) {
+    return;
+  }
   discovered_devices_.append(endpoint_id);
   emit discoveredDevicesChanged();
 }

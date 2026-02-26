@@ -54,7 +54,7 @@ ApplicationWindow {
                                                && fileShareController.transfers.length === 0
 
                 // ── Idle: animated blob ───────────────────────────────────
-                AnimatedBlob {}
+                AnimatedBlob { visible: mainContent.isIdle }
 
                 // ── Non-idle: scrollable device + transfer cards ──────────
                 Flickable {
