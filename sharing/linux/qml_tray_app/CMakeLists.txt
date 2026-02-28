@@ -85,12 +85,6 @@ install(FILES "${NEARBY_CONNECTIONS_SHARED_LIB}"
   DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
-qt_generate_deploy_qml_app_script(
-  TARGET nearby_qml_file_tray_app
-  FILENAME_VARIABLE nearby_qml_file_tray_app_deploy_script
-)
-install(SCRIPT "${nearby_qml_file_tray_app_deploy_script}")
-
 # Convenience build target for the file tray app.
 add_custom_target(build_file_tray_app
   DEPENDS nearby_qml_file_tray_app
