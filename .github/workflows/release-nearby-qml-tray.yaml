@@ -61,6 +61,7 @@ jobs:
             libgpg-error-dev \
             libbluetooth-dev \
             libxkbcommon-dev \
+            patchelf \
             qt6-base-dev \
             qt6-declarative-dev \
             qt6-tools-dev \
@@ -83,6 +84,7 @@ jobs:
           install -d "$INSTALL_PREFIX/lib"
           install -d "$INSTALL_PREFIX/include/sharing/linux"
           install -m 0755 "$BAZEL_BIN/sharing/linux/libnearby_connections_service_linux_shared.so" "$INSTALL_PREFIX/lib/"
+          patchelf --set-soname libnearby_connections_service_linux_shared.so "$INSTALL_PREFIX/lib/libnearby_connections_service_linux_shared.so"
           install -m 0644 "sharing/linux/nearby_connections_qt_facade.h" "$INSTALL_PREFIX/include/sharing/linux/"
           echo "nearby_prefix=$INSTALL_PREFIX" >> "$GITHUB_OUTPUT"
 
