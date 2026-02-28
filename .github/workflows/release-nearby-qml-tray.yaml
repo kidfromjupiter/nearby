@@ -54,7 +54,15 @@ jobs:
         id: nearby
         run: |
           INSTALL_PREFIX="$RUNNER_TEMP/nearby-install"
-          bash sharing/linux/install_nearby_connections_service.sh --prefix "$INSTALL_PREFIX"
+          bazel build \
+            -s \
+            --check_visibility=false \
+            --spawn_strategy=standalone \
+            --verbose_failures \
+            --cxxopt=-std=c++20 \
+            --host_cxxopt=-std=c++20 \
+            //sharing/linux:nearby_connections_service_linux_shared
+          bash sharing/linux/install_nearby_connections_service.sh --prefix "$INSTALL_PREFIX" --skip-build
           echo "nearby_prefix=$INSTALL_PREFIX" >> "$GITHUB_OUTPUT"
 
       - name: Configure QML tray app
