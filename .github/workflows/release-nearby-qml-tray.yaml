@@ -97,7 +97,9 @@ jobs:
         run: cmake --build sharing/linux/qml_tray_app/build -j
 
       - name: Package release bundle
-        run: cpack --config sharing/linux/qml_tray_app/build/CPackConfig.cmake -G ZIP
+        run: |
+          cd sharing/linux/qml_tray_app/build
+          cpack -G ZIP
 
       - name: Generate SHA256 checksum
         run: |
