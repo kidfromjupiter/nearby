@@ -49,32 +49,11 @@ set_target_properties(
     INTERFACE_INCLUDE_DIRECTORIES "${NEARBY_FACADE_INCLUDE_ROOT}"
 )
 
-qt_add_executable(nearby_qml_tray_app
-  main.cpp
-  nearby_tray_controller.cc
-  nearby_tray_controller.h
-  resources.qrc
-)
-
 qt_add_executable(nearby_qml_file_tray_app
   file_share_tray_main.cpp
   file_share_tray_controller.cc
   file_share_tray_controller.h
   resources_file_share.qrc
-)
-
-target_include_directories(nearby_qml_tray_app PRIVATE
-  "${CMAKE_CURRENT_LIST_DIR}"
-  "${NEARBY_FACADE_INCLUDE_ROOT}"
-)
-target_link_libraries(nearby_qml_tray_app PRIVATE
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Qml
-  Qt6::Quick
-  Qt6::QuickControls2
-  nearby_connections_service_linux_installed
 )
 
 target_include_directories(nearby_qml_file_tray_app PRIVATE
@@ -93,18 +72,11 @@ target_link_libraries(nearby_qml_file_tray_app PRIVATE
 
 get_filename_component(NEARBY_CONNECTIONS_SHARED_LIB_DIR "${NEARBY_CONNECTIONS_SHARED_LIB}" DIRECTORY)
 
-set_target_properties(nearby_qml_tray_app PROPERTIES
-  BUILD_RPATH "${NEARBY_CONNECTIONS_SHARED_LIB_DIR}"
-  INSTALL_RPATH "$ORIGIN"
-)
 set_target_properties(nearby_qml_file_tray_app PROPERTIES
   BUILD_RPATH "${NEARBY_CONNECTIONS_SHARED_LIB_DIR}"
   INSTALL_RPATH "$ORIGIN"
 )
 
-install(TARGETS nearby_qml_tray_app
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-)
 install(TARGETS nearby_qml_file_tray_app
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
@@ -112,12 +84,6 @@ install(TARGETS nearby_qml_file_tray_app
 install(FILES "${NEARBY_CONNECTIONS_SHARED_LIB}"
   DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
-
-qt_generate_deploy_qml_app_script(
-  TARGET nearby_qml_tray_app
-  OUTPUT_SCRIPT nearby_qml_tray_app_deploy_script
-)
-install(SCRIPT "${nearby_qml_tray_app_deploy_script}")
 
 qt_generate_deploy_qml_app_script(
   TARGET nearby_qml_file_tray_app

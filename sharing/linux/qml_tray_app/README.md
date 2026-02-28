@@ -1,6 +1,6 @@
-# Nearby QML Tray App
+# Nearby File Share Tray App
 
-This folder contains a Qt/QML tray application backend and UI wired to:
+This folder contains the Qt/QML **FileShareTray** application — a system tray app for file sharing via Nearby Connections, wired to:
 
 - `nearby::sharing::linux::NearbyConnectionsServiceLinux`
 - Send mode (discovery + connect)
@@ -12,10 +12,11 @@ This folder contains a Qt/QML tray application backend and UI wired to:
 
 ## Files
 
-- `main.cpp`: Qt app bootstrap + system tray behavior.
-- `nearby_tray_controller.h/.cc`: QML-facing backend wrapper around Nearby Connections.
-- `Main.qml`: UI for send/receive workflows and transfer monitoring.
-- `resources.qrc`: embeds `Main.qml`.
+- `file_share_tray_main.cpp`: Qt app bootstrap + system tray behavior.
+- `file_share_tray_controller.h/.cc`: QML-facing backend wrapper around Nearby Connections.
+- `FileShareTray.qml`: Top-level UI for the file share tray app.
+- `components/`: Shared QML UI components used by `FileShareTray.qml`.
+- `resources_file_share.qrc`: Embeds `FileShareTray.qml` and components.
 
 ## Runtime behavior
 
@@ -64,7 +65,7 @@ cmake --install build
 
 Bundle output:
 
-- `dist/bin/nearby_qml_tray_app`
+- `dist/bin/nearby_qml_file_tray_app`
 - `dist/bin/libnearby_connections_service_linux_shared.so`
 
 The app is installed with `INSTALL_RPATH=$ORIGIN`, so it resolves the Nearby
@@ -86,6 +87,6 @@ Output:
 
 This zip is created from the CMake install tree and includes:
 
-- `nearby_qml_tray_app`
+- `nearby_qml_file_tray_app`
 - `libnearby_connections_service_linux_shared.so`
 - Qt runtime libs/plugins/QML imports discovered by Qt deploy tooling
