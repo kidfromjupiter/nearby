@@ -1,0 +1,80 @@
+name: Release Nearby QML Tray App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-linux:
+    name: Build and Release Linux Bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up Bazelisk
+        uses: bazelbuild/setup-bazelisk@v3
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools
+
+      - name: Build and install Nearby shared library
+        id: nearby
+        run: |
+          INSTALL_PREFIX="$RUNNER_TEMP/nearby-install"
+          bash sharing/linux/install_nearby_connections_service.sh --prefix "$INSTALL_PREFIX"
+          echo "nearby_prefix=$INSTALL_PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Configure QML tray app
+        run: |
+          cmake -S sharing/linux/qml_tray_app \
+                -B sharing/linux/qml_tray_app/build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DNEARBY_INSTALL_PREFIX="${{ steps.nearby.outputs.nearby_prefix }}"
+
+      - name: Build QML tray app
+        run: cmake --build sharing/linux/qml_tray_app/build -j
+
+      - name: Package release bundle
+        run: cpack --config sharing/linux/qml_tray_app/build/CPackConfig.cmake -G ZIP
+
+      - name: Generate SHA256 checksum
+        run: |
+          cd sharing/linux/qml_tray_app/build
+          sha256sum nearby_qml_tray_app-Linux-x86_64.zip > nearby_qml_tray_app-Linux-x86_64.zip.sha256
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nearby_qml_tray_app-Linux-x86_64
+          path: |
+            sharing/linux/qml_tray_app/build/nearby_qml_tray_app-Linux-x86_64.zip
+            sharing/linux/qml_tray_app/build/nearby_qml_tray_app-Linux-x86_64.zip.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            sharing/linux/qml_tray_app/build/nearby_qml_tray_app-Linux-x86_64.zip
+            sharing/linux/qml_tray_app/build/nearby_qml_tray_app-Linux-x86_64.zip.sha256
