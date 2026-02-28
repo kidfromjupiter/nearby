@@ -60,8 +60,14 @@ jobs:
             --verbose_failures \
             --cxxopt=-std=c++20 \
             --host_cxxopt=-std=c++20 \
+            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+            --copt='-DGITHUB_BUILD' \
             //sharing/linux:nearby_connections_service_linux_shared
-          bash sharing/linux/install_nearby_connections_service.sh --prefix "$INSTALL_PREFIX" --skip-build
+          BAZEL_BIN="$(bazel info bazel-bin)"
+          install -d "$INSTALL_PREFIX/lib"
+          install -d "$INSTALL_PREFIX/include/sharing/linux"
+          install -m 0755 "$BAZEL_BIN/sharing/linux/libnearby_connections_service_linux_shared.so" "$INSTALL_PREFIX/lib/"
+          install -m 0644 "sharing/linux/nearby_connections_qt_facade.h" "$INSTALL_PREFIX/include/sharing/linux/"
           echo "nearby_prefix=$INSTALL_PREFIX" >> "$GITHUB_OUTPUT"
 
       - name: Configure QML tray app
