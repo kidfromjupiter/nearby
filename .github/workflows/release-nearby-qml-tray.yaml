@@ -24,14 +24,14 @@ jobs:
           submodules: recursive
 
       - name: Set up Bazelisk
-        uses: bazelbuild/setup-bazelisk@v3
-
-      - name: Cache Bazel build outputs
-        uses: actions/cache@v4
+        uses: bazel-contrib/setup-bazel@0.18.0
         with:
-          path: ~/.cache/bazel-disk
-          key: bazel-build-${{ runner.os }}-${{ github.sha }}
-          restore-keys: bazel-build-${{ runner.os }}-
+          # Avoid downloading Bazel every time.
+          bazelisk-cache: true
+          # Store build cache per workflow.
+          disk-cache: ${{ github.workflow }}
+          # Share repository cache between workflows.
+          repository-cache: true
 
       - name: Install Linux build dependencies
         run: |
@@ -63,7 +63,6 @@ jobs:
         run: |
           INSTALL_PREFIX="$RUNNER_TEMP/nearby-install"
           bazel build \
-            --disk_cache=~/.cache/bazel-disk \
             --check_visibility=false \
             --spawn_strategy=standalone \
             --verbose_failures \

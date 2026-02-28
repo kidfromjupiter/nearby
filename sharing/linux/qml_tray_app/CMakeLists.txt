@@ -87,7 +87,7 @@ install(FILES "${NEARBY_CONNECTIONS_SHARED_LIB}"
 
 qt_generate_deploy_qml_app_script(
   TARGET nearby_qml_file_tray_app
-  OUTPUT_SCRIPT nearby_qml_file_tray_app_deploy_script
+  FILENAME_VARIABLE nearby_qml_file_tray_app_deploy_script
 )
 install(SCRIPT "${nearby_qml_file_tray_app_deploy_script}")
 
