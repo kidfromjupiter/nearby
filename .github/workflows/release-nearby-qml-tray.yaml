@@ -55,7 +55,6 @@ jobs:
         run: |
           INSTALL_PREFIX="$RUNNER_TEMP/nearby-install"
           bazel build \
-            -s \
             --check_visibility=false \
             --spawn_strategy=standalone \
             --verbose_failures \
