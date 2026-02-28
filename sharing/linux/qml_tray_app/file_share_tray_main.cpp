@@ -155,10 +155,12 @@ int main(int argc, char* argv[]) {
 
   QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller,
                    [&controller]() { controller.stop(); });
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
   QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &tray,
                    [&tray, &resolve_tray_icon](Qt::ColorScheme) {
                      tray.setIcon(resolve_tray_icon());
                    });
+#endif
 
   tray.setContextMenu(&tray_menu);
   tray.show();

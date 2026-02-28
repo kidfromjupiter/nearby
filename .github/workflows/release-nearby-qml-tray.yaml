@@ -33,6 +33,14 @@ jobs:
           # Share repository cache between workflows.
           repository-cache: true
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/release-nearby-qml-tray.yaml') }}
+          restore-keys: apt-${{ runner.os }}-
+          save-always: true
+
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
