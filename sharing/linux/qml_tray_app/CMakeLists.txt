@@ -30,3 +30,12 @@ target_link_libraries(nearby_qml_file_tray_app PRIVATE
   Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2
   "${NEARBY_LIB}"
 )
+
+set_target_properties(nearby_qml_file_tray_app PROPERTIES
+  INSTALL_RPATH "$ORIGIN/lib"
+)
+
+include(GNUInstallDirs)
+
+install(TARGETS nearby_qml_file_tray_app RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES "${NEARBY_LIB}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
