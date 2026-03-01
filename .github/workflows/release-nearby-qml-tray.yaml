@@ -126,11 +126,13 @@ jobs:
           export LD_LIBRARY_PATH="$NEARBY_PREFIX/lib:${LD_LIBRARY_PATH:-}"
           export QMAKE="$(which qmake6)"
           export OUTPUT="$RUNNER_TEMP/Nearby_File_Share-x86_64.AppImage"
+          cp "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/tray_icon.png" \
+             "$RUNNER_TEMP/nearby-file-share.png"
           "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
             --appdir "$RUNNER_TEMP/AppDir" \
             --executable "$STAGING/bin/nearby_qml_file_tray_app" \
             --desktop-file "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/nearby-file-share.desktop" \
-            --icon-file "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/tray_icon.png" \
+            --icon-file "$RUNNER_TEMP/nearby-file-share.png" \
             --library "$NEARBY_PREFIX/lib/libnearby_connections_service_linux_shared.so" \
             --plugin qt \
             --output appimage
