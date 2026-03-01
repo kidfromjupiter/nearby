@@ -129,8 +129,8 @@ jobs:
           "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
             --appdir "$RUNNER_TEMP/AppDir" \
             --executable "$STAGING/bin/nearby_qml_file_tray_app" \
-            --desktop-file sharing/linux/qml_tray_app/nearby-file-share.desktop \
-            --icon-file sharing/linux/qml_tray_app/tray_icon.png \
+            --desktop-file "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/nearby-file-share.desktop" \
+            --icon-file "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/tray_icon.png" \
             --library "$NEARBY_PREFIX/lib/libnearby_connections_service_linux_shared.so" \
             --plugin qt \
             --output appimage
