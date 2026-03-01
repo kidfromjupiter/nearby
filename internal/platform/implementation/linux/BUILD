@@ -153,14 +153,12 @@ cc_library(
         "crypto.cc",
     ],
     visibility = ["//visibility:public"],
-#    linkopts= [
-#        '-lssl',
-#        "-lcrypto"
-#    ],
+    linkopts= [
+        "-lcrypto",
+    ],
     deps = [
         "//internal/platform:base",
         "//internal/platform/implementation:types",
-        "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
     ],
 )
