@@ -21,7 +21,7 @@
 
 namespace nearby {
 namespace sharing {
-class NearbyConnectionsQtFacade {
+class __attribute__((visibility("default"))) NearbyConnectionsQtFacade {
 public:
   enum class Status {
     kSuccess = 0,

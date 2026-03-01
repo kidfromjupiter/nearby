@@ -66,8 +66,7 @@ jobs:
             qt6-declarative-dev \
             qt6-wayland \
             qt6-tools-dev \
-            qt6-tools-dev-tools \
-            qml6-module-* 
+            qt6-tools-dev-tools 
 
       - name: Build and install Nearby shared library
         id: nearby
@@ -81,6 +80,8 @@ jobs:
             --host_cxxopt=-std=c++20 \
             --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
             --copt='-DGITHUB_BUILD' \
+            --copt='-fvisibility=hidden' \
+            --cxxopt='-fvisibility-inlines-hidden' \
             //sharing/linux:nearby_connections_service_linux_shared
           BAZEL_BIN="$(bazel info bazel-bin)"
           install -d "$INSTALL_PREFIX/lib"
@@ -112,41 +113,10 @@ jobs:
           echo "tarball=$RUNNER_TEMP/$TARBALL" >> "$GITHUB_ENV"
           echo "tarball_name=$TARBALL" >> "$GITHUB_ENV"
 
-      - name: Download linuxdeploy
-        run: |
-          cd "$RUNNER_TEMP"
-          curl -fSL -o linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -fSL -o linuxdeploy-plugin-qt-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
-
-      - name: Build AppImage
-        run: |
-          STAGING="$RUNNER_TEMP/staging"
-          NEARBY_PREFIX="${{ steps.nearby.outputs.nearby_prefix }}"
-          export LD_LIBRARY_PATH="$NEARBY_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-          export QMAKE="$(which qmake6)"
-          export QML_SOURCES_PATHS="$GITHUB_WORKSPACE/sharing/linux/qml_tray_app"
-          export OUTPUT="$RUNNER_TEMP/Nearby_File_Share-x86_64.AppImage"
-          cp "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/tray_icon.png" \
-             "$RUNNER_TEMP/nearby-file-share.png"
-          "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
-            --appdir "$RUNNER_TEMP/AppDir" \
-            --executable "$STAGING/bin/nearby_qml_file_tray_app" \
-            --desktop-file "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/nearby-file-share.desktop" \
-            --icon-file "$RUNNER_TEMP/nearby-file-share.png" \
-            --library "$NEARBY_PREFIX/lib/libnearby_connections_service_linux_shared.so" \
-            --plugin qt \
-            --output appimage
-          echo "appimage=$OUTPUT" >> "$GITHUB_ENV"
-          echo "appimage_name=Nearby_File_Share-x86_64.AppImage" >> "$GITHUB_ENV"
-
       - name: Generate SHA256 checksums
         run: |
           cd "$RUNNER_TEMP"
           sha256sum "${{ env.tarball_name }}" > "${{ env.tarball_name }}.sha256"
-          sha256sum "${{ env.appimage_name }}" > "${{ env.appimage_name }}.sha256"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -155,8 +125,6 @@ jobs:
           path: |
             ${{ env.tarball }}
             ${{ env.tarball }}.sha256
-            ${{ env.appimage }}
-            ${{ env.appimage }}.sha256
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -166,5 +134,3 @@ jobs:
           files: |
             ${{ env.tarball }}
             ${{ env.tarball }}.sha256
-            ${{ env.appimage }}
-            ${{ env.appimage }}.sha256
