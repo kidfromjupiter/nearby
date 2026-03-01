@@ -1,20 +1,40 @@
-# Unofficial Linux Nearby
+# Google Nearby Sharing & Connections for Linux (Unofficial)
+
+> **P2P file sharing, device discovery, and wireless connectivity on Linux** — powered by Google Nearby protocols.
 
 ![](cover.png)
 
-This repository is an unofficial Linux implementation of Google Nearby, forked from the official Nearby codebase. It focuses on Linux platform support for Nearby Connections, Nearby Sharing, and Nearby Presence.
+An unofficial Linux implementation of [Google Nearby](https://developers.google.com/nearby), forked from the official Nearby codebase. This project brings **Nearby Connections**, **Nearby Sharing (Quick Share)**, and **Nearby Presence** to Linux, enabling file transfer and device discovery between **Linux and Android** (and Linux to Linux) over Bluetooth, Wi-Fi LAN, Wi-Fi Direct, and more.
 
-Status: This is still a work in progress, and there are known bugs and issues that need to be sorted out.
+> **Status:** Work in progress — known bugs exist. Contributions and bug reports are welcome.
 
-Motivation: Google has multiple Linux implementation PRs open, but they have not been merged into the official repo. I am tired of begging maintainers, so I am maintaining this Linux-focused fork.
+**Motivation:** Google has multiple Linux implementation PRs open but they have not been merged into the official repo. This is an actively maintained Linux-focused fork.
 
-Learn more:
----------------
-> - Nearby wiki: https://github.com/kidfromjupiter/nearby/wiki
+> - 📖 Nearby wiki: https://github.com/kidfromjupiter/nearby/wiki
 
 If you spot bugs, help identifying them is appreciated. Filing issues is always welcome. If you want to contribute, please start a discussion about the guidance you need.
 
 Bazel is a terrible build system when it does not work and a pretty good one when it does. There is no in-between. The source code is unwieldy and it took me months to understand what everything does and where things go. It does not help that this is how I decided I am going to learn C++. Blessed be my naive soul.
+
+## Installation
+
+1. Go to the [Releases page](https://github.com/kidfromjupiter/nearby/releases) and download the latest `.tar.gz` archive.
+2. Extract the archive:
+   ```shell
+   tar -xzf nearby-linux-*.tar.gz
+   ```
+3. Run the executable inside the `bin/` directory of the extracted folder:
+   ```shell
+   ./bin/nearby_sharing
+   ```
+
+## Android Companion App
+
+To **share files from Android to Linux**, you need the Android companion app **shareby**:
+
+👉 **https://github.com/kidfromjupiter/shareby**
+
+Install the app on your Android device, then run the Linux sharing service (see [Installation](#installation) above) on your Linux machine to receive files.
 
 ## Testing status
 
@@ -63,11 +83,11 @@ When initiating a connection from Android to Linux, the Wi-Fi Hotspot medium upg
 
 This is not an officially supported Google product.
 
-## What is included
+## Features
 
-- Nearby Connections
-- Nearby Sharing
-- Nearby Presence
+- **Nearby Connections** — Low-level P2P communication API (advertising, discovery, data transfer)
+- **Nearby Sharing** — File and text sharing compatible with Android Quick Share
+- **Nearby Presence** — Device presence detection and discovery
 
 ## Linux platform support
 
@@ -115,13 +135,14 @@ The Linux platform implementation provides abstraction layers over local network
 
 Note: BLE fast advertising is not supported on Linux because Android uses separate LE random/resolvable MAC addresses per advertisement, and Linux does not currently support that. The Linux implementation uses BLE Extended advertising instead.
 
-## Example applications
+## Example Applications
 
-- Nearby Sharing service example: `sharing/linux`
-- Nearby Connections examples:
+- **Linux Nearby Sharing service:** `sharing/linux`
+- **Nearby Connections examples:**
   - Walkie-talkie: `nearby/connection/walkietalkie`
   - File share: `nearby/connections/file_share`
-- Android Nearby Connections example app (full API exposure): https://github.com/kidfromjupiter/nearby-connections-android
+- **Android Nearby Connections example app** (full API exposure): https://github.com/kidfromjupiter/nearby-connections-android
+- **Android → Linux file sharing companion app (shareby):** https://github.com/kidfromjupiter/shareby
 
 ## Contributing
 
