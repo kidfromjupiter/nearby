@@ -1,5 +1,7 @@
 # Unofficial Linux Nearby
 
+![](cover.png)
+
 This repository is an unofficial Linux implementation of Google Nearby, forked from the official Nearby codebase. It focuses on Linux platform support for Nearby Connections, Nearby Sharing, and Nearby Presence.
 
 Status: This is still a work in progress, and there are known bugs and issues that need to be sorted out.
