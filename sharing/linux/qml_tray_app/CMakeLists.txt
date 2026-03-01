@@ -32,7 +32,7 @@ target_link_libraries(nearby_qml_file_tray_app PRIVATE
 )
 
 set_target_properties(nearby_qml_file_tray_app PROPERTIES
-  INSTALL_RPATH "$ORIGIN/lib"
+  INSTALL_RPATH "$ORIGIN/../lib"
 )
 
 include(GNUInstallDirs)
