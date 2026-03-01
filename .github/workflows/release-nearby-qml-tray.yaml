@@ -130,7 +130,6 @@ jobs:
           export LD_LIBRARY_PATH="$NEARBY_PREFIX/lib:${LD_LIBRARY_PATH:-}"
           export QMAKE="$(which qmake6)"
           export QML_SOURCES_PATHS="$GITHUB_WORKSPACE/sharing/linux/qml_tray_app"
-          export EXTRA_PLATFORM_PLUGINS="wayland"
           export OUTPUT="$RUNNER_TEMP/Nearby_File_Share-x86_64.AppImage"
           cp "$GITHUB_WORKSPACE/sharing/linux/qml_tray_app/tray_icon.png" \
              "$RUNNER_TEMP/nearby-file-share.png"
