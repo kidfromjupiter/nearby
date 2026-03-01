@@ -123,7 +123,7 @@ The Linux platform implementation provides abstraction layers over local network
 | BLE (Fast)        |                        | <ul><li>[x] </li></ul> |                        |
 | BLE (GATT)        | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> |                        |
 | BLE (Extended)    | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> |                        |
-| BLE (L2CAP)       |                        |                        |                        |
+| BLE (L2CAP)       | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> |
 | Wi-Fi LAN         | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> | <ul><li>[x] </li></ul> |
 | Wi-Fi Hotspot     |                        |                        | <ul><li>[x] </li></ul> |
 | Wi-Fi Direct      |                        |                        | <ul><li>[x] </li></ul> |
