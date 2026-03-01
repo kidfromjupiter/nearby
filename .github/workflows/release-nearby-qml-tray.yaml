@@ -123,6 +123,7 @@ jobs:
         run: |
           STAGING="$RUNNER_TEMP/staging"
           NEARBY_PREFIX="${{ steps.nearby.outputs.nearby_prefix }}"
+          export LD_LIBRARY_PATH="$NEARBY_PREFIX/lib:${LD_LIBRARY_PATH:-}"
           export QMAKE="$(which qmake6)"
           export OUTPUT="$RUNNER_TEMP/Nearby_File_Share-x86_64.AppImage"
           "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
