@@ -67,9 +67,7 @@ jobs:
             qt6-wayland \
             qt6-tools-dev \
             qt6-tools-dev-tools \
-            qml6-module-qtquick-controls \
-            qml6-module-qtqml-workerscript \
-            qml6-module-qtquick-window 
+            qml6-module-* 
 
       - name: Build and install Nearby shared library
         id: nearby
