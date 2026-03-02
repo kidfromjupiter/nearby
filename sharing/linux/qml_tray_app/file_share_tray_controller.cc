@@ -23,6 +23,9 @@ bool IsTerminalPayloadStatus(NearbyConnectionsQtFacade::PayloadStatus status) {
          status == NearbyConnectionsQtFacade::PayloadStatus::kCanceled;
 }
 
+// Mirrors kOutgoingDisconnectionDelay from nearby_sharing_service_impl.
+constexpr int kOutgoingDisconnectionDelayMs = 60'000;
+
 QString NormalizeConnectionStrategy(const QString& strategy) {
   const QString token = strategy.trimmed().toLower();
   if (token == QStringLiteral("p2pstar") || token == QStringLiteral("star")) {
@@ -269,6 +272,14 @@ void FileShareTrayController::stop() {
   endpoint_mediums_.clear();
   target_endpoint_for_send_.clear();
 
+  // Cancel any pending outgoing-completion timers.
+  for (QTimer* timer : outgoing_disconnect_timers_) {
+    timer->stop();
+    timer->deleteLater();
+  }
+  outgoing_disconnect_timers_.clear();
+  pending_outgoing_completions_.clear();
+
   emit discoveredDevicesChanged();
   emit connectedDevicesChanged();
   emit endpointMediumsChanged();
@@ -382,6 +393,12 @@ void FileShareTrayController::clearTransfers() {
   outgoing_file_payload_to_endpoint_.clear();
   outgoing_file_payload_to_name_.clear();
   send_terminal_notified_.clear();
+  for (QTimer* timer : outgoing_disconnect_timers_) {
+    timer->stop();
+    timer->deleteLater();
+  }
+  outgoing_disconnect_timers_.clear();
+  pending_outgoing_completions_.clear();
   emit transfersChanged();
 }
 
@@ -504,6 +521,33 @@ FileShareTrayController::BuildConnectionListener() {
     QMetaObject::invokeMethod(
         this,
         [this, endpoint = QString::fromStdString(endpoint_id)]() {
+          // If there is a pending outgoing completion for this endpoint, the
+          // receiver just disconnected — mirror OutgoingShareSession::
+          // OnConnectionDisconnected: cancel the fallback timer and emit the
+          // final tray notification now.
+          auto pending_it = pending_outgoing_completions_.find(endpoint);
+          if (pending_it != pending_outgoing_completions_.end()) {
+            const PendingOutgoingCompletion completion = pending_it.value();
+            pending_outgoing_completions_.erase(pending_it);
+            auto timer_it = outgoing_disconnect_timers_.find(endpoint);
+            if (timer_it != outgoing_disconnect_timers_.end()) {
+              timer_it.value()->stop();
+              timer_it.value()->deleteLater();
+              outgoing_disconnect_timers_.erase(timer_it);
+            }
+            LogLine(QStringLiteral("Receiver disconnected, emitting send result endpoint=%1").arg(endpoint));
+            if (completion.success) {
+              emit requestTrayMessage(
+                  QStringLiteral("Send complete"),
+                  QStringLiteral("%1 sent to %2").arg(completion.file_name, completion.peer));
+            } else {
+              emit requestTrayMessage(
+                  QStringLiteral("Send failed"),
+                  QStringLiteral("%1 failed to send to %2")
+                      .arg(completion.file_name, completion.peer));
+            }
+          }
+
           const QString peer = PeerLabelForEndpoint(endpoint);
           RemoveConnectedDevice(endpoint);
           endpoint_mediums_.remove(endpoint);
@@ -656,6 +700,10 @@ FileShareTrayController::BuildPayloadListener() {
                               .arg(incoming_endpoint)
                               .arg(update.payload_id)
                               .arg(final_path));
+                  // Mirror nearby_sharing_service_impl: receiver disconnects
+                  // immediately on transfer complete, which then triggers the
+                  // sender's OnConnectionDisconnected / DelayComplete path.
+                  disconnectDevice(incoming_endpoint);
                 } else if (!is_outgoing_file &&
                            IsTerminalPayloadStatus(update.status)) {
                   incoming_file_paths_.remove(update.payload_id);
@@ -671,17 +719,8 @@ FileShareTrayController::BuildPayloadListener() {
               const QString file_name =
                   outgoing_file_payload_to_name_.value(update.payload_id,
                                                        QStringLiteral("file"));
-
-              if (update.status == NearbyConnectionsQtFacade::PayloadStatus::kSuccess) {
-                emit requestTrayMessage(
-                    QStringLiteral("Send complete"),
-                    QStringLiteral("%1 sent to %2").arg(file_name, peer));
-              } else {
-                emit requestTrayMessage(
-                    QStringLiteral("Send failed"),
-                    QStringLiteral("%1 failed to send to %2")
-                        .arg(file_name, peer));
-              }
+              const bool send_success =
+                  update.status == NearbyConnectionsQtFacade::PayloadStatus::kSuccess;
 
               outgoing_file_payload_to_endpoint_.remove(update.payload_id);
               outgoing_file_payload_to_name_.remove(update.payload_id);
@@ -697,7 +736,45 @@ FileShareTrayController::BuildPayloadListener() {
               }
               target_endpoint_for_send_.clear();
 
-              disconnectDevice(endpoint);
+              // Mirror nearby_sharing_service_impl OutgoingShareSession::DelayComplete:
+              // wait for the receiver to disconnect first so we don't cut the
+              // connection before in-flight bytes are fully processed.  A
+              // 60-second timer fires disconnectDevice() as a fallback.
+              LogLine(QStringLiteral("Outgoing transfer complete endpoint=%1 success=%2, waiting for receiver disconnect")
+                          .arg(endpoint)
+                          .arg(send_success ? QStringLiteral("true") : QStringLiteral("false")));
+              pending_outgoing_completions_.insert(
+                  endpoint, PendingOutgoingCompletion{file_name, peer, endpoint, send_success});
+
+              QTimer* timer = new QTimer(this);
+              timer->setSingleShot(true);
+              connect(timer, &QTimer::timeout, this,
+                      [this, endpoint, timer]() {
+                        auto it = pending_outgoing_completions_.find(endpoint);
+                        if (it == pending_outgoing_completions_.end()) {
+                          timer->deleteLater();
+                          outgoing_disconnect_timers_.remove(endpoint);
+                          return;
+                        }
+                        const PendingOutgoingCompletion completion = it.value();
+                        pending_outgoing_completions_.erase(it);
+                        outgoing_disconnect_timers_.remove(endpoint);
+                        timer->deleteLater();
+                        LogLine(QStringLiteral("Outgoing disconnect timeout fired endpoint=%1").arg(endpoint));
+                        if (completion.success) {
+                          emit requestTrayMessage(
+                              QStringLiteral("Send complete"),
+                              QStringLiteral("%1 sent to %2").arg(completion.file_name, completion.peer));
+                        } else {
+                          emit requestTrayMessage(
+                              QStringLiteral("Send failed"),
+                              QStringLiteral("%1 failed to send to %2")
+                                  .arg(completion.file_name, completion.peer));
+                        }
+                        disconnectDevice(endpoint);
+                      });
+              outgoing_disconnect_timers_.insert(endpoint, timer);
+              timer->start(kOutgoingDisconnectionDelayMs);
             },
             Qt::QueuedConnection);
       };

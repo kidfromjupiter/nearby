@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -206,6 +207,15 @@ class FileShareTrayController : public QObject {
   QHash<qlonglong, QString> outgoing_file_payload_to_endpoint_;
   QHash<qlonglong, QString> outgoing_file_payload_to_name_;
   QSet<qlonglong> send_terminal_notified_;
+
+  struct PendingOutgoingCompletion {
+    QString file_name;
+    QString peer;
+    QString endpoint;
+    bool success = false;
+  };
+  QHash<QString, PendingOutgoingCompletion> pending_outgoing_completions_;
+  QHash<QString, QTimer*> outgoing_disconnect_timers_;
 
   QFile log_file_;
 };
