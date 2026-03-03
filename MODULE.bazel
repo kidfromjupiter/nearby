@@ -15,6 +15,9 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 git_repository(
     name = "beto-core",
     commit = "479289ef072b0880c0347d36937265e44f00f4ee",
+    patch_cmds = [
+        "grep -q '^load(\"@rules_cc//cc:defs.bzl\", \"cc_binary\", \"cc_library\")' BUILD || sed -i '1iload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\", \"cc_library\")' BUILD",
+    ],
     remote = "https://beto-core.googlesource.com/beto-core",
 )
 

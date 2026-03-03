@@ -48,6 +48,7 @@ filegroup(
         "credential_manager.h",
         "credential_manager_impl.h",
         "ldt.h",
+        "np_ldt.h",
         "scan_manager.h",
         "service_controller.h",
         "service_controller_impl.h",
