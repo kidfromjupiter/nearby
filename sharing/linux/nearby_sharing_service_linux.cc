@@ -16,10 +16,12 @@
 #include "sharing/proto/enums.pb.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
@@ -37,6 +39,7 @@
 #include "internal/platform/file.h"
 #include "internal/platform/logging.h"
 #include "sharing/certificates/common.h"
+#include "sharing/proto/wire_format.pb.h"
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/evp.h>
@@ -84,6 +87,231 @@ TransferMetadata::Status StatusFromPayloadStatus(
       return TransferMetadata::Status::kCancelled;
   }
   return TransferMetadata::Status::kUnknown;
+}
+
+using Frame = nearby::sharing::service::proto::Frame;
+using V1Frame = nearby::sharing::service::proto::V1Frame;
+using IntroductionFrame = nearby::sharing::service::proto::IntroductionFrame;
+using ConnectionResponseFrame =
+    nearby::sharing::service::proto::ConnectionResponseFrame;
+using PairedKeyEncryptionFrame =
+    nearby::sharing::service::proto::PairedKeyEncryptionFrame;
+using PairedKeyResultFrame = nearby::sharing::service::proto::PairedKeyResultFrame;
+
+constexpr size_t kPairedKeySignedDataSize = 72;
+constexpr size_t kPairedKeySecretIdHashSize = 6;
+
+bool IsControlFrameType(V1Frame::FrameType type) {
+  switch (type) {
+    case V1Frame::INTRODUCTION:
+    case V1Frame::RESPONSE:
+    case V1Frame::PAIRED_KEY_ENCRYPTION:
+    case V1Frame::PAIRED_KEY_RESULT:
+    case V1Frame::CANCEL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool TryParseControlFrame(const connections::Payload& payload, Frame* frame) {
+  if (!frame || payload.GetType() != connections::PayloadType::kBytes) {
+    return false;
+  }
+  std::string bytes = payload.AsBytes().string_data();
+  if (!frame->ParseFromString(bytes) || !frame->has_v1() ||
+      frame->version() != Frame::V1 || !frame->v1().has_type()) {
+    return false;
+  }
+  return IsControlFrameType(frame->v1().type());
+}
+
+bool SendFramePayload(connections::Core* core, const std::string& endpoint_id,
+                      auto& transfer_state, const Frame& frame) {
+  if (core == nullptr) {
+    return false;
+  }
+
+  std::string serialized;
+  if (!frame.SerializeToString(&serialized)) {
+    LOG(ERROR) << "Failed to serialize protocol frame.";
+    return false;
+  }
+
+  connections::Payload payload{nearby::ByteArray(serialized)};
+  transfer_state.control_payload_ids.insert(payload.GetId());
+  std::vector<std::string> endpoints{endpoint_id};
+  core->SendPayload(endpoints, std::move(payload), [](connections::Status) {});
+  return true;
+}
+
+Frame BuildPairedKeyEncryptionFrame() {
+  Frame frame;
+  frame.set_version(Frame::V1);
+  V1Frame* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::PAIRED_KEY_ENCRYPTION);
+  PairedKeyEncryptionFrame* encryption_frame =
+      v1_frame->mutable_paired_key_encryption();
+  std::vector<uint8_t> secret_hash = GenerateRandomBytes(kPairedKeySecretIdHashSize);
+  std::vector<uint8_t> signed_data = GenerateRandomBytes(kPairedKeySignedDataSize);
+  encryption_frame->set_secret_id_hash(secret_hash.data(), secret_hash.size());
+  encryption_frame->set_signed_data(signed_data.data(), signed_data.size());
+  return frame;
+}
+
+Frame BuildPairedKeyResultFrame(PairedKeyResultFrame::Status status) {
+  Frame frame;
+  frame.set_version(Frame::V1);
+  V1Frame* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::PAIRED_KEY_RESULT);
+  PairedKeyResultFrame* result_frame = v1_frame->mutable_paired_key_result();
+  result_frame->set_status(status);
+  result_frame->set_os_type(
+      location::nearby::proto::sharing::OSType::UNKNOWN_OS_TYPE);
+  return frame;
+}
+
+Frame BuildConnectionResponseFrame(ConnectionResponseFrame::Status status) {
+  Frame frame;
+  frame.set_version(Frame::V1);
+  V1Frame* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::RESPONSE);
+  v1_frame->mutable_connection_response()->set_status(status);
+  return frame;
+}
+
+bool PrepareOutgoingIntroductionAndPayloads(auto& transfer_state,
+                                            IntroductionFrame* introduction) {
+  if (introduction == nullptr) {
+    return false;
+  }
+
+  transfer_state.pending_outgoing_payloads.clear();
+  transfer_state.attachment_payload_ids.clear();
+  transfer_state.completed_attachment_payload_ids.clear();
+  transfer_state.expected_attachment_payload_count = 0;
+  introduction->set_start_transfer(true);
+
+  const AttachmentContainer& attachments = transfer_state.attachments;
+  for (const auto& file : attachments.GetFileAttachments()) {
+    if (!file.file_path().has_value()) {
+      continue;
+    }
+    int64_t payload_id = connections::Payload::GenerateId();
+    auto* metadata = introduction->add_file_metadata();
+    metadata->set_id(file.id());
+    metadata->set_name(std::string(file.file_name()));
+    metadata->set_type(file.type());
+    metadata->set_payload_id(payload_id);
+    metadata->set_size(file.size());
+    metadata->set_mime_type(std::string(file.mime_type()));
+    metadata->set_parent_folder(std::string(file.parent_folder()));
+
+    nearby::InputFile input_file(file.file_path()->ToString());
+    transfer_state.pending_outgoing_payloads.emplace_back(
+        payload_id, std::string(file.parent_folder()),
+        std::string(file.file_name()), std::move(input_file));
+    transfer_state.attachment_payload_ids.insert(payload_id);
+  }
+
+  for (const auto& text : attachments.GetTextAttachments()) {
+    int64_t payload_id = connections::Payload::GenerateId();
+    auto* metadata = introduction->add_text_metadata();
+    metadata->set_id(text.id());
+    metadata->set_text_title(std::string(text.text_title()));
+    metadata->set_type(text.type());
+    metadata->set_payload_id(payload_id);
+    metadata->set_size(text.size());
+
+    std::string body = std::string(text.text_body());
+    transfer_state.pending_outgoing_payloads.emplace_back(
+        payload_id, nearby::ByteArray(body));
+    transfer_state.attachment_payload_ids.insert(payload_id);
+  }
+
+  transfer_state.expected_attachment_payload_count =
+      transfer_state.attachment_payload_ids.size();
+  return true;
+}
+
+void PopulateIncomingAttachmentsFromIntroduction(
+    auto& transfer_state, const IntroductionFrame& introduction) {
+  AttachmentContainer::Builder builder;
+  builder.ReserveAttachmentsCount(
+      introduction.text_metadata_size(), introduction.file_metadata_size(),
+      introduction.wifi_credentials_metadata_size());
+
+  transfer_state.text_attachment_id_by_payload_id.clear();
+  transfer_state.file_attachment_id_by_payload_id.clear();
+  transfer_state.attachment_payload_ids.clear();
+  transfer_state.completed_attachment_payload_ids.clear();
+  transfer_state.expected_attachment_payload_count = 0;
+
+  for (const auto& file : introduction.file_metadata()) {
+    builder.AddFileAttachment(FileAttachment(
+        file.id(), file.size(), file.name(), file.mime_type(), file.type(),
+        file.parent_folder()));
+    transfer_state.file_attachment_id_by_payload_id[file.payload_id()] =
+        file.id();
+    transfer_state.attachment_payload_ids.insert(file.payload_id());
+  }
+
+  for (const auto& text : introduction.text_metadata()) {
+    builder.AddTextAttachment(TextAttachment(
+        text.id(), text.type(), text.text_title(), text.size()));
+    transfer_state.text_attachment_id_by_payload_id[text.payload_id()] =
+        text.id();
+    transfer_state.attachment_payload_ids.insert(text.payload_id());
+  }
+
+  transfer_state.expected_attachment_payload_count =
+      transfer_state.attachment_payload_ids.size();
+  std::unique_ptr<AttachmentContainer> incoming = builder.Build();
+  transfer_state.attachments = std::move(*incoming);
+}
+
+void UpdateIncomingAttachmentPayload(auto& transfer_state,
+                                     connections::Payload& payload) {
+  if (payload.GetType() == connections::PayloadType::kBytes) {
+    auto text_it = transfer_state.text_attachment_id_by_payload_id.find(
+        payload.GetId());
+    if (text_it == transfer_state.text_attachment_id_by_payload_id.end()) {
+      return;
+    }
+
+    std::string body = payload.AsBytes().string_data();
+    auto& texts = transfer_state.attachments.GetTextAttachments();
+    for (int i = 0; i < texts.size(); ++i) {
+      if (texts[i].id() == text_it->second) {
+        transfer_state.attachments.GetMutableTextAttachment(i).set_text_body(
+            body);
+        return;
+      }
+    }
+    return;
+  }
+
+  if (payload.GetType() != connections::PayloadType::kFile) {
+    return;
+  }
+  auto file_it =
+      transfer_state.file_attachment_id_by_payload_id.find(payload.GetId());
+  if (file_it == transfer_state.file_attachment_id_by_payload_id.end()) {
+    return;
+  }
+  nearby::InputFile* input_file = payload.AsFile();
+  if (input_file == nullptr) {
+    return;
+  }
+
+  auto& files = transfer_state.attachments.GetFileAttachments();
+  for (int i = 0; i < files.size(); ++i) {
+    if (files[i].id() == file_it->second) {
+      transfer_state.attachments.GetMutableFileAttachment(i).set_file_path(
+          nearby::FilePath(input_file->GetFilePath()));
+      return;
+    }
+  }
 }
 
 }  // namespace
@@ -614,7 +842,7 @@ void NearbySharingServiceLinux::StopAdvertising() {
     return;
   }
   is_advertising_ = false;
-  core_->StopAdvertising([this](connections::Status status) {
+  core_->StopAdvertising([](connections::Status status) {
     static_cast<void>(status);
   });
 }
@@ -944,45 +1172,27 @@ void NearbySharingServiceLinux::HandleConnectionAccepted(
     return;
   }
 
+  TransferState& transfer_state = transfer_it->second;
   auto share_target = GetShareTarget(endpoint_id);
   if (share_target) {
-    TransferMetadata metadata = TransferMetadataBuilder()
-                                    .set_status(TransferMetadata::Status::kInProgress)
-                                    .set_progress(0)
-                                    .set_total_attachments_count(
-                                        transfer_it->second.attachments.GetAttachmentCount())
-                                    .build();
-    NotifyTransferUpdate(*share_target, transfer_it->second, metadata);
+    TransferMetadata::Status status = is_incoming
+                                          ? TransferMetadata::Status::kInProgress
+                                          : TransferMetadata::Status::kAwaitingRemoteAcceptance;
+    TransferMetadata metadata =
+        TransferMetadataBuilder()
+            .set_status(status)
+            .set_progress(0)
+            .set_total_attachments_count(
+                transfer_state.attachments.GetAttachmentCount())
+            .build();
+    NotifyTransferUpdate(*share_target, transfer_state, metadata);
   }
 
-  if (!is_incoming) {
-    const AttachmentContainer& attachments = transfer_it->second.attachments;
-    std::unique_ptr<connections::Payload> payload;
-    if (!attachments.GetTextAttachments().empty()) {
-      std::string text =
-          std::string(attachments.GetTextAttachments()[0].text_body());
-      payload = std::make_unique<connections::Payload>(ByteArray(text));
-    } else if (!attachments.GetFileAttachments().empty()) {
-      const auto& file_attachment = attachments.GetFileAttachments()[0];
-      if (file_attachment.file_path().has_value()) {
-        std::string file_path = file_attachment.file_path()->ToString();
-        nearby::InputFile input_file(file_path);
-        payload = std::make_unique<connections::Payload>(
-            std::string(file_attachment.parent_folder()),
-            std::string(file_attachment.file_name()), std::move(input_file));
-      }
-    }
-
-    if (payload) {
-      std::vector<std::string> endpoints;
-      endpoints.push_back(endpoint_id);
-      core_->SendPayload(
-          endpoints, std::move(*payload),
-          [this](connections::Status status) {
-            if (!status.Ok()) {
-              is_transferring_ = false;
-            }
-          });
+  // Start minimal Nearby Share frame exchange: PAIRED_KEY_ENCRYPTION.
+  if (!transfer_state.paired_key_encryption_sent) {
+    Frame frame = BuildPairedKeyEncryptionFrame();
+    if (SendFramePayload(core_.get(), endpoint_id, transfer_state, frame)) {
+      transfer_state.paired_key_encryption_sent = true;
     }
   }
 
@@ -1023,8 +1233,7 @@ connections::PayloadListener NearbySharingServiceLinux::MakePayloadListener(
   static_cast<void>(is_incoming);
   connections::PayloadListener listener;
   listener.payload_cb =
-      [this, is_incoming](absl::string_view endpoint_id,
-                          connections::Payload payload) {
+      [this](absl::string_view endpoint_id, connections::Payload payload) {
         auto transfer_it = active_transfers_.find(std::string(endpoint_id));
         if (transfer_it == active_transfers_.end()) {
           return;
@@ -1034,17 +1243,145 @@ connections::PayloadListener NearbySharingServiceLinux::MakePayloadListener(
           return;
         }
 
-        TransferMetadata metadata = TransferMetadataBuilder()
-                                        .set_status(TransferMetadata::Status::kInProgress)
-                                        .set_progress(0)
-                                        .build();
-        NotifyTransferUpdate(*share_target, transfer_it->second, metadata);
+        TransferState& transfer_state = transfer_it->second;
+
+        Frame frame;
+        if (TryParseControlFrame(payload, &frame)) {
+          transfer_state.control_payload_ids.insert(payload.GetId());
+          const V1Frame& v1 = frame.v1();
+          switch (v1.type()) {
+            case V1Frame::PAIRED_KEY_ENCRYPTION: {
+              transfer_state.paired_key_encryption_received = true;
+              if (!transfer_state.paired_key_encryption_sent) {
+                Frame local_encryption = BuildPairedKeyEncryptionFrame();
+                if (SendFramePayload(core_.get(), std::string(endpoint_id),
+                                     transfer_state, local_encryption)) {
+                  transfer_state.paired_key_encryption_sent = true;
+                }
+              }
+              if (!transfer_state.paired_key_result_sent) {
+                Frame result = BuildPairedKeyResultFrame(
+                    PairedKeyResultFrame::UNABLE);
+                if (SendFramePayload(core_.get(), std::string(endpoint_id),
+                                     transfer_state, result)) {
+                  transfer_state.paired_key_result_sent = true;
+                }
+              }
+              break;
+            }
+            case V1Frame::PAIRED_KEY_RESULT:
+              transfer_state.paired_key_result_received = true;
+              break;
+            case V1Frame::INTRODUCTION: {
+              transfer_state.introduction_received = true;
+              if (transfer_state.is_incoming && v1.has_introduction()) {
+                PopulateIncomingAttachmentsFromIntroduction(
+                    transfer_state, v1.introduction());
+                if (!transfer_state.connection_response_sent) {
+                  Frame response =
+                      BuildConnectionResponseFrame(ConnectionResponseFrame::ACCEPT);
+                  if (SendFramePayload(core_.get(), std::string(endpoint_id),
+                                       transfer_state, response)) {
+                    transfer_state.connection_response_sent = true;
+                    transfer_state.connection_response_accepted = true;
+                  }
+                }
+                TransferMetadata metadata =
+                    TransferMetadataBuilder()
+                        .set_status(TransferMetadata::Status::kInProgress)
+                        .set_progress(0)
+                        .set_total_attachments_count(
+                            transfer_state.attachments.GetAttachmentCount())
+                        .build();
+                NotifyTransferUpdate(*share_target, transfer_state, metadata);
+              }
+              break;
+            }
+            case V1Frame::RESPONSE: {
+              if (!transfer_state.is_incoming && v1.has_connection_response()) {
+                transfer_state.connection_response_received = true;
+                transfer_state.connection_response_accepted =
+                    v1.connection_response().status() ==
+                    ConnectionResponseFrame::ACCEPT;
+                if (!transfer_state.connection_response_accepted) {
+                  TransferMetadata::Status rejected_status =
+                      TransferMetadata::Status::kRejected;
+                  TransferMetadata metadata =
+                      TransferMetadataBuilder()
+                          .set_status(rejected_status)
+                          .set_progress(0)
+                          .build();
+                  NotifyTransferUpdate(*share_target, transfer_state, metadata);
+                  active_transfers_.erase(transfer_it);
+                  if (active_transfers_.empty()) {
+                    is_transferring_ = false;
+                  }
+                  return;
+                }
+              }
+              break;
+            }
+            case V1Frame::CANCEL: {
+              TransferMetadata metadata =
+                  TransferMetadataBuilder()
+                      .set_status(TransferMetadata::Status::kCancelled)
+                      .set_progress(0)
+                      .build();
+              NotifyTransferUpdate(*share_target, transfer_state, metadata);
+              active_transfers_.erase(transfer_it);
+              if (active_transfers_.empty()) {
+                is_transferring_ = false;
+              }
+              return;
+            }
+            default:
+              break;
+          }
+
+          // Sender-side progression:
+          if (!transfer_state.is_incoming &&
+              transfer_state.paired_key_encryption_sent &&
+              transfer_state.paired_key_encryption_received &&
+              transfer_state.paired_key_result_sent &&
+              transfer_state.paired_key_result_received &&
+              !transfer_state.introduction_sent) {
+            Frame introduction_frame;
+            introduction_frame.set_version(Frame::V1);
+            V1Frame* out_v1 = introduction_frame.mutable_v1();
+            out_v1->set_type(V1Frame::INTRODUCTION);
+            if (PrepareOutgoingIntroductionAndPayloads(
+                    transfer_state, out_v1->mutable_introduction()) &&
+                SendFramePayload(core_.get(), std::string(endpoint_id),
+                                 transfer_state, introduction_frame)) {
+              transfer_state.introduction_sent = true;
+            }
+          }
+
+          if (!transfer_state.is_incoming && transfer_state.introduction_sent &&
+              transfer_state.connection_response_received &&
+              transfer_state.connection_response_accepted &&
+              !transfer_state.attachment_payloads_sent) {
+            transfer_state.attachment_payloads_sent = true;
+            std::vector<std::string> endpoints{std::string(endpoint_id)};
+            for (auto& data_payload : transfer_state.pending_outgoing_payloads) {
+              transfer_state.attachment_payload_ids.insert(data_payload.GetId());
+              core_->SendPayload(endpoints, std::move(data_payload),
+                                 [](connections::Status) {});
+            }
+            transfer_state.pending_outgoing_payloads.clear();
+          }
+          return;
+        }
+
+        // Non-control payloads are attachment payloads.
+        UpdateIncomingAttachmentPayload(transfer_state, payload);
       };
 
   listener.payload_progress_cb =
-      [this, is_incoming](absl::string_view endpoint_id,
-                          const connections::PayloadProgressInfo& info) {
-        auto transfer_it = active_transfers_.find(std::string(endpoint_id));
+      [this](absl::string_view endpoint_id,
+             const connections::PayloadProgressInfo& info) {
+        std::string endpoint_id_string(endpoint_id);
+        auto transfer_it = active_transfers_.find(endpoint_id_string);
         if (transfer_it == active_transfers_.end()) {
           return;
         }
@@ -1053,22 +1390,61 @@ connections::PayloadListener NearbySharingServiceLinux::MakePayloadListener(
           return;
         }
 
-        float progress = 0.0f;
-        if (info.total_bytes > 0) {
-          progress = static_cast<float>(info.bytes_transferred) /
-                     static_cast<float>(info.total_bytes);
+        TransferState& transfer_state = transfer_it->second;
+        if (transfer_state.control_payload_ids.contains(info.payload_id)) {
+          return;
+        }
+        if (transfer_state.expected_attachment_payload_count == 0) {
+          return;
+        }
+        if (!transfer_state.attachment_payload_ids.contains(info.payload_id)) {
+          return;
+        }
+
+        size_t completed = transfer_state.completed_attachment_payload_ids.size();
+        float progress = static_cast<float>(completed) /
+                         static_cast<float>(
+                             transfer_state.expected_attachment_payload_count);
+        TransferMetadata::Status status = TransferMetadata::Status::kInProgress;
+
+        if (info.status == connections::PayloadProgressInfo::Status::kInProgress) {
+          if (info.total_bytes > 0) {
+            float payload_progress = static_cast<float>(info.bytes_transferred) /
+                                     static_cast<float>(info.total_bytes);
+            progress =
+                (static_cast<float>(completed) + payload_progress) /
+                static_cast<float>(transfer_state.expected_attachment_payload_count);
+          }
+        } else if (info.status ==
+                   connections::PayloadProgressInfo::Status::kSuccess) {
+          transfer_state.completed_attachment_payload_ids.insert(info.payload_id);
+          completed = transfer_state.completed_attachment_payload_ids.size();
+          progress = static_cast<float>(completed) /
+                     static_cast<float>(
+                         transfer_state.expected_attachment_payload_count);
+          status = completed >= transfer_state.expected_attachment_payload_count
+                       ? TransferMetadata::Status::kComplete
+                       : TransferMetadata::Status::kInProgress;
+        } else {
+          status = StatusFromPayloadStatus(info.status);
         }
 
         TransferMetadata metadata =
             TransferMetadataBuilder()
-                .set_status(StatusFromPayloadStatus(info.status))
-                .set_progress(progress)
+                .set_status(status)
+                .set_progress(std::min(progress, 1.0f))
                 .set_transferred_bytes(info.bytes_transferred)
+                .set_total_attachments_count(
+                    static_cast<int>(
+                        transfer_state.expected_attachment_payload_count))
                 .build();
-
-        NotifyTransferUpdate(*share_target, transfer_it->second, metadata);
+        NotifyTransferUpdate(*share_target, transfer_state, metadata);
 
         if (TransferMetadata::IsFinalStatus(metadata.status())) {
+          if (metadata.status() == TransferMetadata::Status::kComplete) {
+            core_->DisconnectFromEndpoint(endpoint_id_string,
+                                          [](connections::Status) {});
+          }
           active_transfers_.erase(transfer_it);
           if (active_transfers_.empty()) {
             is_transferring_ = false;

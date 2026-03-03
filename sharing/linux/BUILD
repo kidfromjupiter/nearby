@@ -163,9 +163,11 @@ cc_binary(
     deps = [
         ":nearby_sharing_service_linux",
         "//internal/platform:base",
+        "//internal/platform/implementation:account_manager",
         "//sharing:attachments",
         "//sharing:types",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
     ],
 )
 

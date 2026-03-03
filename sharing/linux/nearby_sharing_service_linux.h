@@ -15,6 +15,7 @@
 #ifndef THIRD_PARTY_NEARBY_SHARING_LINUX_NEARBY_SHARING_SERVICE_LINUX_H_
 #define THIRD_PARTY_NEARBY_SHARING_LINUX_NEARBY_SHARING_SERVICE_LINUX_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -145,6 +146,28 @@ class NearbySharingServiceLinux : public NearbySharingService {
     nearby::sharing::AttachmentContainer attachments;
     TransferUpdateCallback* callback = nullptr;
     bool is_incoming = false;
+
+    // Minimal Nearby Share frame protocol state.
+    bool paired_key_encryption_sent = false;
+    bool paired_key_encryption_received = false;
+    bool paired_key_result_sent = false;
+    bool paired_key_result_received = false;
+    bool introduction_sent = false;
+    bool introduction_received = false;
+    bool connection_response_sent = false;
+    bool connection_response_received = false;
+    bool connection_response_accepted = false;
+    bool attachment_payloads_sent = false;
+
+    // Payload routing state.
+    std::unordered_set<int64_t> control_payload_ids;
+    std::unordered_set<int64_t> attachment_payload_ids;
+    std::unordered_set<int64_t> completed_attachment_payload_ids;
+    std::unordered_map<int64_t, int64_t> text_attachment_id_by_payload_id;
+    std::unordered_map<int64_t, int64_t> file_attachment_id_by_payload_id;
+    size_t expected_attachment_payload_count = 0;
+    bool transfer_complete_notified = false;
+    std::vector<connections::Payload> pending_outgoing_payloads;
   };
 
   struct ParsedAdvertisement {
