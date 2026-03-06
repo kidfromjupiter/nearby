@@ -146,7 +146,7 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   }
 
 //async api
-// this doesn't run. wonder why
+// runs with nearby presence
 std::unique_ptr<api::ble::BleMedium::AdvertisingSession>
 BleV2Medium::StartAdvertising(
   const api::ble::BleAdvertisementData &advertising_data,
@@ -164,10 +164,6 @@ BleV2Medium::StartAdvertising(
     return nullptr;
   }
 
-  std::shared_ptr<sdbus::IProxy> proxy =
-    sdbus::createProxy(*system_bus_, "org.bluez", adapter_.GetObjectPath());
-  proxy->finishRegistration();
-
   std::shared_ptr<AdvertisingCallback> shared_cb =
     std::make_shared<AdvertisingCallback>(std::move(callback));
 
@@ -176,39 +172,30 @@ BleV2Medium::StartAdvertising(
     *system_bus_, advertising_data, advertise_set_parameters));
   auto adv_it = advs_.begin();
 
-  auto pending_call =
-    proxy->callMethodAsync("RegisterAdvertisement")
-         .onInterface(org::bluez::LEAdvertisingManager1_proxy::INTERFACE_NAME)
-         .withArguments((*adv_it)->getObjectPath(),
-                        std::map<std::string, sdbus::Variant>{})
-         .uponReplyInvoke(
-           [this, proxy, shared_cb, adv_it](const sdbus::Error *error) {
-             if (error != nullptr && error->isValid()) {
-               {
-                 absl::MutexLock lock(&advs_mutex_);
-                 advs_.erase(adv_it);
-               }
-               DBUS_LOG_METHOD_CALL_ERROR(adv_manager_,
-                                          "RegisterAdvertisement", *error);
-               auto name = error->getName();
-               std::string msg = error->getMessage();
-               absl::Status status;
-
-               if (name == "org.bluez.Error.InvalidArguments" ||
-                 name == "org.bluez.Error.InvalidLength") {
-                 status = absl::InvalidArgumentError(msg);
-               } else if (name == "org.bluez.Error.AlreadyExists") {
-                 status = absl::AlreadyExistsError(msg);
-               } else if (name == "org.bluez.Error.NotPermitted") {
-                 status = absl::ResourceExhaustedError(msg);
-               } else {
-                 status = absl::UnknownError(msg);
-               }
-               shared_cb->start_advertising_result(std::move(status));
-             } else {
-               shared_cb->start_advertising_result(absl::OkStatus());
-             }
-           });
+  // Keep async API surface, but register using the same typed DBus path as the
+  // working sync implementation to avoid signature mismatch (oa{sv} vs sa{sv}).
+  try {
+    adv_manager_->RegisterAdvertisement((*adv_it)->getObjectPath(), {});
+    shared_cb->start_advertising_result(absl::OkStatus());
+  } catch (const sdbus::Error &e) {
+    advs_.erase(adv_it);
+    DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisement", e);
+    auto name = e.getName();
+    std::string msg = e.getMessage();
+    absl::Status status;
+    if (name == "org.bluez.Error.InvalidArguments" ||
+        name == "org.bluez.Error.InvalidLength") {
+      status = absl::InvalidArgumentError(msg);
+    } else if (name == "org.bluez.Error.AlreadyExists") {
+      status = absl::AlreadyExistsError(msg);
+    } else if (name == "org.bluez.Error.NotPermitted") {
+      status = absl::ResourceExhaustedError(msg);
+    } else {
+      status = absl::UnknownError(msg);
+    }
+    shared_cb->start_advertising_result(std::move(status));
+    return nullptr;
+  }
 
   absl::AnyInvocable<absl::Status()> stop_adv = [&, adv_it]() {
     LOG(INFO) << __func__ << ": Unregistering advertisement object "
