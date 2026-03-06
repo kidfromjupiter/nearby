@@ -24,7 +24,7 @@ git_repository(
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2021",
-    versions = ["1.77.1"],
+    versions = ["1.85.0"],
 )
 use_repo(rust, "rust_toolchains")
 
