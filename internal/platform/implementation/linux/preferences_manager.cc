@@ -29,6 +29,8 @@
 #include "internal/platform/implementation/platform.h"
 #include "nlohmann/json.hpp"
 #include "nlohmann/json_fwd.hpp"
+#include "google/protobuf/json/json.h"
+#include "google/protobuf/message.h"
 
 namespace nearby {
 namespace linux {
@@ -113,6 +115,16 @@ bool PreferencesManager::SetTime(absl::string_view key, absl::Time value) {
   return Commit();
 }
 
+bool PreferencesManager::SetProtoMessage(
+    absl::string_view key, const google::protobuf::Message& value) {
+  std::string json_string;
+  if (!google::protobuf::json::MessageToJsonString(value, &json_string).ok()) {
+    return false;
+  }
+  absl::MutexLock lock(&mutex_);
+  return SetValue(key, json::parse(json_string));
+}
+
 // Get JSON value.
 json PreferencesManager::Get(absl::string_view key,
                              const json& default_value) const {
@@ -179,10 +191,33 @@ absl::Time PreferencesManager::GetTime(absl::string_view key,
   return absl::FromUnixNanos(result->get<int64_t>());
 }
 
+bool PreferencesManager::GetProtoMessage(absl::string_view key,
+                                         google::protobuf::Message* value) const {
+  absl::MutexLock lock(&mutex_);
+  auto result = value_.find(absl::StrCat(key));
+  if (result == value_.end()) {
+    return false;
+  }
+  return google::protobuf::json::JsonStringToMessage(result->dump(), value).ok();
+}
+
 // Removes preferences
 void PreferencesManager::Remove(absl::string_view key) {
   absl::MutexLock lock(&mutex_);
   value_.erase(absl::StrCat(key));
+}
+
+bool PreferencesManager::RemoveKeyPrefix(absl::string_view prefix) {
+  absl::MutexLock lock(&mutex_);
+  auto it = value_.begin();
+  while (it != value_.end()) {
+    if (it.key().starts_with(prefix)) {
+      it = value_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return true;
 }
 
 // Private methods
