@@ -22,12 +22,40 @@
 #include <utility>
 #include <vector>
 
+#if defined(__has_include)
+#if __has_include("location/nearby/sharing/lib/sync/sync_binding_prefs.pb.h")
 #include "location/nearby/sharing/lib/sync/sync_binding_prefs.pb.h"
+#define NEARBY_HAS_SYNC_BINDING_PREFS_PROTO 1
+#endif  // __has_include("location/nearby/sharing/lib/sync/sync_binding_prefs.pb.h")
+#if __has_include("location/nearby/sharing/lib/sync/sync_config_prefs.pb.h")
 #include "location/nearby/sharing/lib/sync/sync_config_prefs.pb.h"
+#define NEARBY_HAS_SYNC_CONFIG_PREFS_PROTO 1
+#endif  // __has_include("location/nearby/sharing/lib/sync/sync_config_prefs.pb.h")
+#endif  // defined(__has_include)
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "sharing/internal/api/private_certificate_data.h"
+
+#ifndef NEARBY_HAS_SYNC_CONFIG_PREFS_PROTO
+namespace nearby::sharing::sync {
+class SyncConfigPrefs {
+ public:
+  bool ParseFromString(const std::string&) { return false; }
+  std::string SerializeAsString() const { return {}; }
+};
+}  // namespace nearby::sharing::sync
+#endif  // NEARBY_HAS_SYNC_CONFIG_PREFS_PROTO
+
+#ifndef NEARBY_HAS_SYNC_BINDING_PREFS_PROTO
+namespace nearby::sharing::sync {
+class SyncBindingPrefs {
+ public:
+  bool ParseFromString(const std::string&) { return false; }
+  std::string SerializeAsString() const { return {}; }
+};
+}  // namespace nearby::sharing::sync
+#endif  // NEARBY_HAS_SYNC_BINDING_PREFS_PROTO
 
 namespace nearby::sharing::api {
 
