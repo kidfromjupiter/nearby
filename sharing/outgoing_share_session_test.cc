@@ -673,7 +673,7 @@ TEST_F(OutgoingShareSessionTest, SendPayloads) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
 
-  session_.SendPayloads([](std::optional<V1Frame> frame) {},
+  session_.SendPayloads([](bool is_timeout, std::optional<V1Frame> frame) {},
                         payload_transder_update_callback.AsStdFunction());
 
   auto payload_listener = session_.payload_tracker().lock();
@@ -714,7 +714,7 @@ TEST_F(OutgoingShareSessionTest, SendPayloadsSetsAdvancedProtectionFlags) {
 
   session_.SetAdvancedProtectionStatus(/*advanced_protection_enabled=*/true,
                                        /*advanced_protection_mismatch=*/true);
-  session_.SendPayloads([](std::optional<V1Frame> frame) {},
+  session_.SendPayloads([](bool is_timeout, std::optional<V1Frame> frame) {},
                         payload_transder_update_callback.AsStdFunction());
 
   auto payload_listener = session_.payload_tracker().lock();
@@ -753,7 +753,7 @@ TEST_F(OutgoingShareSessionTest, SendNextPayload) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
 
-  session_.SendPayloads([](std::optional<V1Frame> frame) {},
+  session_.SendPayloads([](bool is_timeout, std::optional<V1Frame> frame) {},
                         payload_transder_update_callback.AsStdFunction());
 
   EXPECT_CALL(send_payload_callback, Call(_, _))
@@ -782,38 +782,6 @@ TEST_F(OutgoingShareSessionTest, SendNextPayload) {
             payload->id = session_.attachment_payload_map().at(wifi1_.id());
           });
   session_.SendNextPayload();
-}
-
-TEST_F(OutgoingShareSessionTest, ProcessKeyVerificationResultFail) {
-  NearbyConnectionImpl connection(device_info_);
-  session_.set_session_id(1234);
-  ConnectionSuccess(&connection);
-  session_.SetTokenForTests("1234");
-
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail,
-          OSType::WINDOWS),
-      IsFalse());
-
-  EXPECT_THAT(session_.token(), Eq("1234"));
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
-}
-
-TEST_F(OutgoingShareSessionTest, ProcessKeyVerificationResultSuccess) {
-  NearbyConnectionImpl connection(device_info_);
-  session_.set_session_id(1234);
-  ConnectionSuccess(&connection);
-  session_.SetTokenForTests("1234");
-
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess,
-          OSType::WINDOWS),
-      IsTrue());
-
-  EXPECT_THAT(session_.token(), IsEmpty());
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
 }
 
 TEST_F(OutgoingShareSessionTest, DelayCompleteReceiverDisconnect) {

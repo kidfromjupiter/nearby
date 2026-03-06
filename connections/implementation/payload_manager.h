@@ -323,9 +323,13 @@ class PayloadManager : public EndpointManager::FrameProcessor {
                  LAST_CHUNK) != 0);
   }
 
+  // Creates an incoming payload and returns a handle to it.
+  // If `save_path` is empty, the payload will be saved to the default save
+  // path set in `SetCustomSavePath()`.
   ErrorOr<PendingPayloadHandle> CreateIncomingPayload(
       const location::nearby::connections::PayloadTransferFrame& frame,
-      const std::string& endpoint_id) ABSL_LOCKS_EXCLUDED(mutex_);
+      const std::string& endpoint_id,
+      const std::string& save_path) ABSL_LOCKS_EXCLUDED(mutex_);
 
   Payload::Id CreateOutgoingPayload(Payload payload,
                                     const EndpointIds& endpoint_ids)
@@ -367,6 +371,9 @@ class PayloadManager : public EndpointManager::FrameProcessor {
       const location::nearby::connections::PayloadTransferFrame::PayloadHeader&
           payload_header,
       std::int64_t payload_chunk_offset, bool is_last_chunk);
+  bool IsPayloadReceivedAckEnabled(ClientProxy* client,
+                                   const std::string& endpoint_id,
+                                   PendingPayload& pending_payload);
 
   // Handles a finished outgoing payload for the given endpointIds. All
   // statuses except for SUCCESS are handled here.

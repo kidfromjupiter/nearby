@@ -27,6 +27,9 @@
 #include <tuple>
 #include <vector>
 
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
@@ -51,7 +54,6 @@
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/api/sharing_platform.h"
-#include "sharing/internal/api/sharing_rpc_client.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/nearby_connection.h"
@@ -102,11 +104,13 @@ class NearbySharingServiceImpl
   NearbySharingServiceImpl(
       std::unique_ptr<nearby::TaskRunner> service_thread, Context* context,
       nearby::sharing::api::SharingPlatform& sharing_platform,
-      std::unique_ptr<nearby::sharing::api::SharingRpcClientFactory>
-          nearby_share_client_factory,
+      nearby::sharing::api::IdentityRpcClient* absl_nonnull
+          nearby_identity_client,
+      nearby::sharing::api::SharingRpcClient* absl_nonnull nearby_share_client,
       std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
       std::unique_ptr<NearbyShareContactManager> contact_manager,
-      analytics::AnalyticsRecorder* analytics_recorder);
+      analytics::AnalyticsRecorder* analytics_recorder,
+      bool supports_file_sync);
   ~NearbySharingServiceImpl() override;
 
   // NearbySharingService
@@ -311,16 +315,20 @@ class NearbySharingServiceImpl
       int64_t share_target_id,
       PairedKeyVerificationRunner::PairedKeyVerificationResult result,
       ::location::nearby::proto::sharing::OSType share_target_os_type);
-  void OnReceivedIntroduction(
+  void OnIncomingSessionFrameRead(
       int64_t share_target_id,
-      std::optional<nearby::sharing::service::proto::IntroductionFrame> frame);
+      bool is_timeout,
+      std::optional<nearby::sharing::service::proto::V1Frame> frame);
+  void OnReceivedIntroduction(
+      IncomingShareSession& session,
+      const nearby::sharing::service::proto::IntroductionFrame& frame);
   void OnReceiveConnectionResponse(
       int64_t share_target_id,
       std::optional<nearby::sharing::service::proto::ConnectionResponseFrame>
           frame);
   void OnStorageCheckCompleted(IncomingShareSession& session);
-  void OnFrameRead(
-      int64_t share_target_id,
+  void OnOutgoingSessionFrameRead(
+      int64_t share_target_id, bool is_timeout,
       std::optional<nearby::sharing::service::proto::V1Frame> frame);
 
   void OnConnectionDisconnected(int64_t share_target_id);
@@ -406,10 +414,12 @@ class NearbySharingServiceImpl
   AccountManager& account_manager_;
   // Used to create analytics events.
   analytics::AnalyticsRecorder& analytics_recorder_;
+  // Whether the device supports file sync extension.
+  const bool supports_file_sync_;
 
   std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager_;
-  std::unique_ptr<nearby::sharing::api::SharingRpcClientFactory>
-      nearby_share_client_factory_;
+  nearby::sharing::api::SharingRpcClient* absl_nonnull const
+      nearby_share_client_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> local_device_data_manager_;
   std::unique_ptr<NearbyShareContactManager> contact_manager_;
   std::unique_ptr<NearbyShareCertificateManager> certificate_manager_;
@@ -520,6 +530,7 @@ class NearbySharingServiceImpl
   // If true, a new endpoint id will be generated at the next advertisement.
   bool force_new_endpoint_id_ = false;
   OutgoingTargetsManager outgoing_targets_manager_;
+  nearby::sharing::SyncManager sync_manager_;
 };
 
 }  // namespace nearby::sharing

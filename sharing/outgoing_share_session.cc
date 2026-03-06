@@ -188,12 +188,6 @@ bool OutgoingShareSession::InitiateSendAttachments(
   return success;
 }
 
-bool OutgoingShareSession::ProcessKeyVerificationResult(
-    PairedKeyVerificationRunner::PairedKeyVerificationResult result,
-    location::nearby::proto::sharing::OSType share_target_os_type) {
-  return HandleKeyVerificationResult(result, share_target_os_type);
-}
-
 void OutgoingShareSession::OnConnectionDisconnected() {
   disconnection_timeout_ = nullptr;
   if (pending_complete_metadata_.has_value()) {
@@ -342,7 +336,8 @@ bool OutgoingShareSession::AcceptTransfer(
   VLOG(1) << "Waiting for response frame from " << share_target().id;
   frames_reader()->ReadFrame(
       nearby::sharing::service::proto::V1Frame::RESPONSE,
-      [callback = std::move(response_callback)](std::optional<V1Frame> frame) {
+      [callback = std::move(response_callback)](bool is_timeout,
+                                                std::optional<V1Frame> frame) {
         if (!frame.has_value()) {
           callback(std::nullopt);
           return;
@@ -355,14 +350,16 @@ bool OutgoingShareSession::AcceptTransfer(
 
 void OutgoingShareSession::SendPayloads(
     std::function<
-        void(std::optional<nearby::sharing::service::proto::V1Frame> frame)>
+        void(bool is_tiumeout,
+             std::optional<nearby::sharing::service::proto::V1Frame> frame)>
         frame_read_callback,
     std::function<void()> payload_transder_update_callback) {
   if (!IsConnected()) {
     LOG(WARNING) << "SendPayloads invoked for unconnected share target";
     return;
   }
-  frames_reader()->ReadFrame(std::move(frame_read_callback));
+  frames_reader()->ReadFrame(std::move(frame_read_callback),
+                             absl::ZeroDuration());
 
   // Log analytics event of sending attachment start.
   analytics_recorder().NewSendAttachmentsStart(

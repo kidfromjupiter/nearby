@@ -25,10 +25,12 @@
 #include <utility>
 #include <vector>
 
+#include "google/nearby/identity/v1/resources.pb.h"
+#include "google/nearby/identity/v1/rpcs.pb.h"
+#include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
-#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -38,8 +40,6 @@
 #include "internal/platform/implementation/account_manager.h"
 #include "internal/platform/mac_address.h"
 #include "internal/test/fake_account_manager.h"
-#include "proto/identity/v1/resources.pb.h"
-#include "proto/identity/v1/rpcs.pb.h"
 #include "sharing/certificates/constants.h"
 #include "sharing/certificates/fake_nearby_share_certificate_storage.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
@@ -48,7 +48,6 @@
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
 #include "sharing/certificates/test_util.h"
-#include "sharing/internal/api/fake_nearby_share_client.h"
 #include "sharing/internal/api/mock_sharing_platform.h"
 #include "sharing/internal/public/pref_names.h"
 #include "sharing/internal/test/fake_bluetooth_adapter.h"
@@ -148,7 +147,7 @@ class NearbyShareCertificateManagerImplTest
     cert_manager_ = NearbyShareCertificateManagerImpl::Factory::Create(
         &fake_context_, mock_sharing_platform_,
         local_device_data_manager_.get(),
-        /*profile_path=*/{}, &client_factory_);
+        /*profile_path=*/{}, &identity_client_);
     cert_manager_->AddObserver(this);
 
     cert_store_ = cert_store_factory_.instances().back();
@@ -191,10 +190,6 @@ class NearbyShareCertificateManagerImplTest
   }
   void OnPrivateCertificatesChanged() override {
     ++num_private_certs_changed_notifications_;
-  }
-
-  FakeNearbyIdentityClient* GetIdentityClient() {
-    return client_factory_.identity_instances().back();
   }
 
  protected:
@@ -242,10 +237,11 @@ class NearbyShareCertificateManagerImplTest
   }
 
   void VerifyCertificatesUpload(bool expected_force_update_contacts) {
-    FakeNearbyIdentityClient* identity_client = GetIdentityClient();
-    ASSERT_FALSE(identity_client->publish_device_requests().empty());
+    std::vector<PublishDeviceRequest> publish_device_requests =
+        identity_client_.publish_device_requests();
+    ASSERT_FALSE(publish_device_requests.empty());
     const PublishDeviceRequest& publish_device_request =
-        identity_client->publish_device_requests().back();
+        publish_device_requests.back();
     EXPECT_EQ(publish_device_request.device().name(),
               absl::StrCat("devices/", kDeviceId));
     EXPECT_EQ(publish_device_request.device()
@@ -330,7 +326,6 @@ class NearbyShareCertificateManagerImplTest
 
   void InvokeCertUploadPublishDevice(bool contacts_removed,
                                      bool publish_device_success) {
-    FakeNearbyIdentityClient* identity_client = GetIdentityClient();
     std::vector<absl::StatusOr<PublishDeviceResponse>> responses;
     if (contacts_removed) {
       // When contacts are removed, a second publish device call is scheduled.
@@ -342,7 +337,7 @@ class NearbyShareCertificateManagerImplTest
     PublishDeviceResponse response;
     response.add_contact_updates(PublishDeviceResponse::CONTACT_UPDATE_ADDED);
     responses.push_back(response);
-    identity_client->SetPublishDeviceResponses(std::move(responses));
+    identity_client_.SetPublishDeviceResponses(std::move(responses));
 
     upload_scheduler_->InvokeRequestCallback();
     Sync();
@@ -351,7 +346,7 @@ class NearbyShareCertificateManagerImplTest
       Sync();
       Sync();
     }
-    EXPECT_EQ(identity_client->publish_device_requests().size(),
+    EXPECT_EQ(identity_client_.publish_device_requests().size(),
               contacts_removed ? 2 : 1);
 
     VerifyCertificatesUpload(
@@ -385,15 +380,14 @@ class NearbyShareCertificateManagerImplTest
           BuildQuerySharedCredentialsResponse(page_number, page_token));
     }
 
-    FakeNearbyIdentityClient* identity_client = GetIdentityClient();
-    identity_client->SetQuerySharedCredentialsResponses(responses);
+    identity_client_.SetQuerySharedCredentialsResponses(responses);
     cert_store_->SetAddPublicCertificatesResult(
         result != DownloadPublicCertificatesResult::kStorageError);
     download_scheduler_->InvokeRequestCallback();
     Sync();
 
     std::vector<QuerySharedCredentialsRequest> requests =
-        identity_client->query_shared_credentials_requests();
+        identity_client_.query_shared_credentials_requests();
     EXPECT_EQ(requests.size(), num_pages);
     EXPECT_EQ(requests.back().name(), absl::StrCat("devices/", kDeviceId));
     ASSERT_EQ(download_scheduler_->handled_results().size(),
@@ -494,7 +488,7 @@ class NearbyShareCertificateManagerImplTest
   std::vector<PublicCertificate> public_certificates_;
   std::vector<NearbyShareEncryptedMetadataKey> metadata_encryption_keys_;
 
-  FakeNearbyShareClientFactory client_factory_;
+  FakeNearbyIdentityClient identity_client_;
   FakeNearbyShareSchedulerFactory scheduler_factory_;
   FakeNearbyShareCertificateStorage::Factory cert_store_factory_;
   std::unique_ptr<FakeNearbyShareLocalDeviceDataManager>
@@ -762,7 +756,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
 
   EXPECT_EQ(0, upload_scheduler_->num_immediate_requests());
   EXPECT_TRUE(cert_store_->GetPrivateCertificates().empty());
-  EXPECT_TRUE(GetIdentityClient()->publish_device_requests().empty());
+  EXPECT_TRUE(identity_client_.publish_device_requests().empty());
 }
 
 TEST_F(NearbyShareCertificateManagerImplTest,
@@ -935,7 +929,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
 
   upload_scheduler_->InvokeRequestCallback();
   Sync();
-  EXPECT_TRUE(GetIdentityClient()->publish_device_requests().empty());
+  EXPECT_TRUE(identity_client_.publish_device_requests().empty());
   EXPECT_EQ(upload_scheduler_->handled_results().size(), 1);
   EXPECT_EQ(upload_scheduler_->handled_results().back(), false);
 }
@@ -962,16 +956,15 @@ TEST_F(NearbyShareCertificateManagerImplTest, StopScheduledTasks) {
 TEST_F(NearbyShareCertificateManagerImplTest,
        UpdateAccountInfo_TitanumEnabled) {
   Initialize();
-  FakeNearbyIdentityClient* identity_client = GetIdentityClient();
   GetAccountInfoResponse response;
   response.mutable_account_info()->mutable_capabilities()->Add(
       AccountInfo::CAPABILITY_TITANIUM);
-  identity_client->SetGetAccountInfoResponse(response);
+  identity_client_.SetGetAccountInfoResponse(response);
 
   account_info_update_scheduler_->InvokeRequestCallback();
   Sync();
 
-  EXPECT_FALSE(GetIdentityClient()->get_account_info_requests().empty());
+  EXPECT_FALSE(identity_client_.get_account_info_requests().empty());
   EXPECT_TRUE(preference_manager_.GetBoolean(
       PrefNames::kAdvancedProtectionEnabled, /*default_value=*/false));
 }
@@ -980,14 +973,13 @@ TEST_F(NearbyShareCertificateManagerImplTest,
        UpdateAccountInfo_TitanumDisabled) {
   Initialize();
   preference_manager_.SetBoolean(PrefNames::kAdvancedProtectionEnabled, true);
-  FakeNearbyIdentityClient* identity_client = GetIdentityClient();
   GetAccountInfoResponse response;
-  identity_client->SetGetAccountInfoResponse(response);
+  identity_client_.SetGetAccountInfoResponse(response);
 
   account_info_update_scheduler_->InvokeRequestCallback();
   Sync();
 
-  EXPECT_FALSE(GetIdentityClient()->get_account_info_requests().empty());
+  EXPECT_FALSE(identity_client_.get_account_info_requests().empty());
   EXPECT_FALSE(preference_manager_.GetBoolean(
       PrefNames::kAdvancedProtectionEnabled, /*default_value=*/false));
 }
@@ -996,16 +988,15 @@ TEST_F(NearbyShareCertificateManagerImplTest,
        UpdateAccountInfo_TitanumUnspecified) {
   Initialize();
   preference_manager_.SetBoolean(PrefNames::kAdvancedProtectionEnabled, true);
-  FakeNearbyIdentityClient* identity_client = GetIdentityClient();
   GetAccountInfoResponse response;
   response.mutable_account_info()->mutable_capabilities()->Add(
       AccountInfo::CAPABILITY_UNSPECIFIED);
-  identity_client->SetGetAccountInfoResponse(response);
+  identity_client_.SetGetAccountInfoResponse(response);
 
   account_info_update_scheduler_->InvokeRequestCallback();
   Sync();
 
-  EXPECT_FALSE(GetIdentityClient()->get_account_info_requests().empty());
+  EXPECT_FALSE(identity_client_.get_account_info_requests().empty());
   EXPECT_FALSE(preference_manager_.GetBoolean(
       PrefNames::kAdvancedProtectionEnabled, /*default_value=*/false));
 }
@@ -1019,7 +1010,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
   Sync();
 
   // Identity client by default return Status::NotFound.
-  EXPECT_FALSE(GetIdentityClient()->get_account_info_requests().empty());
+  EXPECT_FALSE(identity_client_.get_account_info_requests().empty());
   EXPECT_TRUE(preference_manager_.GetBoolean(
       PrefNames::kAdvancedProtectionEnabled, /*default_value=*/false));
 }

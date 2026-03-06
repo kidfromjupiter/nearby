@@ -227,7 +227,6 @@ cc_library(
         "//connections:core_types",
         "//connections/implementation/analytics",
         "//connections/implementation/flags:connections_flags",
-        "//connections/implementation/mediums",
         "//connections/v3:v3_types",
         "//internal/flags:nearby_flags",
         "//internal/interop:device",
@@ -583,6 +582,7 @@ cc_test(
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
 )

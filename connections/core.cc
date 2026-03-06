@@ -138,11 +138,12 @@ void Core::RequestConnection(absl::string_view endpoint_id,
         << "Client request connection with keep-alive frame as interval="
         << connection_options.keep_alive_interval_millis
         << ", timeout=" << connection_options.keep_alive_timeout_millis
-        << ", which is un-expected. Change to default.",
-        connection_options.keep_alive_interval_millis =
-            FeatureFlags::GetInstance().GetFlags().keep_alive_interval_millis;
+        << ", which is un-expected. Change to default.";
+    FeatureFlags::Flags flags = FeatureFlags::GetInstance().GetFlags();
+    connection_options.keep_alive_interval_millis =
+        flags.keep_alive_interval_millis;
     connection_options.keep_alive_timeout_millis =
-        FeatureFlags::GetInstance().GetFlags().keep_alive_timeout_millis;
+        flags.keep_alive_timeout_millis;
   }
 
   router_->RequestConnection(&client_, endpoint_id, info, connection_options,
@@ -206,6 +207,11 @@ void Core::StopAllEndpoints(ResultCallback callback) {
 
 void Core::SetCustomSavePath(absl::string_view path, ResultCallback callback) {
   router_->SetCustomSavePath(&client_, path, std::move(callback));
+}
+
+void Core::OverrideSavePath(absl::string_view endpoint_id,
+                            absl::string_view path) {
+  client_.OverrideSavePath(endpoint_id, path);
 }
 
 std::string Core::Dump() { return client_.Dump(); }
@@ -402,10 +408,11 @@ void Core::RequestConnectionV3(const NearbyDevice& local_device,
         << connection_options.keep_alive_interval_millis
         << ", timeout=" << connection_options.keep_alive_timeout_millis
         << ", which is un-expected. Change to default.";
+    FeatureFlags::Flags flags = FeatureFlags::GetInstance().GetFlags();
     connection_options.keep_alive_interval_millis =
-        FeatureFlags::GetInstance().GetFlags().keep_alive_interval_millis;
+        flags.keep_alive_interval_millis;
     connection_options.keep_alive_timeout_millis =
-        FeatureFlags::GetInstance().GetFlags().keep_alive_timeout_millis;
+        flags.keep_alive_timeout_millis;
   }
   router_->RequestConnectionV3(&client_, remote_device, std::move(info),
                                connection_options, std::move(result_cb));
@@ -435,10 +442,11 @@ void Core::RequestConnectionV3(const NearbyDevice& remote_device,
         << connection_options.keep_alive_interval_millis
         << ", timeout=" << connection_options.keep_alive_timeout_millis
         << ", which is un-expected. Change to default.";
+    FeatureFlags::Flags flags = FeatureFlags::GetInstance().GetFlags();
     connection_options.keep_alive_interval_millis =
-        FeatureFlags::GetInstance().GetFlags().keep_alive_interval_millis;
+        flags.keep_alive_interval_millis;
     connection_options.keep_alive_timeout_millis =
-        FeatureFlags::GetInstance().GetFlags().keep_alive_timeout_millis;
+        flags.keep_alive_timeout_millis;
   }
   router_->RequestConnectionV3(&client_, remote_device, std::move(info),
                                connection_options, std::move(result_cb));

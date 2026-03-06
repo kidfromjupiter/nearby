@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/status/statusor.h"
@@ -37,7 +38,6 @@
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/api/public_certificate_database.h"
 #include "sharing/internal/api/sharing_platform.h"
-#include "sharing/internal/api/sharing_rpc_client.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/proto/enums.pb.h"
@@ -68,7 +68,7 @@ class NearbyShareCertificateManagerImpl
         nearby::sharing::api::SharingPlatform& sharing_platform,
         NearbyShareLocalDeviceDataManager* local_device_data_manager,
         const FilePath& profile_path,
-        nearby::sharing::api::SharingRpcClientFactory* client_factory);
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull identity_client);
     static void SetFactoryForTesting(Factory* test_factory);
 
    protected:
@@ -77,7 +77,8 @@ class NearbyShareCertificateManagerImpl
         Context* context,
         NearbyShareLocalDeviceDataManager* local_device_data_manager,
         const FilePath& profile_path,
-        nearby::sharing::api::SharingRpcClientFactory* client_factory) = 0;
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull
+            identity_client) = 0;
 
    private:
     static Factory* test_factory_;
@@ -101,7 +102,8 @@ class NearbyShareCertificateManagerImpl
   class CertificateDownloadContext {
    public:
     CertificateDownloadContext(
-        nearby::sharing::api::IdentityRpcClient* nearby_identity_client,
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull
+            nearby_identity_client,
         std::string device_id,
         absl::AnyInvocable<void(absl::StatusOr<std::vector<
                                     nearby::sharing::proto::PublicCertificate>>
@@ -119,7 +121,8 @@ class NearbyShareCertificateManagerImpl
     void QuerySharedCredentialsFetchNextPage();
 
    private:
-    nearby::sharing::api::IdentityRpcClient* const nearby_identity_client_;
+    nearby::sharing::api::IdentityRpcClient* absl_nonnull const
+        nearby_identity_client_;
     std::string device_id_;
     std::optional<std::string> next_page_token_;
     int page_number_ = 1;
@@ -137,7 +140,7 @@ class NearbyShareCertificateManagerImpl
       std::unique_ptr<nearby::sharing::api::PublicCertificateDatabase>
           public_certificate_database,
       NearbyShareLocalDeviceDataManager* local_device_data_manager,
-      nearby::sharing::api::SharingRpcClientFactory* client_factory);
+      nearby::sharing::api::IdentityRpcClient* absl_nonnull identity_client);
 
   // NearbyShareCertificateManager:
   void OnStartScheduledTasks() override;
@@ -197,8 +200,7 @@ class NearbyShareCertificateManagerImpl
   NearbyShareLocalDeviceDataManager* const local_device_data_manager_;
   nearby::sharing::api::PreferenceManager& preference_manager_;
   int32_t vendor_id_ = 0;  // Defaults to GOOGLE.
-  std::unique_ptr<nearby::sharing::api::SharingRpcClient> nearby_client_;
-  std::unique_ptr<nearby::sharing::api::IdentityRpcClient>
+  nearby::sharing::api::IdentityRpcClient* absl_nonnull const
       nearby_identity_client_;
 
   std::shared_ptr<NearbyShareCertificateStorage> certificate_storage_;

@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/casts.h"
+#include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
@@ -54,6 +54,7 @@
 #include "internal/test/fake_task_runner.h"
 #include "internal/test/mock_account_observer.h"
 #include "sharing/advertisement.h"
+#include "sharing/advertisement_capabilities.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/fake_nearby_share_certificate_manager.h"
@@ -73,6 +74,7 @@
 #include "sharing/internal/api/mock_app_info.h"
 #include "sharing/internal/api/mock_sharing_platform.h"
 #include "sharing/internal/api/preference_manager.h"
+#include "sharing/internal/public/pref_names.h"
 #include "sharing/internal/test/fake_bluetooth_adapter.h"
 #include "sharing/internal/test/fake_connectivity_manager.h"
 #include "sharing/internal/test/fake_context.h"
@@ -474,8 +476,7 @@ class NearbySharingServiceImplTest : public testing::Test {
 
   void SetLanConnected(bool connected) {
     FakeConnectivityManager* connectivity_manager =
-        down_cast<FakeConnectivityManager*>(
-            fake_context_.GetConnectivityManager());
+        fake_context_.fake_connectivity_manager();
     connectivity_manager->SetLanConnected(connected);
   }
 
@@ -483,10 +484,10 @@ class NearbySharingServiceImplTest : public testing::Test {
       std::unique_ptr<FakeTaskRunner> task_runner) {
     return std::make_unique<NearbySharingServiceImpl>(
         std::move(task_runner), &fake_context_, mock_sharing_platform_,
-        /*nearby_share_client_factory=*/nullptr,
+        &nearby_identity_client_, &nearby_share_client_,
         absl::WrapUnique(fake_nearby_connections_manager_),
-        absl::WrapUnique(contact_manager_),
-        analytics_recorder_.get());
+        absl::WrapUnique(contact_manager_), analytics_recorder_.get(),
+        /*supports_file_sync=*/false);
   }
 
   void SetVisibility(DeviceVisibility visibility) {
@@ -502,14 +503,14 @@ class NearbySharingServiceImplTest : public testing::Test {
 
   void SetBluetoothIsPresent(bool present) {
     FakeBluetoothAdapter& bluetooth_adapter =
-        down_cast<FakeBluetoothAdapter&>(fake_context_.GetBluetoothAdapter());
+        *fake_context_.fake_bluetooth_adapter();
     bluetooth_adapter.ReceivedAdapterPresentChangedFromOs(present);
     FlushTesting();
   }
 
   void SetBluetoothIsPowered(bool powered) {
     FakeBluetoothAdapter& bluetooth_adapter =
-        down_cast<FakeBluetoothAdapter&>(fake_context_.GetBluetoothAdapter());
+        *fake_context_.fake_bluetooth_adapter();
     bluetooth_adapter.ReceivedAdapterPoweredChangedFromOs(powered);
     fake_context_.fake_clock()->FastForward(absl::Milliseconds(500));
     FlushTesting();
@@ -517,8 +518,7 @@ class NearbySharingServiceImplTest : public testing::Test {
 
   void SetLanIsConnected(bool connected) {
     FakeConnectivityManager* connectivity_manager =
-        down_cast<FakeConnectivityManager*>(
-            fake_context_.GetConnectivityManager());
+        fake_context_.fake_connectivity_manager();
     connectivity_manager->SetLanConnected(connected);
     FlushTesting();
   }
@@ -741,7 +741,7 @@ class NearbySharingServiceImplTest : public testing::Test {
     std::unique_ptr<Advertisement> advertisement = Advertisement::NewInstance(
         GetNearbyShareTestEncryptedMetadataKey().salt(),
         GetNearbyShareTestEncryptedMetadataKey().encrypted_key(), kDeviceType,
-        kDeviceName, vendor_id);
+        kDeviceName, vendor_id, AdvertisementCapabilities{});
     return advertisement->ToEndpointInfo();
   }
 
@@ -1081,7 +1081,7 @@ class NearbySharingServiceImplTest : public testing::Test {
     std::unique_ptr<Advertisement> advertisement = Advertisement::NewInstance(
         GetNearbyShareTestEncryptedMetadataKey().salt(),
         GetNearbyShareTestEncryptedMetadataKey().encrypted_key(), kDeviceType,
-        std::nullopt, kVendorId);
+        std::nullopt, kVendorId, AdvertisementCapabilities{});
     return advertisement->ToEndpointInfo();
   }
 
@@ -1279,6 +1279,8 @@ class NearbySharingServiceImplTest : public testing::Test {
       ABSL_GUARDED_BY(connection_output_mutex_);
   std::queue<PayloadInfo> written_payloads_
       ABSL_GUARDED_BY(connection_output_mutex_);
+  FakeNearbyIdentityClient nearby_identity_client_;
+  FakeNearbyShareClient nearby_share_client_;
 };
 
 struct ValidSendSurfaceTestData {
@@ -1822,8 +1824,7 @@ TEST_F(NearbySharingServiceImplTest,
   SetLanConnected(true);
   SetVisibility(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
   preference_manager().SetInteger(
-      prefs::kNearbySharingDataUsageName,
-      static_cast<int>(DataUsage::OFFLINE_DATA_USAGE));
+      PrefNames::kDataUsage, static_cast<int>(DataUsage::OFFLINE_DATA_USAGE));
   FlushTesting();
   MockTransferUpdateCallback callback;
   NearbySharingService::StatusCodes result = RegisterReceiveSurface(
@@ -1835,8 +1836,7 @@ TEST_F(NearbySharingServiceImplTest,
             fake_nearby_connections_manager_->advertising_data_usage());
 
   preference_manager().SetInteger(
-      prefs::kNearbySharingDataUsageName,
-      static_cast<int>(DataUsage::ONLINE_DATA_USAGE));
+      PrefNames::kDataUsage, static_cast<int>(DataUsage::ONLINE_DATA_USAGE));
   FlushTesting();
   EXPECT_TRUE(fake_nearby_connections_manager_->IsAdvertising());
   EXPECT_EQ(DataUsage::ONLINE_DATA_USAGE,
@@ -1849,7 +1849,7 @@ TEST_F(
   TestObserver observer(service_.get());
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
 
@@ -1895,7 +1895,7 @@ TEST_F(NearbySharingServiceImplTest,
        RegisterReceiveSurfaceWithVendorId_StartAdvertisingVendorId) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_EVERYONE));
   FlushTesting();
 
@@ -1920,7 +1920,7 @@ TEST_F(NearbySharingServiceImplTest,
        RegisterReceiveSurfaceWithVendorId_DoesNotAdvertiseInContacts) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
 
@@ -1945,7 +1945,7 @@ TEST_F(NearbySharingServiceImplTest,
        RegisterReceiveSurfaceWithDifferentVendorIdIsBlocked) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
 
@@ -1971,7 +1971,7 @@ TEST_F(NearbySharingServiceImplTest,
        RegisterReceiveSurfaceWithVendorId_OkWithBgNoVendorId) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_EVERYONE));
   FlushTesting();
 
@@ -2079,7 +2079,7 @@ TEST_F(NearbySharingServiceImplTest,
        ForegroundReceiveSurfaceNoOneVisibilityIsAdvertising) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2095,7 +2095,7 @@ TEST_F(NearbySharingServiceImplTest,
   SetLanConnected(true);
   SetVisibility(DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_UNSPECIFIED));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2120,7 +2120,7 @@ TEST_F(NearbySharingServiceImplTest,
   EXPECT_TRUE(fake_nearby_connections_manager_->IsAdvertising());
 
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_HIDDEN));
   FlushTesting();
   EXPECT_FALSE(fake_nearby_connections_manager_->IsAdvertising());
@@ -2191,7 +2191,7 @@ TEST_F(NearbySharingServiceImplTest,
        ForegroundReceiveSurfaceSelectedContactsVisibilityIsAdvertising) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2206,7 +2206,7 @@ TEST_F(NearbySharingServiceImplTest,
        BackgroundReceiveSurfaceSelectedContactsVisibilityIsAdvertising) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2221,7 +2221,7 @@ TEST_F(NearbySharingServiceImplTest,
        ForegroundReceiveSurfaceAllContactsVisibilityIsAdvertising) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2236,7 +2236,7 @@ TEST_F(NearbySharingServiceImplTest,
        BackgroundReceiveSurfaceAllContactsVisibilityNotAdvertising) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
   MockTransferUpdateCallback callback;
@@ -2501,7 +2501,7 @@ TEST_F(NearbySharingServiceImplTest,
 TEST_F(NearbySharingServiceImplTest, IncomingConnectionOutOfStorage) {
   SetDiskSpace(kFreeDiskSpace);
   preference_manager().SetString(
-      prefs::kNearbySharingCustomSavePath,
+      PrefNames::kCustomSavePath,
       fake_device_info_.GetDownloadPath().ToString());
   fake_nearby_connections_manager_->SetRawAuthenticationToken(kEndpointId,
                                                               GetToken());
@@ -4455,7 +4455,7 @@ TEST_F(NearbySharingServiceImplTest,
        RegisterSendSurfaceWithDifferentVendorIdIsBlocked) {
   SetLanConnected(true);
   preference_manager().SetInteger(
-      prefs::kNearbySharingBackgroundVisibilityName,
+      PrefNames::kVisibility,
       static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS));
   FlushTesting();
 
@@ -4519,7 +4519,7 @@ TEST_F(NearbySharingServiceImplTest, CreateShareTarget) {
   std::unique_ptr<Advertisement> advertisement = Advertisement::NewInstance(
       GetNearbyShareTestEncryptedMetadataKey().salt(),
       GetNearbyShareTestEncryptedMetadataKey().encrypted_key(), kDeviceType,
-      kDeviceName, kVendorId);
+      kDeviceName, kVendorId, AdvertisementCapabilities{});
 
   // Flip |for_self_share| to true to ensure the resulting ShareTarget picks
   // this up.
@@ -4643,7 +4643,7 @@ TEST_F(NearbySharingServiceImplTest, LoginAndLogoutShouldResetSettings) {
   service_->GetSettings()->SetIsAnalyticsEnabled(true);
 
   std::string device_id =
-      preference_manager_.GetString(prefs::kNearbySharingDeviceIdName, "");
+      preference_manager_.GetString(PrefNames::kDeviceId, "");
   EXPECT_TRUE(device_id.empty());
 
   // Create account.
@@ -4662,7 +4662,7 @@ TEST_F(NearbySharingServiceImplTest, LoginAndLogoutShouldResetSettings) {
   EXPECT_EQ(service_->GetAccountManager()->GetCurrentAccount()->id,
             kTestAccountId);
   device_id =
-      preference_manager_.GetString(prefs::kNearbySharingDeviceIdName, "");
+      preference_manager_.GetString(PrefNames::kDeviceId, "");
   EXPECT_FALSE(device_id.empty());
   EXPECT_EQ(device_id.size(), 10u);
   for (const char c : device_id) EXPECT_TRUE(std::isalnum(c));
@@ -4680,7 +4680,7 @@ TEST_F(NearbySharingServiceImplTest, LoginAndLogoutShouldResetSettings) {
   EXPECT_FALSE(service_->GetAccountManager()->GetCurrentAccount().has_value());
   EXPECT_TRUE(sharing_service_task_runner_->SyncWithTimeout(kTaskWaitTimeout));
   device_id =
-      preference_manager_.GetString(prefs::kNearbySharingDeviceIdName, "");
+      preference_manager_.GetString(PrefNames::kDeviceId, "");
   EXPECT_TRUE(device_id.empty());
 }
 

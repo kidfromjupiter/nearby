@@ -80,7 +80,9 @@ constexpr absl::string_view kMdnsDeviceSelectorFormat =
 constexpr absl::string_view kDisableMdnsAdvertisingRegistryValue =
     "disable_mdns_advertising";
 
-constexpr absl::Duration kConnectTimeout = absl::Milliseconds(500);
+// From metrics, P90 wifi connection latency is just under 600ms.
+// Set to 700ms to be slightly more generous than the P90.
+constexpr absl::Duration kConnectTimeout = absl::Milliseconds(700);
 
 bool IsSelfInstance(IMapView<winrt::hstring, IInspectable> properties,
                     absl::string_view self_instance_name) {
@@ -770,21 +772,10 @@ api::UpgradeAddressInfo WifiLanMedium::GetUpgradeAddressCandidates(
       }
     }
   }
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          platform::config_package_nearby::nearby_platform_feature::
-              kEnableWifiLanAddressCandidates)) {
-    // Append v4 addresses to the end of the list.
-    result.address_candidates.insert(result.address_candidates.end(),
-                                     ipv4_addresses.begin(),
-                                     ipv4_addresses.end());
-  } else {
-    // If kEnableWifiLanAddressCandidates is disabled, only return the last v4
-    // address.
-    result.address_candidates.clear();
-    if (!ipv4_addresses.empty()) {
-      result.address_candidates.push_back(ipv4_addresses.back());
-    }
-  }
+  // Append v4 addresses to the end of the list.
+  result.address_candidates.insert(result.address_candidates.end(),
+                                    ipv4_addresses.begin(),
+                                    ipv4_addresses.end());
   return result;
 }
 

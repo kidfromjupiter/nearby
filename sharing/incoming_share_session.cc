@@ -24,8 +24,11 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/sharing/lib/sync/sync_config_prefs.pb.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/time/time.h"
 #include "internal/base/file_path.h"
 #include "internal/platform/clock.h"
 #include "internal/platform/task_runner.h"
@@ -37,7 +40,6 @@
 #include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/paired_key_verification_runner.h"
 #include "sharing/payload_tracker.h"
 #include "sharing/proto/wire_format.pb.h"
 #include "sharing/share_session.h"
@@ -55,9 +57,12 @@ using ::location::nearby::proto::sharing::OSType;
 using ::location::nearby::proto::sharing::ResponseToIntroduction;
 using ::nearby::sharing::service::proto::AppMetadata;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
+using ::nearby::sharing::service::proto::Frame;
 using ::nearby::sharing::service::proto::IntroductionFrame;
+using ::nearby::sharing::service::proto::SyncConfig;
 using ::nearby::sharing::service::proto::V1Frame;
 using ::nearby::sharing::service::proto::WifiCredentials;
+using ::nearby::sharing::sync::SyncConfigPrefs;
 
 }  // namespace
 
@@ -84,6 +89,7 @@ void IncomingShareSession::InvokeTransferUpdateCallback(
 std::optional<TransferMetadata::Status>
 IncomingShareSession::ProcessIntroduction(
     const IntroductionFrame& introduction_frame) {
+  session_phase_ = SessionPhase::kTransfer;
   int64_t file_size_sum = 0;
   int app_file_count = 0;
   for (const AppMetadata& apk : introduction_frame.app_metadata()) {
@@ -191,33 +197,10 @@ IncomingShareSession::ProcessIntroduction(
   return std::nullopt;
 }
 
-bool IncomingShareSession::ProcessKeyVerificationResult(
-    PairedKeyVerificationRunner::PairedKeyVerificationResult result,
-    OSType share_target_os_type,
-    std::function<void(std::optional<IntroductionFrame>)>
-        introduction_callback) {
-  if (!HandleKeyVerificationResult(result, share_target_os_type)) {
-    return false;
-  }
-  LOG(INFO) << ":Waiting for introduction from " << share_target().id;
-
-  frames_reader()->ReadFrame(
-      V1Frame::INTRODUCTION,
-      [callback =
-           std::move(introduction_callback)](std::optional<V1Frame> frame) {
-        if (!frame.has_value()) {
-          callback(std::nullopt);
-        } else {
-          callback(frame->introduction());
-        }
-      },
-      kReadFramesTimeout);
-  return true;
-}
-
 bool IncomingShareSession::ReadyForTransfer(
     std::function<void()> accept_timeout_callback,
-    std::function<void(std::optional<V1Frame> frame)> frame_read_callback) {
+    std::function<void(bool is_timeout, std::optional<V1Frame> frame)>
+        frame_read_callback) {
   if (!IsConnected()) {
     LOG(WARNING) << "ReadyForTransfer called when not connected";
     return false;
@@ -228,7 +211,8 @@ bool IncomingShareSession::ReadyForTransfer(
   mutual_acceptance_timeout_ = std::make_unique<ThreadTimer>(
       service_thread(), "incoming_mutual_acceptance_timeout",
       kReadResponseFrameTimeout, std::move(accept_timeout_callback));
-  frames_reader()->ReadFrame(std::move(frame_read_callback));
+  frames_reader()->ReadFrame(std::move(frame_read_callback),
+                             absl::ZeroDuration());
 
   if (!self_share()) {
     TransferMetadataBuilder transfer_metadata_builder;
@@ -513,6 +497,45 @@ void IncomingShareSession::OnConnected(NearbyConnection* connection) {
 void IncomingShareSession::PushPayloadTransferUpdateForTest(
     std::unique_ptr<PayloadTransferUpdate> update) {
   payload_updates_queue()->Queue(std::move(update));
+}
+
+void IncomingShareSession::ProcessSyncFrame(
+    SyncManager& sync_manager,
+    const nearby::sharing::service::proto::SyncFrame& sync_frame) {
+  if (session_phase_ != SessionPhase::kUninitialized) {
+    LOG(WARNING) << "Ignore SyncFrame received in unexpected session phase: "
+                 << static_cast<int>(session_phase_);
+    return;
+  }
+  // TODO: b/485304482 - Check that the connected device is authenticated and is
+  // part of a sync pairing.
+  if (!certificate().has_value()) {
+    LOG(WARNING) << "Ignore SyncFrame received from unauthenticated device.";
+    return;
+  }
+  if (false &&
+    !sync_manager.IsFileSyncBinding(certificate()->binding_id())) {
+    LOG(WARNING) << "Ignore SyncFrame received in unexpected binding id: "
+                 << certificate()->binding_id();
+    return;
+  }
+  session_phase_ = SessionPhase::kSync;
+  if (sync_frame.has_handshake()) {
+    VLOG(1) << __func__ << ": Received FileSync Handshake";
+    WriteSyncConfigFrame(
+        sync_manager.GetSyncConfig(certificate()->binding_id())
+            .value_or(SyncConfigPrefs())
+            .sync_config());
+  }
+}
+
+void IncomingShareSession::WriteSyncConfigFrame(const SyncConfig& config) {
+  Frame frame;
+  frame.set_version(Frame::V1);
+  V1Frame* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::FILE_SYNC);
+  *v1_frame->mutable_file_sync()->mutable_config() = config;
+  WriteFrame(frame);
 }
 
 }  // namespace nearby::sharing

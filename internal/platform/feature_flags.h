@@ -126,18 +126,18 @@ class FeatureFlags {
     return *instance;
   }
 
-  const Flags& GetFlags() const ABSL_LOCKS_EXCLUDED(mutex_) {
-    absl::ReaderMutexLock lock(&mutex_);
-    return flags_;
+  static FeatureFlags& GetMutableInstanceForTesting() {
+    return const_cast<FeatureFlags&>(GetInstance());
   }
 
-  static Flags& GetMutableFlagsForTesting() {
-    return const_cast<FeatureFlags&>(GetInstance()).flags_;
+  Flags GetFlags() const ABSL_LOCKS_EXCLUDED(mutex_) {
+    absl::ReaderMutexLock lock(mutex_);
+    return flags_;
   }
 
   // SetFlags for feature controlling
   void SetFlags(const Flags& flags) ABSL_LOCKS_EXCLUDED(mutex_) {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     flags_ = flags;
   }
 

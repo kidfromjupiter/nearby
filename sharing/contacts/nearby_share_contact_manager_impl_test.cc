@@ -18,15 +18,14 @@
 #include <stdint.h>
 
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
+#include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
 #include "gtest/gtest.h"
 #include "absl/time/time.h"
 #include "internal/platform/implementation/account_manager.h"
 #include "internal/test/fake_account_manager.h"
-#include "sharing/internal/api/fake_nearby_share_client.h"
 #include "sharing/internal/test/fake_context.h"
 #include "sharing/local_device_data/fake_nearby_share_local_device_data_manager.h"
 #include "sharing/proto/contact_rpc.pb.h"
@@ -64,7 +63,7 @@ class NearbyShareContactManagerImplTest
     fake_account_manager_.SetAccount(account);
 
     manager_ = std::make_unique<NearbyShareContactManagerImpl>(
-        &fake_context_, fake_account_manager_, &nearby_client_factory_);
+        &fake_context_, fake_account_manager_, &nearby_client_);
   }
 
   void TearDown() override {
@@ -84,16 +83,12 @@ class NearbyShareContactManagerImplTest
   FakeContext& fake_context() { return fake_context_; }
 
  private:
-  FakeNearbyShareClient* client() {
-    return nearby_client_factory_.instances().back();
-  }
-
   FakeAccountManager fake_account_manager_;
   FakeContext fake_context_;
   std::vector<ContactsDownloadedNotification>
       contacts_downloaded_notifications_;
   std::vector<ContactsUploadedNotification> contacts_uploaded_notifications_;
-  FakeNearbyShareClientFactory nearby_client_factory_;
+  FakeNearbyShareClient nearby_client_;
   FakeNearbyShareLocalDeviceDataManager local_device_data_manager_;
   std::unique_ptr<FakeAccountManager> account_manager_;
   std::unique_ptr<NearbyShareContactManagerImpl> manager_;
