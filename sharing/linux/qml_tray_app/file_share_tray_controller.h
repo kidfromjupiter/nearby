@@ -5,19 +5,15 @@
 
 #include <QFile>
 #include <QHash>
-#include <QSet>
 #include <QString>
 #include <QStringList>
-#include <QTimer>
 #include <QVariantList>
-#include <QVariantMap>
 
-#include <string>
-#include <vector>
+#include <memory>
 
-#include "sharing/linux/nearby_connections_qt_facade.h"
+#include "sharing/linux/nearby_sharing_api.h"
 
-using NearbyConnectionsQtFacade = nearby::sharing::NearbyConnectionsQtFacade;
+using NearbySharingApi = nearby::sharing::linux::NearbySharingApi;
 
 class FileShareTrayController : public QObject {
   Q_OBJECT
@@ -27,18 +23,10 @@ class FileShareTrayController : public QObject {
   Q_PROPERTY(bool running READ running NOTIFY runningChanged)
   Q_PROPERTY(QString pendingSendFileName READ pendingSendFileName NOTIFY pendingSendFileNameChanged)
   Q_PROPERTY(QString pendingSendFilePath READ pendingSendFilePath NOTIFY pendingSendFilePathChanged)
-  Q_PROPERTY(QStringList discoveredDevices READ discoveredDevices NOTIFY discoveredDevicesChanged)
-  Q_PROPERTY(QStringList connectedDevices READ connectedDevices NOTIFY connectedDevicesChanged)
-  Q_PROPERTY(QVariantMap endpointMediums READ endpointMediums NOTIFY endpointMediumsChanged)
+  Q_PROPERTY(QVariantList discoveredTargets READ discoveredTargets NOTIFY discoveredTargetsChanged)
   Q_PROPERTY(QVariantList transfers READ transfers NOTIFY transfersChanged)
   Q_PROPERTY(bool autoAcceptIncoming READ autoAcceptIncoming WRITE setAutoAcceptIncoming NOTIFY autoAcceptIncomingChanged)
-  Q_PROPERTY(bool bluetoothEnabled READ bluetoothEnabled WRITE setBluetoothEnabled NOTIFY bluetoothEnabledChanged)
-  Q_PROPERTY(bool bleEnabled READ bleEnabled WRITE setBleEnabled NOTIFY bleEnabledChanged)
-  Q_PROPERTY(bool wifiLanEnabled READ wifiLanEnabled WRITE setWifiLanEnabled NOTIFY wifiLanEnabledChanged)
-  Q_PROPERTY(bool wifiHotspotEnabled READ wifiHotspotEnabled WRITE setWifiHotspotEnabled NOTIFY wifiHotspotEnabledChanged)
-  Q_PROPERTY(bool webRtcEnabled READ webRtcEnabled WRITE setWebRtcEnabled NOTIFY webRtcEnabledChanged)
-  Q_PROPERTY(QString connectionStrategy READ connectionStrategy WRITE setConnectionStrategy NOTIFY connectionStrategyChanged)
-  Q_PROPERTY(QString serviceId READ serviceId WRITE setServiceId NOTIFY serviceIdChanged)
+  Q_PROPERTY(QString qrCodeUrl READ qrCodeUrl NOTIFY qrCodeUrlChanged)
   Q_PROPERTY(QString logPath READ logPath WRITE setLogPath NOTIFY logPathChanged)
 
  public:
@@ -56,34 +44,13 @@ class FileShareTrayController : public QObject {
   QString pendingSendFileName() const { return pending_send_file_name_; }
   QString pendingSendFilePath() const { return pending_send_file_path_; }
 
-  QStringList discoveredDevices() const { return discovered_devices_; }
-  QStringList connectedDevices() const { return connected_devices_; }
-  QVariantMap endpointMediums() const { return endpoint_mediums_; }
+  QVariantList discoveredTargets() const { return discovered_targets_; }
   QVariantList transfers() const { return transfers_; }
 
   bool autoAcceptIncoming() const { return auto_accept_incoming_; }
   void setAutoAcceptIncoming(bool enabled);
 
-  bool bluetoothEnabled() const { return bluetooth_enabled_; }
-  void setBluetoothEnabled(bool enabled);
-
-  bool bleEnabled() const { return ble_enabled_; }
-  void setBleEnabled(bool enabled);
-
-  bool wifiLanEnabled() const { return wifi_lan_enabled_; }
-  void setWifiLanEnabled(bool enabled);
-
-  bool wifiHotspotEnabled() const { return wifi_hotspot_enabled_; }
-  void setWifiHotspotEnabled(bool enabled);
-
-  bool webRtcEnabled() const { return web_rtc_enabled_; }
-  void setWebRtcEnabled(bool enabled);
-
-  QString connectionStrategy() const { return connection_strategy_; }
-  void setConnectionStrategy(const QString& strategy);
-
-  QString serviceId() const { return QString::fromStdString(service_id_); }
-  void setServiceId(const QString& service_id);
+  QString qrCodeUrl() const { return qr_code_url_; }
 
   QString logPath() const { return log_path_; }
   void setLogPath(const QString& path);
@@ -92,9 +59,7 @@ class FileShareTrayController : public QObject {
   Q_INVOKABLE void stop();
   Q_INVOKABLE void switchToReceiveMode();
   Q_INVOKABLE void switchToSendModeWithFile(const QString& file_path);
-  Q_INVOKABLE void sendPendingFileToEndpoint(const QString& endpoint_id);
-  Q_INVOKABLE QString mediumForEndpoint(const QString& endpoint_id) const;
-  Q_INVOKABLE QString peerNameForEndpoint(const QString& endpoint_id) const;
+  Q_INVOKABLE void sendPendingFileToTarget(qlonglong share_target_id);
   Q_INVOKABLE void clearTransfers();
   Q_INVOKABLE void hideToTray();
 
@@ -105,117 +70,63 @@ class FileShareTrayController : public QObject {
   void runningChanged();
   void pendingSendFileNameChanged();
   void pendingSendFilePathChanged();
-  void discoveredDevicesChanged();
-  void connectedDevicesChanged();
-  void endpointMediumsChanged();
+  void discoveredTargetsChanged();
   void transfersChanged();
   void autoAcceptIncomingChanged();
-  void bluetoothEnabledChanged();
-  void bleEnabledChanged();
-  void wifiLanEnabledChanged();
-  void wifiHotspotEnabledChanged();
-  void webRtcEnabledChanged();
-  void connectionStrategyChanged();
-  void serviceIdChanged();
+  void qrCodeUrlChanged();
   void logPathChanged();
 
   void requestTrayMessage(const QString& title, const QString& body);
 
  private:
+  void CreateService();
+  void AttachServiceListeners();
+
   void startSendMode();
   void startReceiveMode();
   void LoadSettings();
   void SaveSettings() const;
 
-  std::vector<uint8_t> BuildEndpointInfo() const;
+  void UpsertTarget(qlonglong share_target_id, const QString& name,
+                    bool is_incoming);
+  void RemoveTarget(qlonglong share_target_id);
+  QString TargetName(qlonglong share_target_id) const;
 
-  NearbyConnectionsQtFacade::ConnectionListener BuildConnectionListener();
-  NearbyConnectionsQtFacade::DiscoveryListener BuildDiscoveryListener();
-  NearbyConnectionsQtFacade::PayloadListener BuildPayloadListener();
-
-  NearbyConnectionsQtFacade::AdvertisingOptions BuildAdvertisingOptions() const;
-  NearbyConnectionsQtFacade::DiscoveryOptions BuildDiscoveryOptions() const;
-  NearbyConnectionsQtFacade::ConnectionOptions BuildConnectionOptions() const;
-  NearbyConnectionsQtFacade::MediumSelection BuildMediumSelection() const;
-
-  void acceptIncomingInternal(const QString& endpoint_id);
-  void requestConnectionForSend(const QString& endpoint_id);
-  void sendPendingFile(const QString& endpoint_id);
-  void disconnectDevice(const QString& endpoint_id);
-
-  void AddDiscoveredDevice(const QString& endpoint_id);
-  void RemoveDiscoveredDevice(const QString& endpoint_id);
-  void AddConnectedDevice(const QString& endpoint_id);
-  void RemoveConnectedDevice(const QString& endpoint_id);
-  void SetPeerNameForEndpoint(const QString& endpoint_id,
-                              const QString& peer_name);
-  QString PeerLabelForEndpoint(const QString& endpoint_id) const;
-
-  QString FinalizeReceivedFilePath(const QString& received_path,
-                                   const QString& received_file_name,
-                                   qlonglong payload_id) const;
-
-  void UpsertTransfer(const QString& endpoint_id, qlonglong payload_id,
-                      const QString& status, qulonglong bytes_transferred,
-                      qulonglong total_bytes, const QString& direction);
-  void UpdateTransferMediumForEndpoint(const QString& endpoint_id,
-                                       const QString& medium);
+  void UpsertTransfer(qlonglong share_target_id, const QString& target_name,
+                      const QString& status, double progress,
+                      qulonglong transferred_bytes, const QString& direction,
+                      const QString& file_name);
 
   void SetStatus(const QString& status);
   bool HasActiveTransfers() const;
   void LogLine(const QString& line);
   void ReopenLogFile();
 
-  static QString StatusToString(NearbyConnectionsQtFacade::Status status);
-  static QString PayloadStatusToString(
-      NearbyConnectionsQtFacade::PayloadStatus status);
-  static QString MediumToString(NearbyConnectionsQtFacade::Medium medium);
+  static QString StatusToString(NearbySharingApi::StatusCode status);
+  static QString TransferStatusToString(NearbySharingApi::TransferStatus status);
+  static bool IsFinalTransferStatus(NearbySharingApi::TransferStatus status);
 
-  NearbyConnectionsQtFacade service_;
+  std::unique_ptr<NearbySharingApi> service_;
 
   QString mode_ = QStringLiteral("Receive");
-  QString device_name_ = QStringLiteral("NearbyQtFile");
-  std::string service_id_ = "com.nearby.qml.tray";
+  QString device_name_ = QStringLiteral("NearbyLinux");
   QString status_message_ = QStringLiteral("Idle");
   bool running_ = false;
 
   bool auto_accept_incoming_ = true;
-  bool bluetooth_enabled_ = true;
-  bool ble_enabled_ = true;
-  bool wifi_lan_enabled_ = true;
-  bool wifi_hotspot_enabled_ = true;
-  bool web_rtc_enabled_ = false;
-  QString connection_strategy_ = QStringLiteral("P2pPointToPoint");
+  QString qr_code_url_;
   QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
 
   QString pending_send_file_path_;
   QString pending_send_file_name_;
-  QString target_endpoint_for_send_;
+  qlonglong pending_send_target_id_ = 0;
 
-  QStringList discovered_devices_;
-  QStringList connected_devices_;
-  QHash<QString, QString> endpoint_peer_names_;
-  QVariantMap endpoint_mediums_;
+  QVariantList discovered_targets_;
+  QHash<qlonglong, int> discovered_row_by_target_;
+  QHash<qlonglong, QString> target_names_;
 
   QVariantList transfers_;
-  QHash<qlonglong, int> transfer_row_for_payload_;
-
-  QHash<QString, QString> pending_file_names_;
-  QHash<qlonglong, QString> incoming_file_paths_;
-  QHash<qlonglong, QString> incoming_file_names_;
-  QHash<qlonglong, QString> incoming_file_endpoints_;
-  QHash<qlonglong, QString> outgoing_file_payload_to_endpoint_;
-  QHash<qlonglong, QString> outgoing_file_payload_to_name_;
-  QSet<qlonglong> send_terminal_notified_;
-
-  struct PendingOutgoingCompletion {
-    QString file_name;
-    QString peer;
-    QString endpoint;
-    bool success = false;
-  };
-  QHash<QString, PendingOutgoingCompletion> pending_outgoing_completions_;
-  QHash<QString, QTimer*> outgoing_disconnect_timers_;
+  QHash<qlonglong, int> transfer_row_by_target_;
 
   QFile log_file_;
 };

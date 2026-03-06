@@ -1,19 +1,19 @@
 # Nearby File Share Tray App
 
-This folder contains the Qt/QML **FileShareTray** application — a system tray app for file sharing via Nearby Connections, wired to:
+This folder contains the Qt/QML **FileShareTray** application — a system tray
+app for file sharing via Nearby Sharing, wired to:
 
-- `nearby::sharing::linux::NearbyConnectionsServiceLinux`
-- Send mode (discovery + connect)
+- `nearby::sharing::linux::NearbySharingApi`
+- Send mode (discover nearby share targets + send file)
 - Receive mode (incoming requests + accept/reject)
-- Transfer status list (progress + payload status)
-- Connected medium display per endpoint
+- Transfer status list (progress + transfer status)
 - Persistent tray behavior (window close hides app to tray)
-- File logging to `/tmp/nearby_qml_tray.log`
+- File logging to `/tmp/nearby_qml_file_tray.log`
 
 ## Files
 
 - `file_share_tray_main.cpp`: Qt app bootstrap + system tray behavior.
-- `file_share_tray_controller.h/.cc`: QML-facing backend wrapper around Nearby Connections.
+- `file_share_tray_controller.h/.cc`: QML-facing backend wrapper around Nearby Sharing.
 - `FileShareTray.qml`: Top-level UI for the file share tray app.
 - `components/`: Shared QML UI components used by `FileShareTray.qml`.
 - `resources_file_share.qrc`: Embeds `FileShareTray.qml` and components.
@@ -24,36 +24,36 @@ This folder contains the Qt/QML **FileShareTray** application — a system tray 
 - Use tray icon menu to show/hide/quit.
 - Mode `Send`:
   - Starts discovery.
-  - Shows discovered endpoints.
-  - Lets you connect and send text payloads.
+  - Shows discovered share targets.
+  - Sends the selected file to a chosen target.
 - Mode `Receive`:
   - Starts advertising.
-  - Shows pending incoming connection requests.
+  - Shows pending incoming transfer requests.
   - Lets you accept/reject incoming requests.
-- Transfers are shown with endpoint, direction, status, progress, and medium.
-- Logs are appended to `/tmp/nearby_qml_tray.log`.
+- Transfers are shown with target, direction, status, and progress.
+- Logs are appended to `/tmp/nearby_qml_file_tray.log`.
 
 ## Building
 
 This CMake app links against the installed Nearby shared library and header:
 
-- `libnearby_connections_service_linux_shared.so`
-- `sharing/linux/nearby_connections_qt_facade.h`
+- `libnearby_sharing_api_shared.so`
+- `sharing/linux/nearby_sharing_api.h`
 
 Install them first (repo root):
 
 ```bash
-./sharing/linux/install_nearby_connections_service.sh
+./sharing/linux/install_nearby_sharing_service.sh
 ```
 
 Then build the app (from `sharing/linux/qml_tray_app`):
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEARBY_INSTALL_PREFIX=/usr/local
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEARBY_PREFIX=/usr/local
 cmake --build build -j
 ```
 
-## Bundle `libnearby_connections_service_linux_shared.so` with the app
+## Bundle `libnearby_sharing_api_shared.so` with the app
 
 From `sharing/linux/qml_tray_app`:
 
@@ -66,7 +66,7 @@ cmake --install build
 Bundle output:
 
 - `dist/bin/nearby_qml_file_tray_app`
-- `dist/bin/libnearby_connections_service_linux_shared.so`
+- `dist/bin/libnearby_sharing_api_shared.so`
 
 The app is installed with `INSTALL_RPATH=$ORIGIN`, so it resolves the Nearby
 shared library from the same folder in the bundle.
@@ -88,5 +88,5 @@ Output:
 This zip is created from the CMake install tree and includes:
 
 - `nearby_qml_file_tray_app`
-- `libnearby_connections_service_linux_shared.so`
+- `libnearby_sharing_api_shared.so`
 - Qt runtime libs/plugins/QML imports discovered by Qt deploy tooling

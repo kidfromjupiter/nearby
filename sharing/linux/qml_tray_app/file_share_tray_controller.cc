@@ -1,65 +1,31 @@
 #include "file_share_tray_controller.h"
 
 #include <QDateTime>
-#include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QSettings>
 #include <QSysInfo>
 #include <QTextStream>
-
-#include <atomic>
-#include <memory>
+#include <QVariantMap>
 
 namespace {
 
-using NearbyConnectionsQtFacade = nearby::sharing::NearbyConnectionsQtFacade;
-
-std::atomic<qlonglong> g_local_payload_id{1'000'000};
-
-bool IsTerminalPayloadStatus(NearbyConnectionsQtFacade::PayloadStatus status) {
-  return status == NearbyConnectionsQtFacade::PayloadStatus::kSuccess ||
-         status == NearbyConnectionsQtFacade::PayloadStatus::kFailure ||
-         status == NearbyConnectionsQtFacade::PayloadStatus::kCanceled;
-}
-
-// Mirrors kOutgoingDisconnectionDelay from nearby_sharing_service_impl.
-constexpr int kOutgoingDisconnectionDelayMs = 60'000;
-
-QString NormalizeConnectionStrategy(const QString& strategy) {
-  const QString token = strategy.trimmed().toLower();
-  if (token == QStringLiteral("p2pstar") || token == QStringLiteral("star")) {
-    return QStringLiteral("P2pStar");
-  }
-  if (token == QStringLiteral("p2ppointtopoint") ||
-      token == QStringLiteral("pointtopoint") ||
-      token == QStringLiteral("point_to_point")) {
-    return QStringLiteral("P2pPointToPoint");
-  }
-  return QStringLiteral("P2pCluster");
-}
-
-NearbyConnectionsQtFacade::Strategy StrategyFromName(
-    const QString& normalized_strategy) {
-  if (normalized_strategy == QStringLiteral("P2pStar")) {
-    return NearbyConnectionsQtFacade::Strategy::kP2pStar;
-  }
-  if (normalized_strategy == QStringLiteral("P2pPointToPoint")) {
-    return NearbyConnectionsQtFacade::Strategy::kP2pPointToPoint;
-  }
-  return NearbyConnectionsQtFacade::Strategy::kP2pCluster;
+QString TrimmedOrFallback(const QString& value, const QString& fallback) {
+  const QString trimmed = value.trimmed();
+  return trimmed.isEmpty() ? fallback : trimmed;
 }
 
 }  // namespace
 
 FileShareTrayController::FileShareTrayController(QObject* parent)
     : QObject(parent) {
-  const QString host = QSysInfo::machineHostName();
+  const QString host = QSysInfo::machineHostName().trimmed();
   if (!host.isEmpty()) {
     device_name_ = host;
   }
 
   LoadSettings();
+  CreateService();
   ReopenLogFile();
   LogLine(QStringLiteral("Started file share tray controller"));
 }
@@ -69,6 +35,158 @@ FileShareTrayController::~FileShareTrayController() {
   if (log_file_.isOpen()) {
     log_file_.close();
   }
+}
+
+void FileShareTrayController::CreateService() {
+  service_ = std::make_unique<NearbySharingApi>(device_name_.toStdString());
+  qr_code_url_ = QString::fromStdString(service_->GetQrCodeUrl());
+  emit qrCodeUrlChanged();
+  AttachServiceListeners();
+}
+
+void FileShareTrayController::AttachServiceListeners() {
+  NearbySharingApi::Listener listener;
+
+  listener.target_discovered_cb = [this](const NearbySharingApi::ShareTargetInfo& info) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, info]() {
+          const QString name = TrimmedOrFallback(
+              QString::fromStdString(info.device_name),
+              QStringLiteral("Unknown device"));
+          UpsertTarget(info.id, name, info.is_incoming);
+          LogLine(QStringLiteral("Target discovered id=%1 name=%2")
+                      .arg(info.id)
+                      .arg(name));
+        },
+        Qt::QueuedConnection);
+  };
+
+  listener.target_updated_cb = [this](const NearbySharingApi::ShareTargetInfo& info) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, info]() {
+          const QString name = TrimmedOrFallback(
+              QString::fromStdString(info.device_name),
+              QStringLiteral("Unknown device"));
+          UpsertTarget(info.id, name, info.is_incoming);
+          LogLine(QStringLiteral("Target updated id=%1 name=%2")
+                      .arg(info.id)
+                      .arg(name));
+        },
+        Qt::QueuedConnection);
+  };
+
+  listener.target_lost_cb = [this](int64_t share_target_id) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, share_target_id]() {
+          RemoveTarget(share_target_id);
+          LogLine(QStringLiteral("Target lost id=%1").arg(share_target_id));
+        },
+        Qt::QueuedConnection);
+  };
+
+  listener.transfer_update_cb =
+      [this](const NearbySharingApi::TransferUpdateInfo& update) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, update]() {
+              const QString update_name =
+                  QString::fromStdString(update.device_name).trimmed();
+              if (!update_name.isEmpty()) {
+                target_names_[update.share_target_id] = update_name;
+              }
+              const QString name = TargetName(update.share_target_id);
+              const QString status = TransferStatusToString(update.status);
+              const QString direction =
+                  update.is_incoming ? QStringLiteral("incoming")
+                                     : QStringLiteral("outgoing");
+              QString file_name = QString::fromStdString(update.first_file_name);
+              if (file_name.isEmpty() && !update.is_incoming &&
+                  pending_send_target_id_ == update.share_target_id &&
+                  !pending_send_file_name_.isEmpty()) {
+                file_name = pending_send_file_name_;
+              }
+
+              UpsertTransfer(update.share_target_id, name, status, update.progress,
+                             update.transferred_bytes, direction, file_name);
+              SetStatus(QStringLiteral("%1 (%2)")
+                            .arg(status)
+                            .arg(name));
+
+              if (update.status ==
+                  NearbySharingApi::TransferStatus::kAwaitingLocalConfirmation) {
+                if (auto_accept_incoming_) {
+                  service_->Accept(
+                      update.share_target_id,
+                      [this, id = update.share_target_id](
+                          NearbySharingApi::StatusCode result) {
+                        QMetaObject::invokeMethod(
+                            this,
+                            [this, id, result]() {
+                              LogLine(QStringLiteral("Accept(%1): %2")
+                                          .arg(id)
+                                          .arg(StatusToString(result)));
+                            },
+                            Qt::QueuedConnection);
+                      });
+                }
+              }
+
+              if (!IsFinalTransferStatus(update.status)) {
+                return;
+              }
+
+              const bool success =
+                  update.status == NearbySharingApi::TransferStatus::kComplete;
+
+              if (update.is_incoming) {
+                if (success) {
+                  const QString received_name =
+                      file_name.isEmpty() ? QStringLiteral("file") : file_name;
+                  emit requestTrayMessage(
+                      QStringLiteral("File received"),
+                      QStringLiteral("%1 from %2").arg(received_name, name));
+                } else {
+                  emit requestTrayMessage(
+                      QStringLiteral("Receive failed"),
+                      QStringLiteral("Transfer from %1 failed (%2)")
+                          .arg(name, status));
+                }
+                return;
+              }
+
+              const QString sent_name = file_name.isEmpty()
+                                            ? QStringLiteral("file")
+                                            : file_name;
+              if (success) {
+                emit requestTrayMessage(QStringLiteral("Send complete"),
+                                        QStringLiteral("%1 sent to %2")
+                                            .arg(sent_name, name));
+              } else {
+                emit requestTrayMessage(
+                    QStringLiteral("Send failed"),
+                    QStringLiteral("%1 failed to send to %2")
+                        .arg(sent_name, name));
+              }
+
+              if (pending_send_target_id_ == update.share_target_id) {
+                pending_send_target_id_ = 0;
+                if (!pending_send_file_path_.isEmpty()) {
+                  pending_send_file_path_.clear();
+                  emit pendingSendFilePathChanged();
+                }
+                if (!pending_send_file_name_.isEmpty()) {
+                  pending_send_file_name_.clear();
+                  emit pendingSendFileNameChanged();
+                }
+              }
+            },
+            Qt::QueuedConnection);
+      };
+
+  service_->SetListener(std::move(listener));
 }
 
 void FileShareTrayController::LoadSettings() {
@@ -85,25 +203,6 @@ void FileShareTrayController::LoadSettings() {
   auto_accept_incoming_ =
       settings.value(QStringLiteral("autoAcceptIncoming"), auto_accept_incoming_)
           .toBool();
-  bluetooth_enabled_ =
-      settings.value(QStringLiteral("bluetoothEnabled"), bluetooth_enabled_).toBool();
-  ble_enabled_ =
-      settings.value(QStringLiteral("bleEnabled"), ble_enabled_).toBool();
-  wifi_lan_enabled_ =
-      settings.value(QStringLiteral("wifiLanEnabled"), wifi_lan_enabled_).toBool();
-  wifi_hotspot_enabled_ =
-      settings.value(QStringLiteral("wifiHotspotEnabled"), wifi_hotspot_enabled_).toBool();
-  web_rtc_enabled_ =
-      settings.value(QStringLiteral("webRtcEnabled"), web_rtc_enabled_).toBool();
-  connection_strategy_ = NormalizeConnectionStrategy(
-      settings.value(QStringLiteral("connectionStrategy"), connection_strategy_)
-          .toString());
-
-  const QString stored_service_id =
-      settings.value(QStringLiteral("serviceId"), serviceId()).toString().trimmed();
-  if (!stored_service_id.isEmpty()) {
-    service_id_ = stored_service_id.toStdString();
-  }
 
   const QString stored_log_path =
       settings.value(QStringLiteral("logPath"), log_path_).toString().trimmed();
@@ -116,13 +215,6 @@ void FileShareTrayController::SaveSettings() const {
   QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlFileTrayApp"));
   settings.setValue(QStringLiteral("deviceName"), device_name_);
   settings.setValue(QStringLiteral("autoAcceptIncoming"), auto_accept_incoming_);
-  settings.setValue(QStringLiteral("bluetoothEnabled"), bluetooth_enabled_);
-  settings.setValue(QStringLiteral("bleEnabled"), ble_enabled_);
-  settings.setValue(QStringLiteral("wifiLanEnabled"), wifi_lan_enabled_);
-  settings.setValue(QStringLiteral("wifiHotspotEnabled"), wifi_hotspot_enabled_);
-  settings.setValue(QStringLiteral("webRtcEnabled"), web_rtc_enabled_);
-  settings.setValue(QStringLiteral("connectionStrategy"), connection_strategy_);
-  settings.setValue(QStringLiteral("serviceId"), serviceId());
   settings.setValue(QStringLiteral("logPath"), log_path_);
   settings.sync();
 }
@@ -133,13 +225,18 @@ void FileShareTrayController::setDeviceName(const QString& device_name) {
     return;
   }
 
+  const bool was_running = running_;
+  if (was_running) {
+    stop();
+  }
+
   device_name_ = trimmed;
   emit deviceNameChanged();
   SaveSettings();
   LogLine(QStringLiteral("Device name changed to %1").arg(device_name_));
+  CreateService();
 
-  if (running_) {
-    stop();
+  if (was_running) {
     start();
   }
 }
@@ -148,57 +245,6 @@ void FileShareTrayController::setAutoAcceptIncoming(bool enabled) {
   if (auto_accept_incoming_ == enabled) return;
   auto_accept_incoming_ = enabled;
   emit autoAcceptIncomingChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setBluetoothEnabled(bool enabled) {
-  if (bluetooth_enabled_ == enabled) return;
-  bluetooth_enabled_ = enabled;
-  emit bluetoothEnabledChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setBleEnabled(bool enabled) {
-  if (ble_enabled_ == enabled) return;
-  ble_enabled_ = enabled;
-  emit bleEnabledChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setWifiLanEnabled(bool enabled) {
-  if (wifi_lan_enabled_ == enabled) return;
-  wifi_lan_enabled_ = enabled;
-  emit wifiLanEnabledChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setWifiHotspotEnabled(bool enabled) {
-  if (wifi_hotspot_enabled_ == enabled) return;
-  wifi_hotspot_enabled_ = enabled;
-  emit wifiHotspotEnabledChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setWebRtcEnabled(bool enabled) {
-  if (web_rtc_enabled_ == enabled) return;
-  web_rtc_enabled_ = enabled;
-  emit webRtcEnabledChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setConnectionStrategy(const QString& strategy) {
-  const QString normalized = NormalizeConnectionStrategy(strategy);
-  if (connection_strategy_ == normalized) return;
-  connection_strategy_ = normalized;
-  emit connectionStrategyChanged();
-  SaveSettings();
-}
-
-void FileShareTrayController::setServiceId(const QString& service_id) {
-  const QString trimmed = service_id.trimmed();
-  if (trimmed.isEmpty() || trimmed.toStdString() == service_id_) return;
-  service_id_ = trimmed.toStdString();
-  emit serviceIdChanged();
   SaveSettings();
 }
 
@@ -234,55 +280,43 @@ void FileShareTrayController::stop() {
   running_ = false;
   emit runningChanged();
 
-  service_.StopDiscovery(
-      service_id_, [this](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, status]() {
-              LogLine(QStringLiteral("StopDiscovery: %1")
-                          .arg(StatusToString(status)));
-            },
-            Qt::QueuedConnection);
-      });
-
-  service_.StopAdvertising(
-      service_id_, [this](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, status]() {
-              LogLine(QStringLiteral("StopAdvertising: %1")
-                          .arg(StatusToString(status)));
-            },
-            Qt::QueuedConnection);
-      });
-
-  service_.StopAllEndpoints([this](NearbyConnectionsQtFacade::Status status) {
+  service_->StopSendMode([this](NearbySharingApi::StatusCode status) {
     QMetaObject::invokeMethod(
         this,
         [this, status]() {
-          LogLine(QStringLiteral("StopAllEndpoints: %1")
-                      .arg(StatusToString(status)));
+          LogLine(QStringLiteral("StopSendMode: %1").arg(StatusToString(status)));
         },
         Qt::QueuedConnection);
   });
 
-  discovered_devices_.clear();
-  connected_devices_.clear();
-  endpoint_peer_names_.clear();
-  endpoint_mediums_.clear();
-  target_endpoint_for_send_.clear();
+  service_->StopReceiveMode([this](NearbySharingApi::StatusCode status) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, status]() {
+          LogLine(
+              QStringLiteral("StopReceiveMode: %1").arg(StatusToString(status)));
+        },
+        Qt::QueuedConnection);
+  });
 
-  // Cancel any pending outgoing-completion timers.
-  for (QTimer* timer : outgoing_disconnect_timers_) {
-    timer->stop();
-    timer->deleteLater();
-  }
-  outgoing_disconnect_timers_.clear();
-  pending_outgoing_completions_.clear();
+  service_->Shutdown([this](NearbySharingApi::StatusCode status) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, status]() {
+          LogLine(QStringLiteral("Shutdown: %1").arg(StatusToString(status)));
+        },
+        Qt::QueuedConnection);
+  });
 
-  emit discoveredDevicesChanged();
-  emit connectedDevicesChanged();
-  emit endpointMediumsChanged();
+  discovered_targets_.clear();
+  discovered_row_by_target_.clear();
+  target_names_.clear();
+  transfers_.clear();
+  transfer_row_by_target_.clear();
+  pending_send_target_id_ = 0;
+
+  emit discoveredTargetsChanged();
+  emit transfersChanged();
 
   SetStatus(QStringLiteral("Stopped"));
 }
@@ -356,49 +390,56 @@ void FileShareTrayController::switchToSendModeWithFile(const QString& file_path)
           .arg(pending_send_file_name_));
 }
 
-void FileShareTrayController::sendPendingFileToEndpoint(const QString& endpoint_id) {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
+void FileShareTrayController::sendPendingFileToTarget(qlonglong share_target_id) {
+  if (share_target_id <= 0) {
     return;
   }
 
-  if (pending_send_file_path_.isEmpty()) {
-    SetStatus(QStringLiteral("No file selected"));
+  QFileInfo file_info(pending_send_file_path_);
+  if (pending_send_file_path_.isEmpty() || !file_info.exists() ||
+      !file_info.isFile()) {
+    SetStatus(QStringLiteral("Selected file is not available"));
     emit requestTrayMessage(QStringLiteral("Send failed"),
-                            QStringLiteral("Select a file first."));
+                            QStringLiteral("Selected file is not available."));
     return;
   }
 
-  target_endpoint_for_send_ = endpoint;
+  const QString target_name = TargetName(share_target_id);
+  pending_send_target_id_ = share_target_id;
+  UpsertTransfer(share_target_id, target_name, QStringLiteral("Queued"), 0.0, 0,
+                 QStringLiteral("outgoing"), pending_send_file_name_);
 
-  if (connected_devices_.contains(endpoint)) {
-    sendPendingFile(endpoint);
-    return;
-  }
+  service_->SendFile(
+      share_target_id, file_info.absoluteFilePath().toStdString(),
+      [this, share_target_id](NearbySharingApi::StatusCode status) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, share_target_id, status]() {
+              const QString target_name = TargetName(share_target_id);
+              LogLine(QStringLiteral("SendFile(%1): %2")
+                          .arg(share_target_id)
+                          .arg(StatusToString(status)));
+              if (status == NearbySharingApi::StatusCode::kOk) {
+                SetStatus(QStringLiteral("Sending %1 to %2")
+                              .arg(pending_send_file_name_, target_name));
+                return;
+              }
 
-  requestConnectionForSend(endpoint);
-}
-
-QString FileShareTrayController::mediumForEndpoint(const QString& endpoint_id) const {
-  return endpoint_mediums_.value(endpoint_id).toString();
-}
-
-QString FileShareTrayController::peerNameForEndpoint(const QString& endpoint_id) const {
-  return PeerLabelForEndpoint(endpoint_id);
+              emit requestTrayMessage(
+                  QStringLiteral("Send failed"),
+                  QStringLiteral("Could not send to %1").arg(target_name));
+              UpsertTransfer(share_target_id, target_name, QStringLiteral("Failed"),
+                             0.0, 0, QStringLiteral("outgoing"),
+                             pending_send_file_name_);
+              pending_send_target_id_ = 0;
+            },
+            Qt::QueuedConnection);
+      });
 }
 
 void FileShareTrayController::clearTransfers() {
   transfers_.clear();
-  transfer_row_for_payload_.clear();
-  outgoing_file_payload_to_endpoint_.clear();
-  outgoing_file_payload_to_name_.clear();
-  send_terminal_notified_.clear();
-  for (QTimer* timer : outgoing_disconnect_timers_) {
-    timer->stop();
-    timer->deleteLater();
-  }
-  outgoing_disconnect_timers_.clear();
-  pending_outgoing_completions_.clear();
+  transfer_row_by_target_.clear();
   emit transfersChanged();
 }
 
@@ -409,774 +450,118 @@ void FileShareTrayController::hideToTray() {
 }
 
 void FileShareTrayController::startSendMode() {
-  discovered_devices_.clear();
-  emit discoveredDevicesChanged();
-
-  service_.StartDiscovery(
-      service_id_, BuildDiscoveryOptions(), BuildDiscoveryListener(),
-      [this](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, status]() {
-              SetStatus(QStringLiteral("StartDiscovery: %1")
-                            .arg(StatusToString(status)));
-              LogLine(QStringLiteral("StartDiscovery: %1")
-                          .arg(StatusToString(status)));
-              if (status != NearbyConnectionsQtFacade::Status::kSuccess) {
-                running_ = false;
-                emit runningChanged();
-              }
-            },
-            Qt::QueuedConnection);
-      });
+  service_->StartSendMode([this](NearbySharingApi::StatusCode status) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, status]() {
+          SetStatus(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
+          LogLine(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
+          if (status != NearbySharingApi::StatusCode::kOk) {
+            running_ = false;
+            emit runningChanged();
+          }
+        },
+        Qt::QueuedConnection);
+  });
 }
 
 void FileShareTrayController::startReceiveMode() {
-  service_.StartAdvertising(
-      service_id_, BuildEndpointInfo(), BuildAdvertisingOptions(),
-      BuildConnectionListener(),
-      [this](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, status]() {
-              SetStatus(QStringLiteral("StartAdvertising: %1")
-                            .arg(StatusToString(status)));
-              LogLine(QStringLiteral("StartAdvertising: %1")
-                          .arg(StatusToString(status)));
-              if (status != NearbyConnectionsQtFacade::Status::kSuccess) {
-                running_ = false;
-                emit runningChanged();
-              }
-            },
-            Qt::QueuedConnection);
-      });
-}
-
-std::vector<uint8_t> FileShareTrayController::BuildEndpointInfo() const {
-  QByteArray endpoint = device_name_.toUtf8();
-  return std::vector<uint8_t>(endpoint.begin(), endpoint.end());
-}
-
-NearbyConnectionsQtFacade::ConnectionListener
-FileShareTrayController::BuildConnectionListener() {
-  NearbyConnectionsQtFacade::ConnectionListener listener;
-
-  listener.initiated_cb = [this](const std::string& endpoint_id,
-                                 const NearbyConnectionsQtFacade::ConnectionInfo& info) {
+  service_->StartReceiveMode([this](NearbySharingApi::StatusCode status) {
     QMetaObject::invokeMethod(
         this,
-        [this, endpoint = QString::fromStdString(endpoint_id),
-         peer_name = QString::fromStdString(info.peer_name),
-         incoming = info.is_incoming_connection]() {
-          SetPeerNameForEndpoint(endpoint, peer_name);
-          const QString peer = PeerLabelForEndpoint(endpoint);
-
-          if (incoming) {
-            SetStatus(QStringLiteral("Incoming connection from %1").arg(peer));
-            if (auto_accept_incoming_) {
-              acceptIncomingInternal(endpoint);
-            }
-          } else {
-            // Always accept outgoing connections (initiated by us for send).
-            acceptIncomingInternal(endpoint);
+        [this, status]() {
+          SetStatus(
+              QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
+          LogLine(
+              QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
+          if (status != NearbySharingApi::StatusCode::kOk) {
+            running_ = false;
+            emit runningChanged();
           }
         },
         Qt::QueuedConnection);
+  });
+}
+
+void FileShareTrayController::UpsertTarget(qlonglong share_target_id,
+                                           const QString& name,
+                                           bool is_incoming) {
+  target_names_[share_target_id] = name;
+  if (is_incoming) {
+    return;
+  }
+
+  QVariantMap row{
+      {QStringLiteral("id"), share_target_id},
+      {QStringLiteral("name"), name},
   };
 
-  listener.accepted_cb = [this](const std::string& endpoint_id) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, endpoint = QString::fromStdString(endpoint_id)]() {
-          const QString peer = PeerLabelForEndpoint(endpoint);
-          AddConnectedDevice(endpoint);
-          SetStatus(QStringLiteral("Connected to %1").arg(peer));
-          LogLine(QStringLiteral("Connection accepted endpoint=%1 peer=%2")
-                      .arg(endpoint, peer));
+  if (discovered_row_by_target_.contains(share_target_id)) {
+    const int row_index = discovered_row_by_target_.value(share_target_id);
+    if (row_index >= 0 && row_index < discovered_targets_.size()) {
+      discovered_targets_[row_index] = row;
+      emit discoveredTargetsChanged();
+      return;
+    }
+  }
 
-          if (!target_endpoint_for_send_.isEmpty() &&
-              target_endpoint_for_send_ == endpoint &&
-              !pending_send_file_path_.isEmpty()) {
-            sendPendingFile(endpoint);
-          }
-        },
-        Qt::QueuedConnection);
+  discovered_row_by_target_.insert(share_target_id, discovered_targets_.size());
+  discovered_targets_.append(row);
+  emit discoveredTargetsChanged();
+}
+
+void FileShareTrayController::RemoveTarget(qlonglong share_target_id) {
+  target_names_.remove(share_target_id);
+  if (!discovered_row_by_target_.contains(share_target_id)) {
+    return;
+  }
+
+  const int removed_index = discovered_row_by_target_.take(share_target_id);
+  if (removed_index < 0 || removed_index >= discovered_targets_.size()) {
+    return;
+  }
+
+  discovered_targets_.removeAt(removed_index);
+  for (auto it = discovered_row_by_target_.begin();
+       it != discovered_row_by_target_.end(); ++it) {
+    if (it.value() > removed_index) {
+      it.value() = it.value() - 1;
+    }
+  }
+  emit discoveredTargetsChanged();
+}
+
+QString FileShareTrayController::TargetName(qlonglong share_target_id) const {
+  const QString name = target_names_.value(share_target_id).trimmed();
+  return name.isEmpty() ? QStringLiteral("Unknown device") : name;
+}
+
+void FileShareTrayController::UpsertTransfer(
+    qlonglong share_target_id, const QString& target_name, const QString& status,
+    double progress, qulonglong transferred_bytes, const QString& direction,
+    const QString& file_name) {
+  QVariantMap transfer{
+      {QStringLiteral("targetId"), share_target_id},
+      {QStringLiteral("targetName"), target_name},
+      {QStringLiteral("status"), status},
+      {QStringLiteral("progress"), progress},
+      {QStringLiteral("transferredBytes"), transferred_bytes},
+      {QStringLiteral("direction"), direction},
+      {QStringLiteral("fileName"), file_name},
   };
 
-  listener.rejected_cb =
-      [this](const std::string& endpoint_id, NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id), status]() {
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              SetStatus(QStringLiteral("Connection rejected by %1 (%2)")
-                            .arg(peer, StatusToString(status)));
-              LogLine(QStringLiteral("Connection rejected endpoint=%1 status=%2")
-                          .arg(endpoint, StatusToString(status)));
-            },
-            Qt::QueuedConnection);
-      };
-
-  listener.disconnected_cb = [this](const std::string& endpoint_id) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, endpoint = QString::fromStdString(endpoint_id)]() {
-          // If there is a pending outgoing completion for this endpoint, the
-          // receiver just disconnected — mirror OutgoingShareSession::
-          // OnConnectionDisconnected: cancel the fallback timer and emit the
-          // final tray notification now.
-          auto pending_it = pending_outgoing_completions_.find(endpoint);
-          if (pending_it != pending_outgoing_completions_.end()) {
-            const PendingOutgoingCompletion completion = pending_it.value();
-            pending_outgoing_completions_.erase(pending_it);
-            auto timer_it = outgoing_disconnect_timers_.find(endpoint);
-            if (timer_it != outgoing_disconnect_timers_.end()) {
-              timer_it.value()->stop();
-              timer_it.value()->deleteLater();
-              outgoing_disconnect_timers_.erase(timer_it);
-            }
-            LogLine(QStringLiteral("Receiver disconnected, emitting send result endpoint=%1").arg(endpoint));
-            if (completion.success) {
-              emit requestTrayMessage(
-                  QStringLiteral("Send complete"),
-                  QStringLiteral("%1 sent to %2").arg(completion.file_name, completion.peer));
-            } else {
-              emit requestTrayMessage(
-                  QStringLiteral("Send failed"),
-                  QStringLiteral("%1 failed to send to %2")
-                      .arg(completion.file_name, completion.peer));
-            }
-          }
-
-          const QString peer = PeerLabelForEndpoint(endpoint);
-          RemoveConnectedDevice(endpoint);
-          endpoint_mediums_.remove(endpoint);
-          emit endpointMediumsChanged();
-          SetStatus(QStringLiteral("Disconnected from %1").arg(peer));
-          LogLine(QStringLiteral("Disconnected endpoint=%1").arg(endpoint));
-        },
-        Qt::QueuedConnection);
-  };
-
-  listener.bandwidth_changed_cb =
-      [this](const std::string& endpoint_id, NearbyConnectionsQtFacade::Medium medium) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id), medium]() {
-              const QString medium_name = MediumToString(medium);
-              endpoint_mediums_[endpoint] = medium_name;
-              emit endpointMediumsChanged();
-              UpdateTransferMediumForEndpoint(endpoint, medium_name);
-              LogLine(QStringLiteral("Bandwidth changed endpoint=%1 medium=%2")
-                          .arg(endpoint, medium_name));
-            },
-            Qt::QueuedConnection);
-      };
-
-  return listener;
-}
-
-NearbyConnectionsQtFacade::DiscoveryListener
-FileShareTrayController::BuildDiscoveryListener() {
-  NearbyConnectionsQtFacade::DiscoveryListener listener;
-
-  listener.endpoint_found_cb =
-      [this](const std::string& endpoint_id,
-             const NearbyConnectionsQtFacade::DiscoveredEndpointInfo& info) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id),
-             peer_name = QString::fromStdString(info.peer_name)]() {
-              SetPeerNameForEndpoint(endpoint, peer_name);
-              AddDiscoveredDevice(endpoint);
-              LogLine(QStringLiteral("Discovered endpoint=%1 peer=%2")
-                          .arg(endpoint, PeerLabelForEndpoint(endpoint)));
-            },
-            Qt::QueuedConnection);
-      };
-
-  listener.endpoint_lost_cb = [this](const std::string& endpoint_id) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, endpoint = QString::fromStdString(endpoint_id)]() {
-          RemoveDiscoveredDevice(endpoint);
-          LogLine(QStringLiteral("Lost endpoint=%1").arg(endpoint));
-        },
-        Qt::QueuedConnection);
-  };
-
-  listener.endpoint_distance_changed_cb =
-      [this](const std::string& endpoint_id, NearbyConnectionsQtFacade::DistanceInfo info) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id), info]() {
-              LogLine(QStringLiteral("Distance changed endpoint=%1 value=%2")
-                          .arg(endpoint)
-                          .arg(static_cast<int>(info)));
-            },
-            Qt::QueuedConnection);
-      };
-
-  return listener;
-}
-
-NearbyConnectionsQtFacade::PayloadListener
-FileShareTrayController::BuildPayloadListener() {
-  NearbyConnectionsQtFacade::PayloadListener listener;
-
-  listener.payload_cb =
-      [this](const std::string& endpoint_id, NearbyConnectionsQtFacade::Payload payload) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id),
-             payload = std::move(payload)]() {
-              if (payload.type == NearbyConnectionsQtFacade::Payload::Type::kBytes) {
-                const QString text = QString::fromUtf8(
-                    reinterpret_cast<const char*>(payload.bytes.data()),
-                    static_cast<int>(payload.bytes.size()));
-                if (text.startsWith(QStringLiteral("FILE:"))) {
-                  const QString filename = text.mid(5).trimmed();
-                  if (!filename.isEmpty()) {
-                    pending_file_names_[endpoint] = filename;
-                  }
-                }
-                return;
-              }
-
-              if (payload.type != NearbyConnectionsQtFacade::Payload::Type::kFile) {
-                return;
-              }
-
-              QString file_name = QString::fromStdString(payload.file_name).trimmed();
-              if (pending_file_names_.contains(endpoint)) {
-                file_name = pending_file_names_.take(endpoint);
-              }
-              incoming_file_endpoints_[payload.id] = endpoint;
-              incoming_file_names_[payload.id] = file_name;
-              incoming_file_paths_[payload.id] =
-                  QString::fromStdString(payload.file_path);
-
-              LogLine(QStringLiteral("Incoming file payload announced endpoint=%1 id=%2 name=%3 path=%4")
-                          .arg(endpoint)
-                          .arg(payload.id)
-                          .arg(file_name, QString::fromStdString(payload.file_path)));
-            },
-            Qt::QueuedConnection);
-      };
-
-  listener.payload_progress_cb =
-      [this](const std::string& endpoint_id,
-             const NearbyConnectionsQtFacade::PayloadTransferUpdate& update) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint = QString::fromStdString(endpoint_id), update]() {
-              const bool is_outgoing_file =
-                  outgoing_file_payload_to_endpoint_.contains(update.payload_id);
-              const QString direction =
-                  is_outgoing_file ? QStringLiteral("outgoing") : QStringLiteral("incoming");
-
-              UpsertTransfer(endpoint, update.payload_id,
-                             PayloadStatusToString(update.status),
-                             update.bytes_transferred, update.total_bytes,
-                             direction);
-
-              if (!is_outgoing_file || !IsTerminalPayloadStatus(update.status) ||
-                  send_terminal_notified_.contains(update.payload_id)) {
-                if (!is_outgoing_file &&
-                    update.status == NearbyConnectionsQtFacade::PayloadStatus::kSuccess &&
-                    incoming_file_paths_.contains(update.payload_id)) {
-                  const QString received_path = incoming_file_paths_.take(update.payload_id);
-                  const QString received_name = incoming_file_names_.take(update.payload_id);
-                  const QString incoming_endpoint =
-                      incoming_file_endpoints_.take(update.payload_id);
-                  const QString final_path = FinalizeReceivedFilePath(
-                      received_path, received_name, update.payload_id);
-                  const QString peer = PeerLabelForEndpoint(incoming_endpoint);
-                  const QString final_name = QFileInfo(final_path).fileName();
-                  emit requestTrayMessage(
-                      QStringLiteral("File received"),
-                      QStringLiteral("%1 from %2").arg(final_name, peer));
-                  LogLine(QStringLiteral("Received file endpoint=%1 id=%2 saved=%3")
-                              .arg(incoming_endpoint)
-                              .arg(update.payload_id)
-                              .arg(final_path));
-                  // Mirror nearby_sharing_service_impl: receiver disconnects
-                  // immediately on transfer complete, which then triggers the
-                  // sender's OnConnectionDisconnected / DelayComplete path.
-                  disconnectDevice(incoming_endpoint);
-                } else if (!is_outgoing_file &&
-                           IsTerminalPayloadStatus(update.status)) {
-                  incoming_file_paths_.remove(update.payload_id);
-                  incoming_file_names_.remove(update.payload_id);
-                  incoming_file_endpoints_.remove(update.payload_id);
-                }
-                return;
-              }
-
-              send_terminal_notified_.insert(update.payload_id);
-
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              const QString file_name =
-                  outgoing_file_payload_to_name_.value(update.payload_id,
-                                                       QStringLiteral("file"));
-              const bool send_success =
-                  update.status == NearbyConnectionsQtFacade::PayloadStatus::kSuccess;
-
-              outgoing_file_payload_to_endpoint_.remove(update.payload_id);
-              outgoing_file_payload_to_name_.remove(update.payload_id);
-              send_terminal_notified_.remove(update.payload_id);
-
-              if (!pending_send_file_path_.isEmpty()) {
-                pending_send_file_path_.clear();
-                emit pendingSendFilePathChanged();
-              }
-              if (!pending_send_file_name_.isEmpty()) {
-                pending_send_file_name_.clear();
-                emit pendingSendFileNameChanged();
-              }
-              target_endpoint_for_send_.clear();
-
-              // Mirror nearby_sharing_service_impl OutgoingShareSession::DelayComplete:
-              // wait for the receiver to disconnect first so we don't cut the
-              // connection before in-flight bytes are fully processed.  A
-              // 60-second timer fires disconnectDevice() as a fallback.
-              LogLine(QStringLiteral("Outgoing transfer complete endpoint=%1 success=%2, waiting for receiver disconnect")
-                          .arg(endpoint)
-                          .arg(send_success ? QStringLiteral("true") : QStringLiteral("false")));
-              pending_outgoing_completions_.insert(
-                  endpoint, PendingOutgoingCompletion{file_name, peer, endpoint, send_success});
-
-              QTimer* timer = new QTimer(this);
-              timer->setSingleShot(true);
-              connect(timer, &QTimer::timeout, this,
-                      [this, endpoint, timer]() {
-                        auto it = pending_outgoing_completions_.find(endpoint);
-                        if (it == pending_outgoing_completions_.end()) {
-                          timer->deleteLater();
-                          outgoing_disconnect_timers_.remove(endpoint);
-                          return;
-                        }
-                        const PendingOutgoingCompletion completion = it.value();
-                        pending_outgoing_completions_.erase(it);
-                        outgoing_disconnect_timers_.remove(endpoint);
-                        timer->deleteLater();
-                        LogLine(QStringLiteral("Outgoing disconnect timeout fired endpoint=%1").arg(endpoint));
-                        if (completion.success) {
-                          emit requestTrayMessage(
-                              QStringLiteral("Send complete"),
-                              QStringLiteral("%1 sent to %2").arg(completion.file_name, completion.peer));
-                        } else {
-                          emit requestTrayMessage(
-                              QStringLiteral("Send failed"),
-                              QStringLiteral("%1 failed to send to %2")
-                                  .arg(completion.file_name, completion.peer));
-                        }
-                        disconnectDevice(endpoint);
-                      });
-              outgoing_disconnect_timers_.insert(endpoint, timer);
-              timer->start(kOutgoingDisconnectionDelayMs);
-            },
-            Qt::QueuedConnection);
-      };
-
-  return listener;
-}
-
-NearbyConnectionsQtFacade::MediumSelection
-FileShareTrayController::BuildMediumSelection() const {
-  NearbyConnectionsQtFacade::MediumSelection selection;
-  selection.bluetooth = bluetooth_enabled_;
-  selection.ble = ble_enabled_;
-  selection.wifi_lan = wifi_lan_enabled_;
-  selection.wifi_hotspot = wifi_hotspot_enabled_;
-  selection.web_rtc = web_rtc_enabled_;
-  return selection;
-}
-
-NearbyConnectionsQtFacade::AdvertisingOptions
-FileShareTrayController::BuildAdvertisingOptions() const {
-  NearbyConnectionsQtFacade::AdvertisingOptions options;
-  options.strategy = StrategyFromName(connection_strategy_);
-  options.allowed_mediums = BuildMediumSelection();
-  options.auto_upgrade_bandwidth = true;
-  options.enable_bluetooth_listening = true;
-  options.enforce_topology_constraints = true;
-  return options;
-}
-
-NearbyConnectionsQtFacade::DiscoveryOptions
-FileShareTrayController::BuildDiscoveryOptions() const {
-  NearbyConnectionsQtFacade::DiscoveryOptions options;
-  options.strategy = StrategyFromName(connection_strategy_);
-  options.allowed_mediums = BuildMediumSelection();
-  return options;
-}
-
-NearbyConnectionsQtFacade::ConnectionOptions
-FileShareTrayController::BuildConnectionOptions() const {
-  NearbyConnectionsQtFacade::ConnectionOptions options;
-  options.allowed_mediums = BuildMediumSelection();
-  options.non_disruptive_hotspot_mode = true;
-  return options;
-}
-
-void FileShareTrayController::acceptIncomingInternal(const QString& endpoint_id) {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
-    return;
-  }
-
-  service_.AcceptConnection(
-      service_id_, endpoint.toStdString(), BuildPayloadListener(),
-      [this, endpoint](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint, status]() {
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              SetStatus(QStringLiteral("AcceptConnection(%1): %2")
-                            .arg(peer, StatusToString(status)));
-              LogLine(QStringLiteral("AcceptConnection(%1): %2")
-                          .arg(endpoint, StatusToString(status)));
-            },
-            Qt::QueuedConnection);
-      });
-}
-
-void FileShareTrayController::requestConnectionForSend(const QString& endpoint_id) {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
-    return;
-  }
-
-  const QString peer = PeerLabelForEndpoint(endpoint);
-  SetStatus(QStringLiteral("Requesting connection to %1").arg(peer));
-  LogLine(QStringLiteral("RequestConnection %1").arg(endpoint));
-
-  service_.RequestConnection(
-      service_id_, BuildEndpointInfo(), endpoint.toStdString(),
-      BuildConnectionOptions(), BuildConnectionListener(),
-      [this, endpoint](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint, status]() {
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              SetStatus(QStringLiteral("RequestConnection(%1): %2")
-                            .arg(peer, StatusToString(status)));
-              LogLine(QStringLiteral("RequestConnection(%1): %2")
-                          .arg(endpoint, StatusToString(status)));
-              if (status != NearbyConnectionsQtFacade::Status::kSuccess) {
-                emit requestTrayMessage(
-                    QStringLiteral("Send failed"),
-                    QStringLiteral("Could not connect to %1").arg(peer));
-              }
-            },
-            Qt::QueuedConnection);
-      });
-}
-
-void FileShareTrayController::sendPendingFile(const QString& endpoint_id) {
-  const QString endpoint = endpoint_id.trimmed();
-  QFileInfo file_info(pending_send_file_path_);
-  if (endpoint.isEmpty() || pending_send_file_path_.isEmpty() ||
-      !file_info.exists() || !file_info.isFile()) {
-    SetStatus(QStringLiteral("Selected file is not available"));
-    emit requestTrayMessage(QStringLiteral("Send failed"),
-                            QStringLiteral("Selected file is not available."));
-    return;
-  }
-
-  const QString peer = PeerLabelForEndpoint(endpoint);
-  const QString file_name =
-      pending_send_file_name_.isEmpty() ? file_info.fileName()
-                                        : pending_send_file_name_;
-
-  // Send metadata message first to preserve file names on receiver side.
-  const QString metadata = QStringLiteral("FILE:%1").arg(file_name);
-  QByteArray metadata_bytes = metadata.toUtf8();
-  std::vector<uint8_t> metadata_vec(metadata_bytes.begin(), metadata_bytes.end());
-  auto metadata_payload = service_.CreateBytesPayload(std::move(metadata_vec));
-
-  service_.SendPayload(
-      service_id_, {endpoint.toStdString()}, std::move(metadata_payload),
-      [this, endpoint](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint, status]() {
-              LogLine(QStringLiteral("Send metadata payload (%1): %2")
-                          .arg(endpoint, StatusToString(status)));
-            },
-            Qt::QueuedConnection);
-      });
-
-  NearbyConnectionsQtFacade::Payload file_payload;
-  file_payload.id = g_local_payload_id.fetch_add(1);
-  file_payload.type = NearbyConnectionsQtFacade::Payload::Type::kFile;
-  file_payload.file_path = file_info.absoluteFilePath().toStdString();
-  file_payload.file_name = file_name.toStdString();
-  file_payload.parent_folder = "";
-
-  const qlonglong payload_id = file_payload.id;
-  const qulonglong total_bytes =
-      static_cast<qulonglong>(qMax<qint64>(0, file_info.size()));
-
-  UpsertTransfer(endpoint, payload_id, QStringLiteral("Queued"), 0,
-                 total_bytes, QStringLiteral("outgoing"));
-
-  outgoing_file_payload_to_endpoint_.insert(payload_id, endpoint);
-  outgoing_file_payload_to_name_.insert(payload_id, file_name);
-  send_terminal_notified_.remove(payload_id);
-
-  emit requestTrayMessage(
-      QStringLiteral("Sending file"),
-      QStringLiteral("Sending %1 to %2").arg(file_name, peer));
-
-  service_.SendPayload(
-      service_id_, {endpoint.toStdString()}, std::move(file_payload),
-      [this, endpoint, payload_id, file_name,
-       total_bytes](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint, payload_id, file_name, status, total_bytes]() {
-              LogLine(QStringLiteral("Send file payload (%1, %2): %3")
-                          .arg(endpoint)
-                          .arg(payload_id)
-                          .arg(StatusToString(status)));
-
-              if (status == NearbyConnectionsQtFacade::Status::kSuccess) {
-                SetStatus(QStringLiteral("Sending %1...").arg(file_name));
-                return;
-              }
-
-              UpsertTransfer(endpoint, payload_id, QStringLiteral("SendFailed"),
-                             0, total_bytes, QStringLiteral("outgoing"));
-
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              emit requestTrayMessage(
-                  QStringLiteral("Send failed"),
-                  QStringLiteral("%1 failed to send to %2")
-                      .arg(file_name, peer));
-
-              outgoing_file_payload_to_endpoint_.remove(payload_id);
-              outgoing_file_payload_to_name_.remove(payload_id);
-              send_terminal_notified_.remove(payload_id);
-
-              if (!pending_send_file_path_.isEmpty()) {
-                pending_send_file_path_.clear();
-                emit pendingSendFilePathChanged();
-              }
-              if (!pending_send_file_name_.isEmpty()) {
-                pending_send_file_name_.clear();
-                emit pendingSendFileNameChanged();
-              }
-
-              target_endpoint_for_send_.clear();
-              disconnectDevice(endpoint);
-            },
-            Qt::QueuedConnection);
-      });
-}
-
-void FileShareTrayController::disconnectDevice(const QString& endpoint_id) {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
-    return;
-  }
-
-  service_.DisconnectFromEndpoint(
-      service_id_, endpoint.toStdString(),
-      [this, endpoint](NearbyConnectionsQtFacade::Status status) {
-        QMetaObject::invokeMethod(
-            this,
-            [this, endpoint, status]() {
-              const QString peer = PeerLabelForEndpoint(endpoint);
-              LogLine(QStringLiteral("Disconnect(%1): %2")
-                          .arg(endpoint, StatusToString(status)));
-              if (status == NearbyConnectionsQtFacade::Status::kSuccess) {
-                RemoveConnectedDevice(endpoint);
-                endpoint_mediums_.remove(endpoint);
-                emit endpointMediumsChanged();
-                SetStatus(QStringLiteral("Disconnected from %1").arg(peer));
-              }
-            },
-            Qt::QueuedConnection);
-      });
-}
-
-void FileShareTrayController::AddDiscoveredDevice(const QString& endpoint_id) {
-  if (discovered_devices_.contains(endpoint_id)) {
-    return;
-  }
-  // Skip ourselves – the peer name is set before this is called.
-  if (PeerLabelForEndpoint(endpoint_id).trimmed() == device_name_.trimmed()) {
-    return;
-  }
-  discovered_devices_.append(endpoint_id);
-  emit discoveredDevicesChanged();
-}
-
-void FileShareTrayController::RemoveDiscoveredDevice(const QString& endpoint_id) {
-  if (!discovered_devices_.removeOne(endpoint_id)) {
-    return;
-  }
-  emit discoveredDevicesChanged();
-}
-
-void FileShareTrayController::AddConnectedDevice(const QString& endpoint_id) {
-  if (connected_devices_.contains(endpoint_id)) {
-    return;
-  }
-  connected_devices_.append(endpoint_id);
-  emit connectedDevicesChanged();
-}
-
-void FileShareTrayController::RemoveConnectedDevice(const QString& endpoint_id) {
-  if (!connected_devices_.removeOne(endpoint_id)) {
-    return;
-  }
-  emit connectedDevicesChanged();
-}
-
-void FileShareTrayController::SetPeerNameForEndpoint(const QString& endpoint_id,
-                                                     const QString& peer_name) {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
-    return;
-  }
-
-  const QString trimmed_name = peer_name.trimmed();
-  const QString previous = endpoint_peer_names_.value(endpoint).trimmed();
-  if (previous == trimmed_name) {
-    return;
-  }
-
-  if (trimmed_name.isEmpty()) {
-    endpoint_peer_names_.remove(endpoint);
-  } else {
-    endpoint_peer_names_[endpoint] = trimmed_name;
-  }
-
-  emit discoveredDevicesChanged();
-  emit connectedDevicesChanged();
-}
-
-QString FileShareTrayController::PeerLabelForEndpoint(const QString& endpoint_id) const {
-  const QString endpoint = endpoint_id.trimmed();
-  if (endpoint.isEmpty()) {
-    return QStringLiteral("Unknown device");
-  }
-
-  const QString peer_name = endpoint_peer_names_.value(endpoint).trimmed();
-  return peer_name.isEmpty() ? QStringLiteral("Unknown device") : peer_name;
-}
-
-QString FileShareTrayController::FinalizeReceivedFilePath(
-    const QString& received_path, const QString& received_file_name,
-    qlonglong payload_id) const {
-  const QString source = received_path.trimmed();
-  if (source.isEmpty()) {
-    return source;
-  }
-
-  QFileInfo source_info(source);
-  const QString source_abs = source_info.absoluteFilePath();
-  const QString source_dir = source_info.absolutePath();
-
-  QString target_name = QFileInfo(received_file_name.trimmed()).fileName();
-  if (target_name.isEmpty()) {
-    target_name = source_info.fileName();
-  }
-  if (target_name.isEmpty()) {
-    target_name = QStringLiteral("payload_%1.bin").arg(payload_id);
-  }
-
-  const QFileInfo target_name_info(target_name);
-  const QString stem =
-      target_name_info.completeBaseName().isEmpty()
-          ? target_name_info.fileName()
-          : target_name_info.completeBaseName();
-  const QString suffix = target_name_info.completeSuffix();
-  QString target_path = QDir(source_dir).filePath(target_name);
-
-  int suffix_index = 1;
-  while (target_path != source_abs && QFileInfo::exists(target_path)) {
-    const QString next_name =
-        suffix.isEmpty()
-            ? QStringLiteral("%1_%2").arg(stem).arg(suffix_index)
-            : QStringLiteral("%1_%2.%3")
-                  .arg(stem)
-                  .arg(suffix_index)
-                  .arg(suffix);
-    target_path = QDir(source_dir).filePath(next_name);
-    ++suffix_index;
-  }
-
-  if (target_path == source_abs) {
-    return source_abs;
-  }
-
-  if (QFile::rename(source_abs, target_path)) {
-    return target_path;
-  }
-
-  if (QFile::copy(source_abs, target_path)) {
-    QFile::remove(source_abs);
-    return target_path;
-  }
-
-  return source_abs;
-}
-
-void FileShareTrayController::UpsertTransfer(const QString& endpoint_id,
-                                             qlonglong payload_id,
-                                             const QString& status,
-                                             qulonglong bytes_transferred,
-                                             qulonglong total_bytes,
-                                             const QString& direction) {
-  const QString medium = mediumForEndpoint(endpoint_id);
-  const double progress =
-      total_bytes > 0
-          ? static_cast<double>(bytes_transferred) /
-                static_cast<double>(total_bytes)
-          : 0.0;
-
-  QVariantMap transfer{{QStringLiteral("payloadId"), payload_id},
-                       {QStringLiteral("endpointId"), endpoint_id},
-                       {QStringLiteral("status"), status},
-                       {QStringLiteral("bytesTransferred"), bytes_transferred},
-                       {QStringLiteral("totalBytes"), total_bytes},
-                       {QStringLiteral("progress"), progress},
-                       {QStringLiteral("medium"), medium},
-                       {QStringLiteral("direction"), direction}};
-
-  if (transfer_row_for_payload_.contains(payload_id)) {
-    const int row = transfer_row_for_payload_.value(payload_id);
-    if (row >= 0 && row < transfers_.size()) {
-      transfers_[row] = transfer;
+  if (transfer_row_by_target_.contains(share_target_id)) {
+    const int row_index = transfer_row_by_target_.value(share_target_id);
+    if (row_index >= 0 && row_index < transfers_.size()) {
+      transfers_[row_index] = transfer;
       emit transfersChanged();
       return;
     }
   }
 
-  transfer_row_for_payload_.insert(payload_id, transfers_.size());
+  transfer_row_by_target_.insert(share_target_id, transfers_.size());
   transfers_.append(transfer);
   emit transfersChanged();
-}
-
-void FileShareTrayController::UpdateTransferMediumForEndpoint(
-    const QString& endpoint_id, const QString& medium) {
-  bool changed = false;
-  for (int i = 0; i < transfers_.size(); ++i) {
-    QVariantMap row = transfers_[i].toMap();
-    if (row.value(QStringLiteral("endpointId")).toString() != endpoint_id) {
-      continue;
-    }
-    row[QStringLiteral("medium")] = medium;
-    transfers_[i] = row;
-    changed = true;
-  }
-  if (changed) {
-    emit transfersChanged();
-  }
 }
 
 void FileShareTrayController::SetStatus(const QString& status) {
@@ -1192,8 +577,10 @@ bool FileShareTrayController::HasActiveTransfers() const {
   for (const QVariant& row_value : transfers_) {
     const QVariantMap row = row_value.toMap();
     const QString status = row.value(QStringLiteral("status")).toString();
-    if (status == QStringLiteral("InProgress") ||
-        status == QStringLiteral("Queued")) {
+    if (status == QStringLiteral("Queued") || status == QStringLiteral("Connecting") ||
+        status == QStringLiteral("AwaitingLocalConfirmation") ||
+        status == QStringLiteral("AwaitingRemoteAcceptance") ||
+        status == QStringLiteral("InProgress")) {
       return true;
     }
   }
@@ -1222,92 +609,35 @@ void FileShareTrayController::ReopenLogFile() {
   log_file_.open(QIODevice::Append | QIODevice::Text | QIODevice::WriteOnly);
 }
 
-QString FileShareTrayController::StatusToString(
-    NearbyConnectionsQtFacade::Status status) {
-  switch (status) {
-    case NearbyConnectionsQtFacade::Status::kSuccess:
-      return QStringLiteral("Success");
-    case NearbyConnectionsQtFacade::Status::kError:
-      return QStringLiteral("Error");
-    case NearbyConnectionsQtFacade::Status::kOutOfOrderApiCall:
-      return QStringLiteral("OutOfOrderApiCall");
-    case NearbyConnectionsQtFacade::Status::kAlreadyHaveActiveStrategy:
-      return QStringLiteral("AlreadyHaveActiveStrategy");
-    case NearbyConnectionsQtFacade::Status::kAlreadyAdvertising:
-      return QStringLiteral("AlreadyAdvertising");
-    case NearbyConnectionsQtFacade::Status::kAlreadyDiscovering:
-      return QStringLiteral("AlreadyDiscovering");
-    case NearbyConnectionsQtFacade::Status::kAlreadyListening:
-      return QStringLiteral("AlreadyListening");
-    case NearbyConnectionsQtFacade::Status::kEndpointIOError:
-      return QStringLiteral("EndpointIOError");
-    case NearbyConnectionsQtFacade::Status::kEndpointUnknown:
-      return QStringLiteral("EndpointUnknown");
-    case NearbyConnectionsQtFacade::Status::kConnectionRejected:
-      return QStringLiteral("ConnectionRejected");
-    case NearbyConnectionsQtFacade::Status::kAlreadyConnectedToEndpoint:
-      return QStringLiteral("AlreadyConnectedToEndpoint");
-    case NearbyConnectionsQtFacade::Status::kNotConnectedToEndpoint:
-      return QStringLiteral("NotConnectedToEndpoint");
-    case NearbyConnectionsQtFacade::Status::kBluetoothError:
-      return QStringLiteral("BluetoothError");
-    case NearbyConnectionsQtFacade::Status::kBleError:
-      return QStringLiteral("BleError");
-    case NearbyConnectionsQtFacade::Status::kWifiLanError:
-      return QStringLiteral("WifiLanError");
-    case NearbyConnectionsQtFacade::Status::kPayloadUnknown:
-      return QStringLiteral("PayloadUnknown");
-    case NearbyConnectionsQtFacade::Status::kReset:
-      return QStringLiteral("Reset");
-    case NearbyConnectionsQtFacade::Status::kTimeout:
-      return QStringLiteral("Timeout");
-    case NearbyConnectionsQtFacade::Status::kUnknown:
-      return QStringLiteral("Unknown");
-    case NearbyConnectionsQtFacade::Status::kNextValue:
-      return QStringLiteral("NextValue");
-  }
-  return QStringLiteral("Unknown");
+QString FileShareTrayController::StatusToString(NearbySharingApi::StatusCode status) {
+  return QString::fromStdString(NearbySharingApi::StatusCodeToString(status));
 }
 
-QString FileShareTrayController::PayloadStatusToString(
-    NearbyConnectionsQtFacade::PayloadStatus status) {
-  switch (status) {
-    case NearbyConnectionsQtFacade::PayloadStatus::kSuccess:
-      return QStringLiteral("Success");
-    case NearbyConnectionsQtFacade::PayloadStatus::kFailure:
-      return QStringLiteral("Failure");
-    case NearbyConnectionsQtFacade::PayloadStatus::kInProgress:
-      return QStringLiteral("InProgress");
-    case NearbyConnectionsQtFacade::PayloadStatus::kCanceled:
-      return QStringLiteral("Canceled");
-  }
-  return QStringLiteral("Unknown");
+QString FileShareTrayController::TransferStatusToString(
+    NearbySharingApi::TransferStatus status) {
+  return QString::fromStdString(NearbySharingApi::TransferStatusToString(status));
 }
 
-QString FileShareTrayController::MediumToString(NearbyConnectionsQtFacade::Medium medium) {
-  switch (medium) {
-    case NearbyConnectionsQtFacade::Medium::kUnknown:
-      return QStringLiteral("Unknown");
-    case NearbyConnectionsQtFacade::Medium::kMdns:
-      return QStringLiteral("mDNS");
-    case NearbyConnectionsQtFacade::Medium::kBluetooth:
-      return QStringLiteral("Bluetooth");
-    case NearbyConnectionsQtFacade::Medium::kWifiHotspot:
-      return QStringLiteral("WiFiHotspot");
-    case NearbyConnectionsQtFacade::Medium::kBle:
-      return QStringLiteral("BLE");
-    case NearbyConnectionsQtFacade::Medium::kWifiLan:
-      return QStringLiteral("WiFiLAN");
-    case NearbyConnectionsQtFacade::Medium::kWifiAware:
-      return QStringLiteral("WiFiAware");
-    case NearbyConnectionsQtFacade::Medium::kNfc:
-      return QStringLiteral("NFC");
-    case NearbyConnectionsQtFacade::Medium::kWifiDirect:
-      return QStringLiteral("WiFiDirect");
-    case NearbyConnectionsQtFacade::Medium::kWebRtc:
-      return QStringLiteral("WebRTC");
-    case NearbyConnectionsQtFacade::Medium::kBleL2Cap:
-      return QStringLiteral("BLEL2CAP");
+bool FileShareTrayController::IsFinalTransferStatus(
+    NearbySharingApi::TransferStatus status) {
+  switch (status) {
+    case NearbySharingApi::TransferStatus::kComplete:
+    case NearbySharingApi::TransferStatus::kFailed:
+    case NearbySharingApi::TransferStatus::kRejected:
+    case NearbySharingApi::TransferStatus::kCancelled:
+    case NearbySharingApi::TransferStatus::kTimedOut:
+    case NearbySharingApi::TransferStatus::kMediaUnavailable:
+    case NearbySharingApi::TransferStatus::kNotEnoughSpace:
+    case NearbySharingApi::TransferStatus::kUnsupportedAttachmentType:
+    case NearbySharingApi::TransferStatus::kDeviceAuthenticationFailed:
+    case NearbySharingApi::TransferStatus::kIncompletePayloads:
+      return true;
+    case NearbySharingApi::TransferStatus::kUnknown:
+    case NearbySharingApi::TransferStatus::kConnecting:
+    case NearbySharingApi::TransferStatus::kAwaitingLocalConfirmation:
+    case NearbySharingApi::TransferStatus::kAwaitingRemoteAcceptance:
+    case NearbySharingApi::TransferStatus::kInProgress:
+      return false;
   }
-  return QStringLiteral("Unknown");
+  return false;
 }

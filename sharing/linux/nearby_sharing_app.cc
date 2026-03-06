@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
+
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
-#include <chrono>
 #include <vector>
 
-#include "absl/time/time.h"
-#include "internal/platform/implementation/account_manager.h"
 #include "sharing/linux/nearby_sharing_service_linux.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
@@ -31,6 +31,7 @@
 #include "sharing/transfer_update_callback.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
+#include "internal/flags/nearby_flags.h"
 
 using namespace nearby::sharing;
 using namespace nearby::sharing::linux;
@@ -96,9 +97,6 @@ class MyTransferUpdateCallback : public TransferUpdateCallback {
     std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
     std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
     std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
-    std::cout << "║10. Sync credentials      │11. Credential status        ║" << std::endl;
-    std::cout << "║12. Visibility: Everyone  │13. Visibility: Contacts     ║" << std::endl;
-    std::cout << "║14. Visibility: Hidden    │                             ║" << std::endl;
     std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
     std::cout << "Choice: ";
   }
@@ -160,9 +158,6 @@ class MyShareTargetDiscoveredCallback : public ShareTargetDiscoveredCallback {
     std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
     std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
     std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
-    std::cout << "║10. Sync credentials      │11. Credential status        ║" << std::endl;
-    std::cout << "║12. Visibility: Everyone  │13. Visibility: Contacts     ║" << std::endl;
-    std::cout << "║14. Visibility: Hidden    │                             ║" << std::endl;
     std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
     std::cout << "Choice: ";
   }
@@ -183,8 +178,6 @@ class NearbySharingApp {
   }
 
   void StartAsReceiver() {
-    PrepareCredentialFlow(/*for_receiver=*/true);
-
     std::cout << "\n=== Starting as Receiver (Foreground) ===" << std::endl;
     
     service_->RegisterReceiveSurface(
@@ -193,8 +186,6 @@ class NearbySharingApp {
         Advertisement::BlockedVendorId::kNone,
         [this](NearbySharingService::StatusCodes status) {
           if (status == NearbySharingService::StatusCodes::kOk) {
-            receive_surface_state_ =
-                NearbySharingService::ReceiveSurfaceState::kForeground;
             std::cout << "Successfully registered as receiver!" << std::endl;
             
             // Display QR code URL
@@ -212,7 +203,6 @@ class NearbySharingApp {
               std::cout << "│ Scan this with your phone to connect!                        │" << std::endl;
               std::cout << "└──────────────────────────────────────────────────────────────┘" << std::endl;
             }
-            ForceCredentialSync("receiver surface registration");
           } else {
             std::cout << "Failed to register as receiver: " 
                      << NearbySharingService::StatusCodeToString(status) << std::endl;
@@ -223,8 +213,6 @@ class NearbySharingApp {
   }
 
   void StartAsSender() {
-    PrepareCredentialFlow(/*for_receiver=*/false);
-
     std::cout << "\n=== Starting as Sender (Foreground) ===" << std::endl;
     
     service_->RegisterSendSurface(
@@ -235,7 +223,6 @@ class NearbySharingApp {
         false, // disable_wifi_hotspot
         [this](NearbySharingService::StatusCodes status) {
           if (status == NearbySharingService::StatusCodes::kOk) {
-            send_surface_state_ = NearbySharingService::SendSurfaceState::kForeground;
             std::cout << "Successfully registered as sender!" << std::endl;
             
             // Display QR code URL
@@ -253,7 +240,6 @@ class NearbySharingApp {
               std::cout << "│ Scan this with your phone to connect!                        │" << std::endl;
               std::cout << "└──────────────────────────────────────────────────────────────┘" << std::endl;
             }
-            ForceCredentialSync("sender surface registration");
           } else {
             std::cout << "Failed to register as sender: " 
                      << NearbySharingService::StatusCodeToString(status) << std::endl;
@@ -428,46 +414,6 @@ class NearbySharingApp {
     std::cout << "======================" << std::endl;
   }
 
-  void SyncCredentialsNow() { ForceCredentialSync("manual menu request"); }
-
-  void PrintCredentialStatus() {
-    std::cout << "\n=== Credential Flow Status ===" << std::endl;
-    auto* account_manager = service_->GetAccountManager();
-    if (account_manager == nullptr) {
-      std::cout << "Account manager: unavailable on this service implementation."
-                << std::endl;
-    } else if (account_manager->GetCurrentAccount().has_value()) {
-      const auto& account = *account_manager->GetCurrentAccount();
-      std::cout << "Signed in account: " << account.email << std::endl;
-      std::cout << "Account id: " << account.id << std::endl;
-    } else {
-      std::cout << "Signed in account: none" << std::endl;
-    }
-
-    std::cout << "Certificate manager pointer: "
-              << (service_->GetCertificateManager() != nullptr ? "available"
-                                                               : "null")
-              << std::endl;
-
-    std::cout << "Service dump:\n" << service_->Dump() << std::endl;
-    std::cout << "==============================" << std::endl;
-  }
-
-  void SetVisibilityEveryone() {
-    ApplyVisibility(proto::DeviceVisibility::DEVICE_VISIBILITY_EVERYONE,
-                    absl::Minutes(15), "EVERYONE");
-  }
-
-  void SetVisibilityContacts() {
-    ApplyVisibility(proto::DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
-                    absl::ZeroDuration(), "ALL_CONTACTS");
-  }
-
-  void SetVisibilityHidden() {
-    ApplyVisibility(proto::DeviceVisibility::DEVICE_VISIBILITY_HIDDEN,
-                    absl::ZeroDuration(), "HIDDEN");
-  }
-
   void Shutdown() {
     std::cout << "\n=== Shutting Down ===" << std::endl;
     service_->Shutdown([](NearbySharingService::StatusCodes status) {
@@ -477,84 +423,9 @@ class NearbySharingApp {
   }
 
  private:
-  void ApplyVisibility(proto::DeviceVisibility visibility,
-                       absl::Duration expiration,
-                       const std::string& label) {
-    service_->SetVisibility(
-        visibility, expiration,
-        [label](NearbySharingService::StatusCodes status) mutable {
-          if (status == NearbySharingService::StatusCodes::kOk) {
-            std::cout << "Visibility updated to " << label << std::endl;
-          } else {
-            std::cout << "Failed to set visibility to " << label << ": "
-                      << NearbySharingService::StatusCodeToString(status)
-                      << std::endl;
-          }
-        });
-  }
-
-  void PrepareCredentialFlow(bool for_receiver) {
-    auto* account_manager = service_->GetAccountManager();
-    bool has_account = account_manager != nullptr &&
-                       account_manager->GetCurrentAccount().has_value();
-
-    // Match NearbySharingServiceImpl behavior: outgoing paths are contacts-based
-    // when account data is available; receiver mode generally uses everyone.
-    if (for_receiver) {
-      SetVisibilityEveryone();
-    } else if (has_account) {
-      SetVisibilityContacts();
-    } else {
-      SetVisibilityEveryone();
-    }
-  }
-
-  void ForceCredentialSync(const std::string& reason) {
-    std::cout << "[Credential flow] Requesting sync via service hooks ("
-              << reason << ")." << std::endl;
-
-    // Keep visibility explicitly valid for cert-backed advertising.
-    SetVisibilityEveryone();
-
-    // NearbySharingServiceImpl forces private cert upload from
-    // RegisterReceiveSurface when visibility is not hidden. Re-registering
-    // the current receive surface is enough to trigger that path.
-    auto state = receive_surface_state_.value_or(
-        NearbySharingService::ReceiveSurfaceState::kBackground);
-    service_->RegisterReceiveSurface(
-        transfer_callback_.get(), state, Advertisement::BlockedVendorId::kNone,
-        [](NearbySharingService::StatusCodes status) {
-          if (status == NearbySharingService::StatusCodes::kOk) {
-            std::cout << "[Credential flow] Receive surface refreshed for sync."
-                      << std::endl;
-          } else {
-            std::cout << "[Credential flow] Failed to refresh receive surface: "
-                      << NearbySharingService::StatusCodeToString(status)
-                      << std::endl;
-          }
-        });
-
-    // Discovery-triggered public cert download is internal to the full service.
-    if (send_surface_state_.has_value()) {
-      service_->RegisterSendSurface(
-          transfer_callback_.get(), discovery_callback_.get(),
-          *send_surface_state_, Advertisement::BlockedVendorId::kNone,
-          /*disable_wifi_hotspot=*/false,
-          [](NearbySharingService::StatusCodes status) {
-            if (status == NearbySharingService::StatusCodes::kOk) {
-              std::cout << "[Credential flow] Send surface refreshed for scan "
-                           "side sync."
-                        << std::endl;
-            }
-          });
-    }
-  }
-
   std::unique_ptr<NearbySharingServiceLinux> service_;
   std::unique_ptr<MyTransferUpdateCallback> transfer_callback_;
   std::unique_ptr<MyShareTargetDiscoveredCallback> discovery_callback_;
-  std::optional<NearbySharingService::ReceiveSurfaceState> receive_surface_state_;
-  std::optional<NearbySharingService::SendSurfaceState> send_surface_state_;
 };
 
 void PrintMenu() {
@@ -566,14 +437,20 @@ void PrintMenu() {
   std::cout << "║ 3. List devices          │ 8. Cancel transfer          ║" << std::endl;
   std::cout << "║ 4. Send file             │ 9. Print status             ║" << std::endl;
   std::cout << "║ 5. Send text             │ 0. Exit                     ║" << std::endl;
-  std::cout << "║10. Sync credentials      │11. Credential status        ║" << std::endl;
-  std::cout << "║12. Visibility: Everyone  │13. Visibility: Contacts     ║" << std::endl;
-  std::cout << "║14. Visibility: Hidden    │                             ║" << std::endl;
   std::cout << "╚═════════════════════════════════════════════════════════╝" << std::endl;
   std::cout << "Choice: ";
 }
 
 int main(int argc, char* argv[]) {
+
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kEnableBleL2cap,
+      true);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kRefactorBleL2cap,
+      true);
   std::string device_name = "MyLinuxDevice";
   
   if (argc > 1) {
@@ -656,26 +533,6 @@ int main(int argc, char* argv[]) {
       
       case 9:
         app.PrintStatus();
-        break;
-
-      case 10:
-        app.SyncCredentialsNow();
-        break;
-
-      case 11:
-        app.PrintCredentialStatus();
-        break;
-
-      case 12:
-        app.SetVisibilityEveryone();
-        break;
-
-      case 13:
-        app.SetVisibilityContacts();
-        break;
-
-      case 14:
-        app.SetVisibilityHidden();
         break;
         
       case 0:

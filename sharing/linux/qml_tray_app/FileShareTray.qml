@@ -50,7 +50,7 @@ ApplicationWindow {
                 topLeftRadius: 48
                 clip: true
 
-                readonly property bool isIdle: fileShareController.discoveredDevices.length === 0
+                readonly property bool isIdle: fileShareController.discoveredTargets.length === 0
                                                && fileShareController.transfers.length === 0
 
                 // ── Idle: animated blob ───────────────────────────────────
@@ -81,7 +81,7 @@ ApplicationWindow {
                         }
 
                         Repeater {
-                            model: fileShareController.discoveredDevices
+                            model: fileShareController.discoveredTargets
                             delegate: DeviceCard {}
                         }
 

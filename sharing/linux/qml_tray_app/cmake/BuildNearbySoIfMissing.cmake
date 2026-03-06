@@ -26,7 +26,7 @@ if(EXISTS "${_output_so}")
   endforeach()
 
   if(NOT _needs_rebuild)
-  # Reuse an existing .so when it already exports the Qt facade symbols.
+  # Reuse an existing .so when it already exports the NearbySharingApi symbols.
   # This avoids stale-cache link failures after facade changes.
     find_program(_nm_program nm)
     if(_nm_program)
@@ -37,11 +37,11 @@ if(EXISTS "${_output_so}")
         ERROR_QUIET
       )
       if(_nm_result EQUAL 0)
-        string(FIND "${_nm_output}" "nearby::sharing::linux::NearbyConnectionsQtFacade::NearbyConnectionsQtFacade()" _facade_ctor_idx)
+        string(FIND "${_nm_output}" "nearby::sharing::linux::NearbySharingApi::NearbySharingApi()" _api_ctor_idx)
         string(FIND "${_nm_output}" " U nearby::api::ImplementationPlatform::CreateScheduledExecutor()" _undef_platform_idx)
         string(FIND "${_nm_output}" " U nearby::SystemClock::ElapsedRealtime()" _undef_clock_idx)
         string(FIND "${_nm_output}" " U nearby::Crypto::Sha256(" _undef_crypto_idx)
-        if(NOT _facade_ctor_idx EQUAL -1
+        if(NOT _api_ctor_idx EQUAL -1
            AND _undef_platform_idx EQUAL -1
            AND _undef_clock_idx EQUAL -1
            AND _undef_crypto_idx EQUAL -1)

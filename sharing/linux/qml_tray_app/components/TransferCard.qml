@@ -15,14 +15,12 @@ Rectangle {
     readonly property color textPrimary: "#111827"
     readonly property color textMuted: "#6b7280"
 
-    readonly property bool isActive: modelData.status === "InProgress" || modelData.status === "Queued"
+    readonly property bool isActive: modelData.status === "InProgress"
+                                     || modelData.status === "Queued"
+                                     || modelData.status === "Connecting"
+                                     || modelData.status === "AwaitingLocalConfirmation"
+                                     || modelData.status === "AwaitingRemoteAcceptance"
     readonly property bool isTerminal: !isActive
-
-    function endpointLabel(endpointId) {
-        var label = fileShareController.peerNameForEndpoint(endpointId)
-        if (!label || label.length === 0 || label === "Unknown device") return "Unknown device"
-        return label
-    }
 
     function formatBytes(bytes) {
         if (bytes === undefined || bytes === null) return "0 B"
@@ -52,7 +50,8 @@ Rectangle {
 
                 Label {
                     anchors.centerIn: parent
-                    text: endpointLabel(modelData.endpointId).charAt(0).toUpperCase()
+                    text: modelData.targetName && modelData.targetName.length > 0
+                          ? modelData.targetName.charAt(0).toUpperCase() : "?"
                     font.pixelSize: 18
                     font.weight: Font.Medium
                     color: textPrimary
@@ -65,7 +64,7 @@ Rectangle {
 
                 Label {
                     Layout.fillWidth: true
-                    text: endpointLabel(modelData.endpointId)
+                    text: modelData.targetName
                     font.weight: Font.Medium
                     elide: Text.ElideRight
                     color: textPrimary
@@ -76,25 +75,10 @@ Rectangle {
                     color: textMuted
                     text: {
                         if (isActive)
-                            return modelData.direction === "Send" ? "Sending..." : "Receiving..."
-                        return modelData.status
+                            return modelData.direction === "outgoing" ? "Sending..." : "Receiving..."
+                        return modelData.status + (modelData.fileName && modelData.fileName.length > 0
+                                                   ? " • " + modelData.fileName : "")
                     }
-                }
-            }
-
-            Rectangle {
-                height: 22
-                width: Math.max(68, medLbl.implicitWidth + 16)
-                radius: 11
-                color: "#e2e8f0"
-                border.color: "#cbd5e1"
-
-                Label {
-                    id: medLbl
-                    anchors.centerIn: parent
-                    text: modelData.medium
-                    font.pixelSize: 11
-                    color: "#334155"
                 }
             }
         }
@@ -110,7 +94,8 @@ Rectangle {
             Layout.fillWidth: true
             visible: isActive
             horizontalAlignment: Text.AlignRight
-            text: formatBytes(modelData.bytesTransferred) + " / " + formatBytes(modelData.totalBytes)
+            text: Math.round((modelData.progress || 0) * 100) + "% • " +
+                  formatBytes(modelData.transferredBytes)
             font.pixelSize: 12
             color: textMuted
         }

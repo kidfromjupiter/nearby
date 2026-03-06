@@ -7,6 +7,7 @@
 #include "internal/base/file_path.h"
 #include "internal/flags/nearby_flags.h"
 #include "sharing/linux/nearby_connections_service_linux.h"
+#include "sharing/nearby_connections_service.h"
 #include "sharing/nearby_connections_types.h"
 
 namespace nearby::sharing {
@@ -347,7 +348,9 @@ std::unique_ptr<nearby::sharing::Payload> ToNativePayload(Facade::Payload payloa
 
 class NearbyConnectionsQtFacade::Impl {
  public:
-  linux::NearbyConnectionsServiceLinux service;
+  Impl() : service(std::make_unique<linux::NearbyConnectionsServiceLinux>()) {}
+
+  std::unique_ptr<NativeService> service;
 };
 
 NearbyConnectionsQtFacade::NearbyConnectionsQtFacade()
@@ -387,7 +390,7 @@ void NearbyConnectionsQtFacade::StartAdvertising(
     const AdvertisingOptions& advertising_options,
     ConnectionListener advertising_listener,
     std::function<void(Status)> callback) {
-  impl_->service.StartAdvertising(
+  impl_->service->StartAdvertising(
       service_id, endpoint_info, ToNativeAdvertisingOptions(advertising_options),
       ToNativeConnectionListener(std::move(advertising_listener)),
       ToNativeStatusCallback(std::move(callback)));
@@ -395,14 +398,14 @@ void NearbyConnectionsQtFacade::StartAdvertising(
 
 void NearbyConnectionsQtFacade::StopAdvertising(
     const std::string& service_id, std::function<void(Status)> callback) {
-  impl_->service.StopAdvertising(service_id,
-                                 ToNativeStatusCallback(std::move(callback)));
+  impl_->service->StopAdvertising(service_id,
+                                  ToNativeStatusCallback(std::move(callback)));
 }
 
 void NearbyConnectionsQtFacade::StartDiscovery(
     const std::string& service_id, const DiscoveryOptions& discovery_options,
     DiscoveryListener discovery_listener, std::function<void(Status)> callback) {
-  impl_->service.StartDiscovery(
+  impl_->service->StartDiscovery(
       service_id, ToNativeDiscoveryOptions(discovery_options),
       ToNativeDiscoveryListener(std::move(discovery_listener)),
       ToNativeStatusCallback(std::move(callback)));
@@ -410,15 +413,15 @@ void NearbyConnectionsQtFacade::StartDiscovery(
 
 void NearbyConnectionsQtFacade::StopDiscovery(const std::string& service_id,
                                               std::function<void(Status)> callback) {
-  impl_->service.StopDiscovery(service_id,
-                               ToNativeStatusCallback(std::move(callback)));
+  impl_->service->StopDiscovery(service_id,
+                                ToNativeStatusCallback(std::move(callback)));
 }
 
 void NearbyConnectionsQtFacade::RequestConnection(
     const std::string& service_id, const std::vector<uint8_t>& endpoint_info,
     const std::string& endpoint_id, const ConnectionOptions& connection_options,
     ConnectionListener connection_listener, std::function<void(Status)> callback) {
-  impl_->service.RequestConnection(
+  impl_->service->RequestConnection(
       service_id, endpoint_info, endpoint_id,
       ToNativeConnectionOptions(connection_options),
       ToNativeConnectionListener(std::move(connection_listener)),
@@ -428,7 +431,7 @@ void NearbyConnectionsQtFacade::RequestConnection(
 void NearbyConnectionsQtFacade::DisconnectFromEndpoint(
     const std::string& service_id, const std::string& endpoint_id,
     std::function<void(Status)> callback) {
-  impl_->service.DisconnectFromEndpoint(
+  impl_->service->DisconnectFromEndpoint(
       service_id, endpoint_id, ToNativeStatusCallback(std::move(callback)));
 }
 
@@ -442,28 +445,29 @@ void NearbyConnectionsQtFacade::SendPayload(
     }
     return;
   }
-  impl_->service.SendPayload(service_id, endpoint_ids, std::move(native_payload),
-                             ToNativeStatusCallback(std::move(callback)));
+  impl_->service->SendPayload(service_id, endpoint_ids,
+                              std::move(native_payload),
+                              ToNativeStatusCallback(std::move(callback)));
 }
 
 void NearbyConnectionsQtFacade::InitiateBandwidthUpgrade(
     const std::string& service_id, const std::string& endpoint_id,
     std::function<void(Status)> callback) {
-  impl_->service.InitiateBandwidthUpgrade(
+  impl_->service->InitiateBandwidthUpgrade(
       service_id, endpoint_id, ToNativeStatusCallback(std::move(callback)));
 }
 
 void NearbyConnectionsQtFacade::AcceptConnection(
     const std::string& service_id, const std::string& endpoint_id,
     PayloadListener payload_listener, std::function<void(Status)> callback) {
-  impl_->service.AcceptConnection(
+  impl_->service->AcceptConnection(
       service_id, endpoint_id, ToNativePayloadListener(std::move(payload_listener)),
       ToNativeStatusCallback(std::move(callback)));
 }
 
 void NearbyConnectionsQtFacade::StopAllEndpoints(
     std::function<void(Status)> callback) {
-  impl_->service.StopAllEndpoints(ToNativeStatusCallback(std::move(callback)));
+  impl_->service->StopAllEndpoints(ToNativeStatusCallback(std::move(callback)));
 }
 
-}  // namespace nearby::sharing::linux
+}  // namespace nearby::sharing

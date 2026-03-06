@@ -72,6 +72,39 @@ cc_binary(
     ],
 )
 
+cc_library(
+    name = "nearby_sharing_api",
+    srcs = ["nearby_sharing_api.cc"],
+    hdrs = ["nearby_sharing_api.h"],
+    alwayslink = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":nearby_sharing_service_linux",
+        "//internal/base:file_path",
+        "//sharing:attachments",
+    ],
+)
+
+cc_binary(
+    name = "nearby_sharing_api_shared",
+    linkshared = True,
+    srcs = [
+        "nearby_sharing_api.cc",
+        "nearby_sharing_api.h",
+    ],
+    visibility = ["//visibility:public"],
+    linkopts = [
+        "-Wl,--exclude-libs,ALL",
+    ],
+    deps = [
+        ":nearby_sharing_service_linux",
+        "//internal/base:file_path",
+        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation/linux",
+        "//sharing:attachments",
+    ],
+)
+
 
 cc_binary(
     name = "app",
@@ -135,7 +168,7 @@ cc_library(
         "//sharing/local_device_data:nearby_share_local_device_data_manager.h",
     ],
     visibility = ["//visibility:public"],
-    linkopts=[
+    linkopts = [
         "-lssl",
         "-lcrypto"
     ],
@@ -163,11 +196,9 @@ cc_binary(
     deps = [
         ":nearby_sharing_service_linux",
         "//internal/platform:base",
-        "//internal/platform/implementation:account_manager",
         "//sharing:attachments",
         "//sharing:types",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
     ],
 )
 

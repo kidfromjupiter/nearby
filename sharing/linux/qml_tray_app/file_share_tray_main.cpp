@@ -46,9 +46,6 @@ QIcon BuildTintedSymbolicIcon(const QString& source, const QColor& color) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  nearby::sharing::NearbyConnectionsQtFacade::SetBleL2capFlagOverrides(
-      true, false);
-
   QApplication app(argc, argv);
   app.setQuitOnLastWindowClosed(false);
 

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
-    required property string modelData
+    required property var modelData
 
     Layout.fillWidth: true
     height: 76
@@ -15,10 +15,12 @@ Rectangle {
     readonly property color textPrimary: "#111827"
     readonly property color textMuted: "#6b7280"
 
-    function endpointLabel(endpointId) {
-        var label = fileShareController.peerNameForEndpoint(endpointId)
-        if (!label || label.length === 0 || label === "Unknown device") return "Unknown device"
-        return label
+    readonly property string targetName: modelData.name && modelData.name.length > 0
+                                         ? modelData.name : "Unknown device"
+
+    function initialLetter(label) {
+        if (!label || label.length === 0) return "?"
+        return label.charAt(0).toUpperCase()
     }
 
     RowLayout {
@@ -33,7 +35,7 @@ Rectangle {
 
             Label {
                 anchors.centerIn: parent
-                text: endpointLabel(modelData).charAt(0).toUpperCase()
+                text: initialLetter(targetName)
                 font.pixelSize: 18
                 font.weight: Font.Medium
                 color: textPrimary
@@ -46,7 +48,7 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                text: endpointLabel(modelData)
+                text: targetName
                 font.weight: Font.Medium
                 elide: Text.ElideRight
                 color: textPrimary
@@ -54,7 +56,7 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                text: modelData
+                text: "#" + modelData.id
                 font.pixelSize: 11
                 color: textMuted
                 elide: Text.ElideRight
@@ -83,7 +85,7 @@ Rectangle {
                 cursorShape: Qt.PointingHandCursor
                 enabled: fileShareController.mode === "Send"
                          && fileShareController.pendingSendFilePath.length > 0
-                onClicked: fileShareController.sendPendingFileToEndpoint(modelData)
+                onClicked: fileShareController.sendPendingFileToTarget(modelData.id)
             }
         }
     }

@@ -6,11 +6,14 @@ Item {
 
     readonly property color textPrimary: "#111827"
     readonly property color textMuted: "#6b7280"
+    readonly property bool isSendMode: fileShareController.pendingSendFilePath.length > 0
 
     Label {
         x: 48; y: 48
         visible: fileShareController.running
-        text: "Ready to receive" + (fileShareController.pendingSendFilePath.length > 0 ? " / send" : "")
+        text: isSendMode
+              ? "Ready to send"
+              : "Ready to receive"
         font.pixelSize: 20
         font.weight: Font.Medium
         color: textPrimary
@@ -20,6 +23,7 @@ Item {
         id: blobCanvas
         width: 380; height: 380
         anchors.centerIn: parent
+        visible: !isSendMode
 
         property real t: 0
         property double startMs: Date.now()
@@ -76,10 +80,55 @@ Item {
         }
     }
 
+    // QR code URL panel shown when a file is pending to send
+    Column {
+        anchors.centerIn: parent
+        visible: isSendMode
+        spacing: 16
+        width: parent.width - 96
+
+        Label {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "Scan to connect"
+            font.pixelSize: 16
+            font.weight: Font.Medium
+            color: textPrimary
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
+            height: urlLabel.implicitHeight + 24
+            radius: 12
+            color: "#f0fdf4"
+            border.color: "#bbf7d0"
+            border.width: 1
+
+            Label {
+                id: urlLabel
+                anchors.centerIn: parent
+                width: parent.width - 32
+                text: fileShareController.qrCodeUrl
+                font.pixelSize: 12
+                font.family: "monospace"
+                color: "#166534"
+                wrapMode: Text.WrapAnywhere
+            }
+        }
+
+        Label {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "Sending: " + fileShareController.pendingSendFileName
+            font.pixelSize: 13
+            color: textMuted
+        }
+    }
+
     Label {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 48
+        visible: !isSendMode
         text: fileShareController.statusMessage
         font.pixelSize: 13
         color: textMuted

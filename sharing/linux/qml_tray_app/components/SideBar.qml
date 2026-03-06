@@ -51,12 +51,6 @@ Item {
                         font.weight: Font.Medium
                         color: textPrimary
                     }
-
-                    Label {
-                        text: "›"
-                        font.pixelSize: 22
-                        color: textMuted
-                    }
                 }
             }
 

@@ -28,6 +28,20 @@ The main service class that provides nearby sharing functionality:
 - **Text Transfer**: Send and receive text messages
 - **Connection Management**: Handle connection lifecycle (accept, reject, cancel)
 
+### NearbySharingApi
+
+For external/Linux app consumers (for example Qt/CMake apps), use
+`nearby::sharing::linux::NearbySharingApi` from:
+
+- `sharing/linux/nearby_sharing_api.h`
+- `libnearby_sharing_api_shared.so`
+
+Install artifacts with:
+
+```bash
+./sharing/linux/install_nearby_sharing_service.sh
+```
+
 ### Key Concepts
 
 #### 1. Send Surface
