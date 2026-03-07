@@ -74,7 +74,7 @@ Item {
             ctx.closePath()
 
             var grad = ctx.createRadialGradient(cx - 40, cy - 40, 0, cx, cy, 150)
-            grad.addColorStop(0, "#e8faf0")
+            grad.addColorStop(0, "#acdac4")
             ctx.fillStyle = grad
             ctx.fill()
         }

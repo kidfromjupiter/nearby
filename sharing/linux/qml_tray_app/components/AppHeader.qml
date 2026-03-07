@@ -34,34 +34,7 @@ Item {
 
         Item { Layout.fillWidth: true }
 
-        Label {
-            text: fileShareController.running ? "● Running" : "○ Stopped"
-            color: fileShareController.running ? accent : textMuted
-            font.pixelSize: 13
-            font.weight: Font.Medium
-        }
 
-        Rectangle {
-            height: 40
-            width: startStopLabel.implicitWidth + 32
-            radius: 12
-            color: fileShareController.running ? "#fee2e2" : "#dcfce7"
-            border.color: fileShareController.running ? "#fca5a5" : "#86efac"
-
-            Label {
-                id: startStopLabel
-                anchors.centerIn: parent
-                text: fileShareController.running ? "Stop" : "Start"
-                color: fileShareController.running ? "#dc2626" : accent
-                font.weight: Font.Medium
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: fileShareController.running ? fileShareController.stop() : fileShareController.start()
-            }
-        }
 
         Rectangle {
             width: 40
