@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -34,6 +35,7 @@
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
+#include "internal/base/files.h"
 #include "internal/crypto_cros/ec_private_key.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/file.h"
@@ -192,10 +194,28 @@ bool PrepareOutgoingIntroductionAndPayloads(auto& transfer_state,
   transfer_state.expected_attachment_payload_count = 0;
   introduction->set_start_transfer(true);
 
-  const AttachmentContainer& attachments = transfer_state.attachments;
-  for (const auto& file : attachments.GetFileAttachments()) {
+  AttachmentContainer& attachments = transfer_state.attachments;
+  for (int i = 0; i < attachments.GetFileAttachments().size(); ++i) {
+    FileAttachment& file = attachments.GetMutableFileAttachment(i);
     if (!file.file_path().has_value()) {
-      continue;
+      LOG(WARNING) << "Outgoing file attachment missing path: "
+                   << std::string(file.file_name());
+      return false;
+    }
+    std::optional<uintmax_t> file_size = Files::GetFileSize(*file.file_path());
+    if (file_size.has_value()) {
+      if (*file_size >
+          static_cast<uintmax_t>(std::numeric_limits<int64_t>::max())) {
+        LOG(WARNING) << "Outgoing file attachment size overflow: "
+                     << std::string(file.file_name());
+        return false;
+      }
+      file.set_size(static_cast<int64_t>(*file_size));
+    }
+    if (file.size() <= 0) {
+      LOG(WARNING) << "Outgoing file attachment has invalid size: "
+                   << std::string(file.file_name()) << " size=" << file.size();
+      return false;
     }
     int64_t payload_id = connections::Payload::GenerateId();
     auto* metadata = introduction->add_file_metadata();
@@ -1349,11 +1369,41 @@ connections::PayloadListener NearbySharingServiceLinux::MakePayloadListener(
             introduction_frame.set_version(Frame::V1);
             V1Frame* out_v1 = introduction_frame.mutable_v1();
             out_v1->set_type(V1Frame::INTRODUCTION);
-            if (PrepareOutgoingIntroductionAndPayloads(
-                    transfer_state, out_v1->mutable_introduction()) &&
-                SendFramePayload(core_.get(), std::string(endpoint_id),
+            if (!PrepareOutgoingIntroductionAndPayloads(
+                    transfer_state, out_v1->mutable_introduction())) {
+              LOG(ERROR) << "Failed to prepare outgoing introduction frame.";
+              TransferMetadata metadata =
+                  TransferMetadataBuilder()
+                      .set_status(TransferMetadata::Status::kFailed)
+                      .set_progress(0)
+                      .build();
+              NotifyTransferUpdate(*share_target, transfer_state, metadata);
+              core_->DisconnectFromEndpoint(std::string(endpoint_id),
+                                            [](connections::Status) {});
+              active_transfers_.erase(transfer_it);
+              if (active_transfers_.empty()) {
+                is_transferring_ = false;
+              }
+              return;
+            }
+            if (SendFramePayload(core_.get(), std::string(endpoint_id),
                                  transfer_state, introduction_frame)) {
               transfer_state.introduction_sent = true;
+            } else {
+              LOG(ERROR) << "Failed to send outgoing introduction frame.";
+              TransferMetadata metadata =
+                  TransferMetadataBuilder()
+                      .set_status(TransferMetadata::Status::kFailed)
+                      .set_progress(0)
+                      .build();
+              NotifyTransferUpdate(*share_target, transfer_state, metadata);
+              core_->DisconnectFromEndpoint(std::string(endpoint_id),
+                                            [](connections::Status) {});
+              active_transfers_.erase(transfer_it);
+              if (active_transfers_.empty()) {
+                is_transferring_ = false;
+              }
+              return;
             }
           }
 

@@ -1,10 +1,13 @@
 #include "sharing/linux/nearby_sharing_api.h"
 
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <utility>
 
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/flags/nearby_flags.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
@@ -307,9 +310,21 @@ void NearbySharingApi::SendFile(int64_t share_target_id,
     return;
   }
 
+  FilePath path(file_path);
+  std::optional<uintmax_t> file_size = nearby::Files::GetFileSize(path);
+  if (!file_size.has_value() || *file_size == 0 ||
+      *file_size >
+          static_cast<uintmax_t>(std::numeric_limits<int64_t>::max())) {
+    if (callback) {
+      callback(StatusCode::kInvalidArgument);
+    }
+    return;
+  }
+
   nearby::sharing::AttachmentContainer::Builder builder;
-  builder.AddFileAttachment(
-      nearby::sharing::FileAttachment(FilePath(file_path)));
+  nearby::sharing::FileAttachment attachment(path);
+  attachment.set_size(static_cast<int64_t>(*file_size));
+  builder.AddFileAttachment(std::move(attachment));
   std::unique_ptr<nearby::sharing::AttachmentContainer> attachments =
       builder.Build();
   if (!attachments || !attachments->HasAttachments()) {
