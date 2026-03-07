@@ -24,10 +24,10 @@ void EnableBleL2capDefaults() {
       nearby::connections::config_package_nearby::nearby_connections_feature::
           kEnableBleL2cap,
       true);
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      nearby::connections::config_package_nearby::nearby_connections_feature::
-          kRefactorBleL2cap,
-      false);
+  //nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+  //    nearby::connections::config_package_nearby::nearby_connections_feature::
+  //        kRefactorBleL2cap,
+  //    false);
 }
 
 NearbySharingApi::StatusCode ToFacadeStatus(
