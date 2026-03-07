@@ -4,6 +4,10 @@
 
 ![](cover.png)
 
+## Demo
+
+- Video demo of the sharing flow: [demo.mp4](demo.mp4)
+
 This is an unofficial Linux-focused fork of Nearby.
 
 ## Purpose
@@ -104,11 +108,6 @@ A likely area to investigate is connection negotiation paths that Linux may not 
 Wi-Fi Direct is theoretically possible, but not implemented yet.
 
 Reason: NetworkManager does not natively support the Wi-Fi Direct Group Owner flow required here.
-
-## Demo Assets (Planned)
-
-- Video demo of the sharing flow.
-- GIF showing the end-to-end process.
 
 ## Contributing
 
