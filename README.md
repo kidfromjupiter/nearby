@@ -6,10 +6,11 @@
 
 ## Demo
 
-<video width="640" height="360" controls>
-  <source src="https://github.com/kidfromjupiter/nearby/releases/download/v0.0.1/demo.mp4" type="video/mp4">
-  Your browser does not support the video tag.  
-</video>
+
+https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
+
+
+
 
 This is an unofficial Linux-focused fork of Nearby.
 
