@@ -111,7 +111,6 @@ class NearbySharingServiceImpl
       nearby::sharing::api::SharingPlatform& sharing_platform,
       nearby::sharing::api::IdentityRpcClient* absl_nonnull
           nearby_identity_client,
-      nearby::sharing::api::SharingRpcClient* absl_nonnull nearby_share_client,
       std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
       std::unique_ptr<NearbyShareContactManager> contact_manager,
       analytics::AnalyticsRecorder* analytics_recorder,
@@ -423,8 +422,8 @@ class NearbySharingServiceImpl
   const bool supports_file_sync_;
 
   std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager_;
-  nearby::sharing::api::SharingRpcClient* absl_nonnull const
-      nearby_share_client_;
+  nearby::sharing::api::IdentityRpcClient* absl_nonnull const
+      nearby_identity_client_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> local_device_data_manager_;
   std::unique_ptr<NearbyShareContactManager> contact_manager_;
   std::unique_ptr<NearbyShareCertificateManager> certificate_manager_;
