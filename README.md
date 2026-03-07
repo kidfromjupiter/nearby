@@ -6,7 +6,9 @@
 
 ## Demo
 
-- Video demo of the sharing flow: [demo.mp4](demo.mp4)
+<video src="https://github.com/kidfromjupiter/nearby/releases/download/v0.0.1/demo.mp4" controls width="900">
+  Your browser does not support the video tag.
+</video>
 
 This is an unofficial Linux-focused fork of Nearby.
 
