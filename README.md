@@ -18,6 +18,14 @@ Technical deep dives are being moved to the project wiki so this README can stay
 
 - Wiki: https://github.com/kidfromjupiter/nearby/wiki
 
+## Requirements
+
+To run this project on Linux, you need:
+- BlueZ `5.86` or higher
+- `NetworkManager`
+- `Avahi`
+- Qt (required for the tray UI app)
+
 ## Installation (End Users)
 
 1. Download the latest release archive from the Releases page.
@@ -96,11 +104,6 @@ A likely area to investigate is connection negotiation paths that Linux may not 
 Wi-Fi Direct is theoretically possible, but not implemented yet.
 
 Reason: NetworkManager does not natively support the Wi-Fi Direct Group Owner flow required here.
-
-## Android Companion App
-
-For Android -> Linux sharing workflows, see:
-- https://github.com/kidfromjupiter/shareby
 
 ## Demo Assets (Planned)
 
