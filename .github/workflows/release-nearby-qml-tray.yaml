@@ -68,7 +68,7 @@ jobs:
             qt6-tools-dev \
             qt6-tools-dev-tools 
 
-      - name: Build and install Nearby shared library
+      - name: Build and install Nearby Sharing API shared library
         id: nearby
         run: |
           INSTALL_PREFIX="$RUNNER_TEMP/nearby-install"
@@ -82,12 +82,12 @@ jobs:
             --copt='-DGITHUB_BUILD' \
             --copt='-fvisibility=hidden' \
             --cxxopt='-fvisibility-inlines-hidden' \
-            //sharing/linux:nearby_connections_service_linux_shared
+            //sharing/linux:nearby_sharing_api_shared
           BAZEL_BIN="$(bazel info bazel-bin)"
           install -d "$INSTALL_PREFIX/lib"
           install -d "$INSTALL_PREFIX/include/sharing/linux"
-          install -m 0755 "$BAZEL_BIN/sharing/linux/libnearby_connections_service_linux_shared.so" "$INSTALL_PREFIX/lib/"
-          install -m 0644 "sharing/linux/nearby_connections_qt_facade.h" "$INSTALL_PREFIX/include/sharing/linux/"
+          install -m 0755 "$BAZEL_BIN/sharing/linux/libnearby_sharing_api_shared.so" "$INSTALL_PREFIX/lib/"
+          install -m 0644 "sharing/linux/nearby_sharing_api.h" "$INSTALL_PREFIX/include/sharing/linux/"
           echo "nearby_prefix=$INSTALL_PREFIX" >> "$GITHUB_OUTPUT"
 
       - name: Configure QML tray app
