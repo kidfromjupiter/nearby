@@ -52,6 +52,32 @@ tar -xzf nearby-file-share-linux-*.tar.gz
 ./install_nearby_file_share.sh
 ```
 
+4. Apply a temporary BlueZ service override (required for now).
+   Create/edit the `bluetooth.service` override:
+
+```bash
+sudo systemctl edit bluetooth
+```
+
+Add:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/usr/local/libexec/bluetooth/bluetoothd -E --debug=src/plugin.c --noplugin=bap,bass,mcp,vcp,micp,ccp,csip,tmap,asha,midi
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart bluetooth
+```
+
+These plugins are currently disabled due to an ongoing likely upstream BlueZ bug:
+`bap,bass,mcp,vcp,micp,ccp,csip,tmap,asha,midi`.
+This workaround will be removed once the issue is fixed.
+
 This installs to `~/.local` by default.
 
 For system-wide installation:
