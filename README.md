@@ -130,6 +130,7 @@ After one transfer, some endpoints/internal state can reset or change, and this 
 - Linux hotspot startup can be slow.
 - Connecting to another device's hotspot can be slow on Linux.
 - Android-initiated connection formation can be very slow.
+- 5 GHz hotspot discovery and connection support is currently removed due to Intel Wi-Fi driver instability related to LAR behavior on Linux. There is no known fix yet; this may be re-enabled in a later release.
 
 A likely area to investigate is connection negotiation paths that Linux may not handle optimally yet.
 
