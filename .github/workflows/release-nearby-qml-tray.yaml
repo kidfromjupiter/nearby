@@ -115,7 +115,7 @@ jobs:
             "$STAGING/install_nearby_file_share.sh"
           install -m 0644 sharing/linux/qml_tray_app/nearby-file-share.desktop \
             "$STAGING/share/applications/nearby-file-share.desktop"
-          install -m 0644 sharing/linux/qml_tray_app/tray_icon.png \
+          install -m 0644 sharing/linux/qml_tray_app/nearby-linux-desktop.png \
             "$STAGING/share/icons/hicolor/256x256/apps/nearby-file-share.png"
           install -m 0644 sharing/linux/nearby_sharing_api.h \
             "$STAGING/include/sharing/linux/nearby_sharing_api.h"

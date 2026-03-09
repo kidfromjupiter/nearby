@@ -71,7 +71,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_SRC="$SCRIPT_DIR/bin/nearby_qml_file_tray_app"
 LIB_SRC="$SCRIPT_DIR/lib/libnearby_sharing_api_shared.so"
 DESKTOP_SRC="$SCRIPT_DIR/share/applications/nearby-file-share.desktop"
-ICON_SRC="$SCRIPT_DIR/share/icons/hicolor/256x256/apps/nearby-file-share.png"
+ICON_SRC_STAGED="$SCRIPT_DIR/share/icons/hicolor/256x256/apps/nearby-file-share.png"
+ICON_SRC_FALLBACK="$SCRIPT_DIR/nearby-linux-desktop.png"
+ICON_SRC="$ICON_SRC_STAGED"
+if [[ ! -f "$ICON_SRC" && -f "$ICON_SRC_FALLBACK" ]]; then
+  ICON_SRC="$ICON_SRC_FALLBACK"
+fi
 HEADER_SRC="$SCRIPT_DIR/include/sharing/linux/nearby_sharing_api.h"
 
 for required in "$BIN_SRC" "$LIB_SRC" "$DESKTOP_SRC" "$ICON_SRC"; do

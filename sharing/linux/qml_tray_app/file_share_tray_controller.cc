@@ -1,11 +1,9 @@
 #include "file_share_tray_controller.h"
 
-#include <QDateTime>
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QSettings>
 #include <QSysInfo>
-#include <QTextStream>
 #include <QVariantMap>
 
 namespace {
@@ -26,15 +24,10 @@ FileShareTrayController::FileShareTrayController(QObject* parent)
 
   LoadSettings();
   CreateService();
-  ReopenLogFile();
-  LogLine(QStringLiteral("Started file share tray controller"));
 }
 
 FileShareTrayController::~FileShareTrayController() {
   stop();
-  if (log_file_.isOpen()) {
-    log_file_.close();
-  }
 }
 
 void FileShareTrayController::CreateService() {
@@ -55,9 +48,6 @@ void FileShareTrayController::AttachServiceListeners() {
               QString::fromStdString(info.device_name),
               QStringLiteral("Unknown device"));
           UpsertTarget(info.id, name, info.is_incoming);
-          LogLine(QStringLiteral("Target discovered id=%1 name=%2")
-                      .arg(info.id)
-                      .arg(name));
         },
         Qt::QueuedConnection);
   };
@@ -70,9 +60,6 @@ void FileShareTrayController::AttachServiceListeners() {
               QString::fromStdString(info.device_name),
               QStringLiteral("Unknown device"));
           UpsertTarget(info.id, name, info.is_incoming);
-          LogLine(QStringLiteral("Target updated id=%1 name=%2")
-                      .arg(info.id)
-                      .arg(name));
         },
         Qt::QueuedConnection);
   };
@@ -82,7 +69,6 @@ void FileShareTrayController::AttachServiceListeners() {
         this,
         [this, share_target_id]() {
           RemoveTarget(share_target_id);
-          LogLine(QStringLiteral("Target lost id=%1").arg(share_target_id));
         },
         Qt::QueuedConnection);
   };
@@ -119,18 +105,7 @@ void FileShareTrayController::AttachServiceListeners() {
                   NearbySharingApi::TransferStatus::kAwaitingLocalConfirmation) {
                 if (auto_accept_incoming_) {
                   service_->Accept(
-                      update.share_target_id,
-                      [this, id = update.share_target_id](
-                          NearbySharingApi::StatusCode result) {
-                        QMetaObject::invokeMethod(
-                            this,
-                            [this, id, result]() {
-                              LogLine(QStringLiteral("Accept(%1): %2")
-                                          .arg(id)
-                                          .arg(StatusToString(result)));
-                            },
-                            Qt::QueuedConnection);
-                      });
+                      update.share_target_id, [](NearbySharingApi::StatusCode) {});
                 }
               }
 
@@ -233,7 +208,6 @@ void FileShareTrayController::setDeviceName(const QString& device_name) {
   device_name_ = trimmed;
   emit deviceNameChanged();
   SaveSettings();
-  LogLine(QStringLiteral("Device name changed to %1").arg(device_name_));
   CreateService();
 
   if (was_running) {
@@ -254,7 +228,6 @@ void FileShareTrayController::setLogPath(const QString& path) {
   log_path_ = trimmed;
   emit logPathChanged();
   SaveSettings();
-  ReopenLogFile();
 }
 
 void FileShareTrayController::start() {
@@ -280,33 +253,9 @@ void FileShareTrayController::stop() {
   running_ = false;
   emit runningChanged();
 
-  service_->StopSendMode([this](NearbySharingApi::StatusCode status) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, status]() {
-          LogLine(QStringLiteral("StopSendMode: %1").arg(StatusToString(status)));
-        },
-        Qt::QueuedConnection);
-  });
-
-  service_->StopReceiveMode([this](NearbySharingApi::StatusCode status) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, status]() {
-          LogLine(
-              QStringLiteral("StopReceiveMode: %1").arg(StatusToString(status)));
-        },
-        Qt::QueuedConnection);
-  });
-
-  service_->Shutdown([this](NearbySharingApi::StatusCode status) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, status]() {
-          LogLine(QStringLiteral("Shutdown: %1").arg(StatusToString(status)));
-        },
-        Qt::QueuedConnection);
-  });
+  service_->StopSendMode([](NearbySharingApi::StatusCode) {});
+  service_->StopReceiveMode([](NearbySharingApi::StatusCode) {});
+  service_->Shutdown([](NearbySharingApi::StatusCode) {});
 
   discovered_targets_.clear();
   discovered_row_by_target_.clear();
@@ -333,7 +282,6 @@ void FileShareTrayController::switchToReceiveMode() {
   if (mode_ != QStringLiteral("Receive")) {
     mode_ = QStringLiteral("Receive");
     emit modeChanged();
-    LogLine(QStringLiteral("Mode changed to Receive"));
     if (running_) {
       stop();
       start();
@@ -372,7 +320,6 @@ void FileShareTrayController::switchToSendModeWithFile(const QString& file_path)
   if (mode_ != QStringLiteral("Send")) {
     mode_ = QStringLiteral("Send");
     emit modeChanged();
-    LogLine(QStringLiteral("Mode changed to Send"));
     if (running_) {
       stop();
       start();
@@ -416,9 +363,6 @@ void FileShareTrayController::sendPendingFileToTarget(qlonglong share_target_id)
             this,
             [this, share_target_id, status]() {
               const QString target_name = TargetName(share_target_id);
-              LogLine(QStringLiteral("SendFile(%1): %2")
-                          .arg(share_target_id)
-                          .arg(StatusToString(status)));
               if (status == NearbySharingApi::StatusCode::kOk) {
                 SetStatus(QStringLiteral("Sending %1 to %2")
                               .arg(pending_send_file_name_, target_name));
@@ -455,7 +399,6 @@ void FileShareTrayController::startSendMode() {
         this,
         [this, status]() {
           SetStatus(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
-          LogLine(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
           if (status != NearbySharingApi::StatusCode::kOk) {
             running_ = false;
             emit runningChanged();
@@ -471,8 +414,6 @@ void FileShareTrayController::startReceiveMode() {
         this,
         [this, status]() {
           SetStatus(
-              QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
-          LogLine(
               QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
           if (status != NearbySharingApi::StatusCode::kOk) {
             running_ = false;
@@ -570,7 +511,6 @@ void FileShareTrayController::SetStatus(const QString& status) {
   }
   status_message_ = status;
   emit statusMessageChanged();
-  LogLine(QStringLiteral("Status: %1").arg(status_message_));
 }
 
 bool FileShareTrayController::HasActiveTransfers() const {
@@ -585,28 +525,6 @@ bool FileShareTrayController::HasActiveTransfers() const {
     }
   }
   return false;
-}
-
-void FileShareTrayController::LogLine(const QString& line) {
-  if (!log_file_.isOpen()) {
-    ReopenLogFile();
-  }
-  if (!log_file_.isOpen()) {
-    return;
-  }
-
-  QTextStream stream(&log_file_);
-  stream << QDateTime::currentDateTimeUtc().toString(Qt::ISODate) << " " << line
-         << "\n";
-  stream.flush();
-}
-
-void FileShareTrayController::ReopenLogFile() {
-  if (log_file_.isOpen()) {
-    log_file_.close();
-  }
-  log_file_.setFileName(log_path_);
-  log_file_.open(QIODevice::Append | QIODevice::Text | QIODevice::WriteOnly);
 }
 
 QString FileShareTrayController::StatusToString(NearbySharingApi::StatusCode status) {

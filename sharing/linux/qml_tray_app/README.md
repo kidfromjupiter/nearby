@@ -8,7 +8,7 @@ app for file sharing via Nearby Sharing, wired to:
 - Receive mode (incoming requests + accept/reject)
 - Transfer status list (progress + transfer status)
 - Persistent tray behavior (window close hides app to tray)
-- File logging to `/tmp/nearby_qml_file_tray.log`
+- Process log redirection to file (`stdout`/`stderr`)
 
 ## Files
 
@@ -31,7 +31,10 @@ app for file sharing via Nearby Sharing, wired to:
   - Shows pending incoming transfer requests.
   - Lets you accept/reject incoming requests.
 - Transfers are shown with target, direction, status, and progress.
-- Logs are appended to `/tmp/nearby_qml_file_tray.log`.
+- `stdout` and `stderr` are redirected at startup to the configured `logPath`
+  setting.
+- Default log path is `/tmp/nearby_qml_file_tray.log` when `logPath` is unset.
+- If `logPath` is changed from Settings, restart the app to apply redirection.
 
 ## Building
 

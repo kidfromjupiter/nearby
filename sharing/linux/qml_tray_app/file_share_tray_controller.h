@@ -3,7 +3,6 @@
 
 #include <QObject>
 
-#include <QFile>
 #include <QHash>
 #include <QString>
 #include <QStringList>
@@ -99,8 +98,6 @@ class FileShareTrayController : public QObject {
 
   void SetStatus(const QString& status);
   bool HasActiveTransfers() const;
-  void LogLine(const QString& line);
-  void ReopenLogFile();
 
   static QString StatusToString(NearbySharingApi::StatusCode status);
   static QString TransferStatusToString(NearbySharingApi::TransferStatus status);
@@ -127,8 +124,6 @@ class FileShareTrayController : public QObject {
 
   QVariantList transfers_;
   QHash<qlonglong, int> transfer_row_by_target_;
-
-  QFile log_file_;
 };
 
 #endif  // SHARING_LINUX_QML_TRAY_APP_FILE_SHARE_TRAY_CONTROLLER_H_

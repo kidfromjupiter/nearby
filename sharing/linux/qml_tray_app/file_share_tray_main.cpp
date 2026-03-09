@@ -1,6 +1,9 @@
 #include <QAction>
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QIcon>
 #include <QMenu>
 #include <QPainter>
@@ -8,12 +11,69 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
+#include <QSettings>
 #include <QStyleHints>
 #include <QSystemTrayIcon>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "file_share_tray_controller.h"
 
 namespace {
+
+constexpr char kDefaultLogPath[] = "/tmp/nearby_qml_file_tray.log";
+
+bool EnsureLogDirectory(const QString& file_path) {
+  const QFileInfo file_info(file_path);
+  QDir directory = file_info.absoluteDir();
+  if (directory.exists()) {
+    return true;
+  }
+  return directory.mkpath(QStringLiteral("."));
+}
+
+bool RedirectStdStreamsToFile(const QString& file_path) {
+  const QByteArray encoded_path = QFile::encodeName(file_path);
+  const int fd = ::open(encoded_path.constData(), O_CREAT | O_APPEND | O_WRONLY, 0644);
+  if (fd < 0) {
+    return false;
+  }
+
+  const bool redirected_stdout = ::dup2(fd, STDOUT_FILENO) >= 0;
+  const bool redirected_stderr = ::dup2(fd, STDERR_FILENO) >= 0;
+  ::close(fd);
+  return redirected_stdout && redirected_stderr;
+}
+
+QString ResolveConfiguredLogPath() {
+  QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlFileTrayApp"));
+  const QString configured_path =
+      settings.value(QStringLiteral("logPath"),
+                     QString::fromLatin1(kDefaultLogPath))
+          .toString()
+          .trimmed();
+  if (configured_path.isEmpty()) {
+    return QString::fromLatin1(kDefaultLogPath);
+  }
+  return configured_path;
+}
+
+void RedirectProcessLogsToConfiguredPath() {
+  QString log_path = ResolveConfiguredLogPath();
+  if (EnsureLogDirectory(log_path) && RedirectStdStreamsToFile(log_path)) {
+    return;
+  }
+
+  const QString fallback_path = QString::fromLatin1(kDefaultLogPath);
+  if (log_path == fallback_path) {
+    return;
+  }
+  if (!EnsureLogDirectory(fallback_path)) {
+    return;
+  }
+  RedirectStdStreamsToFile(fallback_path);
+}
 
 QIcon BuildTintedSymbolicIcon(const QString& source, const QColor& color) {
   QIcon source_icon(source);
@@ -46,6 +106,8 @@ QIcon BuildTintedSymbolicIcon(const QString& source, const QColor& color) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  RedirectProcessLogsToConfiguredPath();
+
   QApplication app(argc, argv);
   app.setQuitOnLastWindowClosed(false);
 
