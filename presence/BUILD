@@ -13,6 +13,7 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//:__subpackages__"])
@@ -149,6 +150,46 @@ cc_test(
     ] + select({
         "@platforms//os:windows": [
             "//internal/platform/implementation/windows",
+        ],
+        "//conditions:default": [
+            "//internal/platform/implementation/g3",
+        ],
+    }),
+)
+
+cc_binary(
+    name = "presence_advertiser_demo",
+    srcs = ["presence_advertiser_demo.cc"],
+    deps = [
+        ":types",
+        ":presence_advertiser_demo_platform_impl",
+        "//internal/platform:types",
+        "//presence/implementation:internal",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_binary(
+    name = "presence_scanner_demo",
+    srcs = ["presence_scanner_demo.cc"],
+    deps = [
+        ":presence",
+        ":presence_advertiser_demo_platform_impl",
+        "//internal/platform:types",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "presence_advertiser_demo_platform_impl",
+    alwayslink = 1,
+    deps = select({
+        "@platforms//os:windows": [
+            "//internal/platform/implementation/windows",
+        ],
+        "@platforms//os:linux": [
+            "//internal/platform/implementation/linux:linux",
         ],
         "//conditions:default": [
             "//internal/platform/implementation/g3",
