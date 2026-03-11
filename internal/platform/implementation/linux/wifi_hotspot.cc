@@ -32,6 +32,15 @@
 
 namespace nearby {
 namespace linux {
+namespace {
+
+// Prefer non-DFS channels that are broadly available in the 00 (world) regulatory
+// domain for AP mode.
+constexpr int kPreferred24GhzChannel = 6;
+constexpr int kPreferred5GhzChannel = 40;
+
+}  // namespace
+
 std::unique_ptr<api::WifiHotspotSocket>
 NetworkManagerWifiHotspotMedium::ConnectToService(
     absl::string_view ip_address, int port,
@@ -147,20 +156,28 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
     return false;
   }
 
-  // TODO: starting 5ghz AP with intel devices fail often bcz of LAR. Find a workaround
   // Get device capabilities to select the best available band
-  // api::WifiCapability& capability = wireless_device_->GetCapability();
-  // std::string selected_band;
-  // if (capability.supports_6_ghz) {
-  //   selected_band = "a";  // 5/6 GHz - NetworkManager uses "a" for both 5 GHz and 6 GHz
-  //   LOG(INFO) << __func__ << ": Device supports 6 GHz, using 5/6 GHz band";
-  // } else if (capability.supports_5_ghz) {
-  //   selected_band = "a";  // 5 GHz
-  //   LOG(INFO) << __func__ << ": Device supports 5 GHz, using 5 GHz band";
-  // } else {
-  //   selected_band = "bg";  // 2.4 GHz
-  //   LOG(INFO) << __func__ << ": Device supports only 2.4 GHz, using 2.4 GHz band";
-  // }
+  api::WifiCapability& capability = wireless_device_->GetCapability();
+  std::string selected_band;
+  int selected_channel = kPreferred24GhzChannel;
+  if (capability.supports_6_ghz) {
+    selected_band = "a";  // 5/6 GHz - NetworkManager uses "a" for both 5 GHz and 6 GHz
+    selected_channel = kPreferred5GhzChannel;
+    LOG(INFO) << __func__
+              << ": Device supports 6 GHz, using 5/6 GHz band on channel "
+              << selected_channel;
+  } else if (capability.supports_5_ghz) {
+    selected_band = "a";  // 5 GHz
+    selected_channel = kPreferred5GhzChannel;
+    LOG(INFO) << __func__ << ": Device supports 5 GHz, using 5 GHz band on "
+              << "channel " << selected_channel;
+  } else {
+    selected_band = "bg";  // 2.4 GHz
+    selected_channel = kPreferred24GhzChannel;
+    LOG(INFO) << __func__
+              << ": Device supports only 2.4 GHz, using 2.4 GHz band on "
+              << "channel " << selected_channel;
+  }
 
   std::map<std::string, std::map<std::string, sdbus::Variant>>
       connection_settings{
@@ -175,7 +192,8 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
            {{"assigned-mac-address", "random"},
             {"ap-isolation", networkmanager::constants::kNMTernaryFalse},
             {"mode", "ap"},
-            {"band", "bg"},
+            {"band", selected_band},
+            {"channel", selected_channel},
             {"ssid", std::vector<uint8_t>(ssid.begin(), ssid.end())},
             {"security", "802-11-wireless-security"}}},
           {"802-11-wireless-security",
