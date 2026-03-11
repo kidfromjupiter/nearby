@@ -252,6 +252,11 @@ std::unique_ptr<api::ble::BleMedium> ImplementationPlatform::CreateBleMedium(
       dynamic_cast<linux::BluetoothAdapter &>(adapter));
 }
 
+std::unique_ptr<api::CredentialStorage>
+ImplementationPlatform::CreateCredentialStorage() {
+  return nullptr;
+}
+
 namespace {
 static std::unique_ptr<linux::NetworkManagerWifiMedium> createWifiMedium(
     std::shared_ptr<linux::networkmanager::NetworkManager> nm) {
