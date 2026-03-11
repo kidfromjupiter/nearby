@@ -99,6 +99,30 @@ std::string BluetoothDevice::GetAddressType() const {
   }
 }
 
+std::optional<int16_t> BluetoothDevice::GetRssi() const {
+  auto device = device_;
+  if (device == nullptr) return std::nullopt;
+
+  try {
+    return device->RSSI();
+  } catch (const sdbus::Error& e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(device, "RSSI", e);
+    return std::nullopt;
+  }
+}
+
+std::optional<int16_t> BluetoothDevice::GetTxPower() const {
+  auto device = device_;
+  if (device == nullptr) return std::nullopt;
+
+  try {
+    return device->TxPower();
+  } catch (const sdbus::Error& e) {
+    DBUS_LOG_PROPERTY_GET_ERROR(device, "TxPower", e);
+    return std::nullopt;
+  }
+}
+
 bool BluetoothDevice::ConnectToProfile(absl::string_view service_uuid) {
   auto device = device_;
   if (device == nullptr) return false;

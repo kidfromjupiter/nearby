@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 
 #include <sdbus-c++/Error.h>
 #include <sdbus-c++/IConnection.h>
@@ -53,6 +54,8 @@ class BluetoothDevice : public api::BluetoothDevice {
   std::string GetName() const override;
   MacAddress GetMacAddress() const override;
   std::string GetAddressType() const;
+  std::optional<int16_t> GetRssi() const;
+  std::optional<int16_t> GetTxPower() const;
 
   MacAddress GetAddress() const { return last_known_address_; }
 
