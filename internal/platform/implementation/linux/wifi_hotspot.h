@@ -15,6 +15,8 @@
 #ifndef PLATFORM_IMPL_LINUX_WIFI_HOTSPOT_H_
 #define PLATFORM_IMPL_LINUX_WIFI_HOTSPOT_H_
 
+#include <arpa/inet.h>
+
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/Types.h>
 
@@ -43,9 +45,17 @@ class NetworkManagerWifiHotspotMedium : public api::WifiHotspotMedium {
     virtual std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
         const ServiceAddress& service_address,
         CancellationFlag* cancellation_flag) {
-    return ConnectToService(
-      std::string(service_address.address.begin(), service_address.address.end())
-    , service_address.port, cancellation_flag) ;
+    if (service_address.address.size() != 4) {
+      return nullptr;
+    }
+    char ip_address_buffer[INET_ADDRSTRLEN] = {};
+    if (inet_ntop(AF_INET, service_address.address.data(),
+                  ip_address_buffer, sizeof(ip_address_buffer)) == nullptr) {
+      return nullptr;
+    }
+
+    return ConnectToService(ip_address_buffer, service_address.port,
+                            cancellation_flag);
   };
     std::unique_ptr<api::WifiHotspotSocket> ConnectToService(
       absl::string_view ip_address, int port,
