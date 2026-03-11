@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <random>
@@ -37,7 +38,10 @@ namespace {
 // Prefer non-DFS channels that are broadly available in the 00 (world) regulatory
 // domain for AP mode.
 constexpr int kPreferred24GhzChannel = 6;
-constexpr int kPreferred5GhzChannel = 40;
+constexpr int kPreferred5GhzChannel = 36;
+// NM_SETTING_WIRELESS_CHANNEL_WIDTH_* (nm-settings: 40mhz=40, 80mhz=80).
+constexpr int32_t k40MhzChannelWidth = 40;
+constexpr int32_t k80MhzChannelWidth = 80;
 
 }  // namespace
 
@@ -179,46 +183,68 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
               << "channel " << selected_channel;
   }
 
-  std::map<std::string, std::map<std::string, sdbus::Variant>>
-      connection_settings{
-          {
-              "connection",
-              {{"uuid", *connection_id},
-               {"id", "Google Nearby Hotspot"},
-               {"type", "802-11-wireless"},
-               {"zone", "Public"}},
-          },
-          {"802-11-wireless",
-           {{"assigned-mac-address", "random"},
-            {"ap-isolation", networkmanager::constants::kNMTernaryFalse},
-            {"mode", "ap"},
-            {"band", selected_band},
-            {"channel", selected_channel},
-            {"ssid", std::vector<uint8_t>(ssid.begin(), ssid.end())},
-            {"security", "802-11-wireless-security"}}},
-          {"802-11-wireless-security",
-           {{"pmf",
-             networkmanager::constants::setting::kWirelessSecurityPMFDisable},
-            {"key-mgmt", "wpa-psk"},
-            {"psk", password}}},
-          {"ipv4", {{"method", "shared"}}},
-          {"ipv6",
-           {
-               {"addr-gen-mode", networkmanager::constants::setting::
-                                     kIP6ConfigAddrGenModeStablePrivacy},
-               {"method", "shared"},
-           }}};
+  const int32_t fallback_channel_width =
+      selected_band == "a" ? k80MhzChannelWidth : k40MhzChannelWidth;
+
   std::unique_ptr<networkmanager::ActiveConnection> active_conn;
-  try {
-    auto [path, active_path, result] =
-        network_manager_->AddAndActivateConnection2(
-            connection_settings, wireless_device_->getObjectPath(), "/",
-            {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
-    active_conn = std::make_unique<networkmanager::ActiveConnection>(
-        system_bus_, active_path);
-  } catch (const sdbus::Error &e) {
-    DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "AddAndActivateConnection2",
-                               e);
+  for (bool include_channel_width : {true, false}) {
+    std::map<std::string, std::map<std::string, sdbus::Variant>>
+        connection_settings{
+            {
+                "connection",
+                {{"uuid", *connection_id},
+                 {"id", "Google Nearby Hotspot"},
+                 {"type", "802-11-wireless"},
+                 {"zone", "Public"}},
+            },
+            {"802-11-wireless",
+             {{"assigned-mac-address", "random"},
+              {"ap-isolation", networkmanager::constants::kNMTernaryFalse},
+              {"mode", "ap"},
+              {"band", selected_band},
+              {"channel", selected_channel},
+              {"ssid", std::vector<uint8_t>(ssid.begin(), ssid.end())},
+              {"security", "802-11-wireless-security"}}},
+            {"802-11-wireless-security",
+             {{"pmf",
+               networkmanager::constants::setting::kWirelessSecurityPMFDisable},
+              {"key-mgmt", "wpa-psk"},
+              {"psk", password}}},
+            {"ipv4", {{"method", "shared"}}},
+            {"ipv6",
+             {
+                 {"addr-gen-mode", networkmanager::constants::setting::
+                                       kIP6ConfigAddrGenModeStablePrivacy},
+                 {"method", "shared"},
+             }}};
+    if (include_channel_width) {
+      connection_settings["802-11-wireless"]["channel-width"] =
+          fallback_channel_width;
+    }
+    try {
+      auto [path, active_path, result] =
+          network_manager_->AddAndActivateConnection2(
+              connection_settings, wireless_device_->getObjectPath(), "/",
+              {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
+      active_conn = std::make_unique<networkmanager::ActiveConnection>(
+          system_bus_, active_path);
+      break;
+    } catch (const sdbus::Error &e) {
+      if (include_channel_width) {
+        LOG(WARNING) << __func__
+                     << ": Failed to set channel-width="
+                     << fallback_channel_width << "mhz: "
+                     << e.getName() << ": " << e.getMessage()
+                     << ". Retrying without channel-width.";
+        continue;
+      }
+      DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "AddAndActivateConnection2",
+                                 e);
+      return false;
+    }
+  }
+
+  if (active_conn == nullptr) {
     return false;
   }
 
