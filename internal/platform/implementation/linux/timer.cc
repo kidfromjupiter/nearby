@@ -20,12 +20,26 @@
 #include <ctime>
 
 #include "absl/synchronization/mutex.h"
-#include "internal/platform/implementation/linux/submittable_executor.h"
 #include "internal/platform/implementation/linux/timer.h"
 #include "internal/platform/logging.h"
 
 namespace nearby {
 namespace linux {
+
+namespace {
+
+timespec MillisToTimespec(int milliseconds) {
+  if (milliseconds < 0) {
+    milliseconds = 0;
+  }
+
+  timespec ts{};
+  ts.tv_sec = milliseconds / 1000;
+  ts.tv_nsec = static_cast<long>(milliseconds % 1000) * 1000000L;
+  return ts;
+}
+
+}  // namespace
 
 static void timer_callback(union sigval val) {
   absl::AnyInvocable<void()> *callback =
@@ -33,14 +47,7 @@ static void timer_callback(union sigval val) {
   if (*callback != nullptr) (*callback)();
 }
 
-Timer::~Timer() {
-  absl::MutexLock l(&mutex_);
-  if (timerid_.has_value())
-    if (timer_delete(*timerid_) < 0) {
-      LOG(ERROR) << __func__ << ": Error deleting POSIX timer: "
-                         << std::strerror(errno);
-    }
-}
+Timer::~Timer() { Stop(); }
 
 bool Timer::Create(int delay, int interval,
                    absl::AnyInvocable<void()> callback) {
@@ -52,26 +59,29 @@ bool Timer::Create(int delay, int interval,
 
   absl::MutexLock l(&mutex_);
   if (timerid_.has_value()) {
-    LOG(ERROR) << __func__
-                       << "Timer has already been created and armed.";
-    return false;
+    if (timer_delete(*timerid_) < 0) {
+      if (errno != EINVAL) {
+        LOG(ERROR) << __func__ << ": Error deleting stale POSIX timer: "
+                   << std::strerror(errno);
+        return false;
+      }
+    }
+    timerid_.reset();
   }
 
   callback_ = std::move(callback);
 
-  struct sigevent ev;
+  struct sigevent ev{};
+  ev.sigev_notify = SIGEV_THREAD;
   ev.sigev_value.sival_ptr = &callback_;
   ev.sigev_notify_function = timer_callback;
+  ev.sigev_notify_attributes = nullptr;
 
   timer_t timerid;
 
-  struct itimerspec spec;
-
-  spec.it_value.tv_nsec = delay * 1000000;
-  spec.it_value.tv_sec = 0;
-
-  spec.it_interval.tv_nsec = interval * 1000000;
-  spec.it_interval.tv_sec = 0;
+  struct itimerspec spec{};
+  spec.it_value = MillisToTimespec(delay);
+  spec.it_interval = MillisToTimespec(interval);
 
   if (timer_create(CLOCK_MONOTONIC, &ev, &timerid) < 0) {
     LOG(ERROR) << __func__ << ": Error creating POSIX timer: "
@@ -79,10 +89,10 @@ bool Timer::Create(int delay, int interval,
     return false;
   }
 
-  if (timer_settime(&timerid, 0, &spec, nullptr) < 0) {
+  if (timer_settime(timerid, 0, &spec, nullptr) < 0) {
     LOG(ERROR) << __func__ << ": Error arming POSIX timer: "
                        << std::strerror(errno);
-    if (!timer_delete(&timerid)) {
+    if (timer_delete(timerid) < 0) {
       LOG(ERROR) << __func__ << ": error deleting POSIX timer: "
                          << std::strerror(errno);
     }
@@ -96,14 +106,15 @@ bool Timer::Create(int delay, int interval,
 bool Timer::Stop() {
   absl::MutexLock l(&mutex_);
   if (!timerid_.has_value()) {
-    LOG(WARNING) << __func__ << ": no timer created";
     return true;
   }
 
-  if (!timer_delete(&*timerid_)) {
-    LOG(ERROR) << __func__ << ": error deleting POSIX timer: "
-                       << std::strerror(errno);
-    return false;
+  if (timer_delete(*timerid_) < 0) {
+    if (errno != EINVAL) {
+      LOG(ERROR) << __func__ << ": error deleting POSIX timer: "
+                 << std::strerror(errno);
+      return false;
+    }
   }
 
   timerid_.reset();
