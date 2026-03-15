@@ -17,13 +17,18 @@
 
 #include <memory>
 
-#include "location/nearby/sharing/lib/rpc/grpc_async_client_factory.h"
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "internal/analytics/event_logger.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/internal/api/sharing_platform.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/nearby_sharing_service.h"
+#if defined(__linux__)
+#include "sharing/linux/stubs/grpc_async_client_factory.h"
+#include "sharing/linux/stubs/sharing_rpc_client.h"
+#else
+#include "location/nearby/sharing/lib/rpc/grpc_async_client_factory.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#endif
 
 namespace nearby::sharing {
 

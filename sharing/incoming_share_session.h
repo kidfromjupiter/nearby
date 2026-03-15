@@ -21,7 +21,6 @@
 #include <string>
 #include <vector>
 
-#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/functional/any_invocable.h"
 #include "internal/base/file_path.h"
 #include "internal/platform/clock.h"
@@ -37,6 +36,8 @@
 #include "sharing/transfer_metadata.h"
 
 namespace nearby::sharing {
+
+class SyncManager;
 
 // Class that represents a single incoming share session.
 // This class is thread-compatible.

@@ -27,8 +27,6 @@
 #include <tuple>
 #include <vector>
 
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
-#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -76,6 +74,13 @@
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
 #include "sharing/wrapped_share_target_discovered_callback.h"
+#if defined(__linux__)
+#include "sharing/linux/stubs/sharing_rpc_client.h"
+#include "sharing/linux/stubs/sync_manager.h"
+#else
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
+#endif
 
 namespace nearby::sharing {
 class NearbyShareContactManager;

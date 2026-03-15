@@ -23,8 +23,6 @@
 #include <variant>
 #include <vector>
 
-#include "location/nearby/sharing/lib/sync/sync_binding_prefs.pb.h"
-#include "location/nearby/sharing/lib/sync/sync_config_prefs.pb.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"

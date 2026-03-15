@@ -13,62 +13,47 @@
 # limitations under the License.
 
 licenses(["notice"])
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 cc_library(
-    name = "nearby_connections_service_linux",
-    srcs = ["nearby_connections_service_linux.cc"],
-    hdrs = [
-        "nearby_connections_service_linux.h",
-        "//sharing:nearby_connections_service.h",
-    ],
-    visibility = ["//visibility:public"],
+    name = "linux_sharing_platform",
+    srcs = ["platform/linux_sharing_platform.cc"],
+    hdrs = ["platform/linux_sharing_platform.h"],
+    visibility = ["//visibility:private"],
     deps = [
-        "//connections:core",
-        "//connections:core_types",
         "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/platform:base",
-        "//internal/platform:logging",
         "//internal/platform:mac_address",
+        "//internal/platform:types",
+        "//internal/platform:uuid",
+        "//internal/platform/implementation:account_manager",
         "//internal/platform/implementation:platform",
+        "//internal/platform/implementation:signin_attempt",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation/linux",
-#        "//internal/platform/implementation/linux:crypto",
-        "//sharing:connection_types",
+        "//sharing/internal/api:platform",
+        "//sharing/internal/public:pref_names",
+        "//sharing/proto:share_cc_proto",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
+        "@nlohmann_json//:json",
     ],
 )
 
 cc_library(
-    name = "nearby_connections_qt_facade",
-    srcs = ["nearby_connections_qt_facade.cc"],
-    hdrs = ["nearby_connections_qt_facade.h"],
+    name = "system_clock_shim",
+    srcs = ["platform/system_clock_shim.cc"],
     alwayslink = True,
-    visibility = ["//visibility:public"],
+    visibility = ["//visibility:private"],
     deps = [
-        ":nearby_connections_service_linux",
-        "//internal/base:file_path",
-    ],
-)
-
-cc_binary(
-    name = "nearby_connections_service_linux_shared",
-    linkshared = True,
-    srcs = [
-        "nearby_connections_qt_facade.cc",
-        "nearby_connections_qt_facade.h",
-    ],
-    visibility = ["//visibility:public"],
-    linkopts = [
-        "-Wl,--exclude-libs,ALL",
-    ],
-    deps = [
-        ":nearby_connections_service_linux",
-        "//internal/base:file_path",
-        "//internal/platform/implementation:platform",
-        "//internal/platform/implementation/linux",
+        "//internal/platform:types",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -79,9 +64,13 @@ cc_library(
     alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
-        ":nearby_sharing_service_linux",
+        ":linux_sharing_platform",
+        ":system_clock_shim",
         "//internal/base:file_path",
         "//sharing:attachments",
+        "//sharing:nearby_sharing_service",
+        "//sharing/analytics",
+        "//sharing/local_device_data",
     ],
 )
 
@@ -97,120 +86,14 @@ cc_binary(
         "-Wl,--exclude-libs,ALL",
     ],
     deps = [
-        ":nearby_sharing_service_linux",
+        ":linux_sharing_platform",
+        ":system_clock_shim",
         "//internal/base:file_path",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation/linux",
         "//sharing:attachments",
-    ],
-)
-
-
-cc_binary(
-    name = "app",
-    srcs = [
-        "qml_tray_app/main.cpp",
-        "qml_tray_app/nearby_tray_controller.cc"
-            ],
-    copts = [
-        "-I/usr/include/qt6",
-        "-I/usr/include/qt6/QtCore",
-    ],
-    linkopts = [
-        "-lQt6Core",
-    ],
-)
-cc_library(
-    name = "nearby_sharing_service_linux",
-    srcs = [
-        "nearby_sharing_service_linux.cc",
-        "//sharing:nearby_sharing_service.cc",
-        "//sharing:nearby_sharing_settings.cc",
-        "//sharing:thread_timer.cc",
-        "//sharing:transfer_metadata.cc",
-        "//sharing:transfer_metadata_builder.cc",
-        "//sharing/analytics:analytics_recorder.cc",
-        "//sharing/certificates:common.cc",
-        "//sharing/certificates:nearby_share_certificate_manager.cc",
-        "//sharing/certificates:nearby_share_decrypted_public_certificate.cc",
-        "//sharing/certificates:nearby_share_encrypted_metadata_key.cc",
-        "//sharing/certificates:nearby_share_private_certificate.cc",
-        "//sharing/common:nearby_share_prefs.cc",
-        "//sharing/local_device_data:nearby_share_local_device_data_manager.cc",
-    ],
-    hdrs = [
-        "nearby_sharing_service_linux.h",
-        "//sharing:nearby_sharing_service.h",
-        "//sharing:nearby_sharing_settings.h",
-        "//sharing:share_target_discovered_callback.h",
-        "//sharing:thread_timer.h",
-        "//sharing:transfer_metadata.h",
-        "//sharing:transfer_metadata_builder.h",
-        "//sharing:transfer_update_callback.h",
-        "//sharing/analytics:analytics_device_settings.h",
-        "//sharing/analytics:analytics_information.h",
-        "//sharing/analytics:analytics_recorder.h",
-        "//sharing/certificates:common.h",
-        "//sharing/certificates:constants.h",
-        "//sharing/certificates:nearby_share_certificate_manager.h",
-        "//sharing/certificates:nearby_share_decrypted_public_certificate.h",
-        "//sharing/certificates:nearby_share_encrypted_metadata_key.h",
-        "//sharing/certificates:nearby_share_private_certificate.h",
-        "//sharing/common:nearby_share_prefs.h",
-        "//sharing/internal/api:bluetooth_adapter.h",
-        "//sharing/internal/api:fast_init_ble_beacon.h",
-        "//sharing/internal/api:fast_initiation_manager.h",
-        "//sharing/internal/api:preference_manager.h",
-        "//sharing/internal/api:private_certificate_data.h",
-        "//sharing/internal/public:connectivity_manager.h",
-        "//sharing/internal/public:context.h",
-        "//sharing/internal/public:pref_names.h",
-        "//sharing/local_device_data:nearby_share_local_device_data_manager.h",
-    ],
-    visibility = ["//visibility:public"],
-    linkopts = [
-        "-lssl",
-        "-lcrypto"
-    ],
-    deps = [
-        "//connections:core",
-        "//connections:core_types",
-        "//internal/platform:base",
-        "//internal/platform:comm",
-        "//internal/platform:types",
-        "//internal/platform/implementation:platform",
-        "//internal/platform/implementation/linux",
-        "//internal/platform/implementation/linux:crypto",
-        "//sharing:attachments",
-        "//sharing:types",
-        "//sharing/proto:share_cc_proto",
-#        "@boringssl//:crypto",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-cc_binary(
-    name = "nearby_sharing_app",
-    srcs = ["nearby_sharing_app.cc"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":nearby_sharing_service_linux",
-        "//internal/platform:base",
-        "//sharing:attachments",
-        "//sharing:types",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-cc_binary(
-    name = "simple_example",
-    srcs = ["simple_example.cc"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":nearby_sharing_service_linux",
-        "//internal/platform:base",
-        "//sharing:attachments",
-        "//sharing:types",
-        "@com_google_absl//absl/strings",
+        "//sharing:nearby_sharing_service",
+        "//sharing/analytics",
+        "//sharing/local_device_data",
     ],
 )

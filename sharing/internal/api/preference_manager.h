@@ -32,6 +32,7 @@
 #define NEARBY_HAS_SYNC_CONFIG_PREFS_PROTO 1
 #endif  // __has_include("location/nearby/sharing/lib/sync/sync_config_prefs.pb.h")
 #endif  // defined(__has_include)
+#include "sharing/proto/wire_format.pb.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
@@ -41,8 +42,21 @@
 namespace nearby::sharing::sync {
 class SyncConfigPrefs {
  public:
-  bool ParseFromString(const std::string&) { return false; }
-  std::string SerializeAsString() const { return {}; }
+  bool ParseFromString(const std::string& serialized) {
+    return sync_config_.ParseFromString(serialized);
+  }
+  std::string SerializeAsString() const {
+    return sync_config_.SerializeAsString();
+  }
+  const nearby::sharing::service::proto::SyncConfig& sync_config() const {
+    return sync_config_;
+  }
+  nearby::sharing::service::proto::SyncConfig* mutable_sync_config() {
+    return &sync_config_;
+  }
+
+ private:
+  nearby::sharing::service::proto::SyncConfig sync_config_;
 };
 }  // namespace nearby::sharing::sync
 #endif  // NEARBY_HAS_SYNC_CONFIG_PREFS_PROTO

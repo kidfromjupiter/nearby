@@ -28,10 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include "google/nearby/identity/v1/resources.pb.h"
-#include "google/nearby/identity/v1/rpcs.pb.h"
 #include "google/protobuf/timestamp.pb.h"
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/algorithm/algorithm.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
@@ -63,6 +60,16 @@
 #include "sharing/internal/public/logging.h"
 #include "sharing/internal/public/pref_names.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
+#if defined(__linux__)
+#include "sharing/linux/stubs/highway_fingerprint.h"
+#include "sharing/linux/stubs/identity_rpc_types.h"
+#include "sharing/linux/stubs/sharing_rpc_client.h"
+#else
+#include "google/nearby/identity/v1/resources.pb.h"
+#include "google/nearby/identity/v1/rpcs.pb.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "util/hash/highway_fingerprint.h"
+#endif
 #include "sharing/proto/certificate_rpc.pb.h"
 #include "sharing/proto/encrypted_metadata.pb.h"
 #include "sharing/proto/enums.pb.h"
@@ -70,7 +77,6 @@
 #include "sharing/proto/timestamp.pb.h"
 #include "sharing/scheduling/nearby_share_scheduler.h"
 #include "sharing/scheduling/nearby_share_scheduler_factory.h"
-#include "util/hash/highway_fingerprint.h"
 
 namespace nearby {
 namespace sharing {

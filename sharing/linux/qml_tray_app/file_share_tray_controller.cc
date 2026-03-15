@@ -73,6 +73,9 @@ FileShareTrayController::FileShareTrayController(QObject* parent)
 
 FileShareTrayController::~FileShareTrayController() {
   stop();
+  if (service_) {
+    service_->Shutdown([](NearbySharingApi::StatusCode) {});
+  }
 }
 
 void FileShareTrayController::CreateService() {
@@ -180,19 +183,6 @@ void FileShareTrayController::AttachServiceListeners() {
                   !pending_send_file_name_.isEmpty()) {
                 file_name = pending_send_file_name_;
               }
-
-              qInfo().noquote()
-                  << QStringLiteral(
-                         "Transfer update target=%1 name=\"%2\" status=%3 "
-                         "progress=%4 bytes=%5 attachments=%6/%7 direction=%8")
-                         .arg(update.share_target_id)
-                         .arg(name)
-                         .arg(status)
-                         .arg(QString::number(update.progress, 'f', 4))
-                         .arg(update.transferred_bytes)
-                         .arg(update.transferred_attachments)
-                         .arg(update.total_attachments)
-                         .arg(direction);
 
               UpsertTransfer(update.share_target_id, name, status, update.progress,
                              update.transferred_bytes, direction, file_name);
@@ -335,6 +325,15 @@ void FileShareTrayController::setDeviceName(const QString& device_name) {
   device_name_ = trimmed;
   emit deviceNameChanged();
   SaveSettings();
+  if (service_) {
+    //service_->SetDeviceName(device_name_.toStdString());
+    //qr_code_url_ = QString::fromStdString(service_->GetQrCodeUrl());
+    //UpdateQrCodeData();
+    //emit qrCodeUrlChanged();
+    //emit qrCodeChanged();
+    service_->Shutdown([](NearbySharingApi::StatusCode) {});
+    service_.reset();
+  }
   CreateService();
 
   if (was_running) {
@@ -382,7 +381,6 @@ void FileShareTrayController::stop() {
 
   service_->StopSendMode([](NearbySharingApi::StatusCode) {});
   service_->StopReceiveMode([](NearbySharingApi::StatusCode) {});
-  service_->Shutdown([](NearbySharingApi::StatusCode) {});
 
   discovered_targets_.clear();
   discovered_row_by_target_.clear();

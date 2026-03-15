@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/base/nullability.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/notification.h"
@@ -31,6 +30,11 @@
 #include "sharing/contacts/nearby_share_contact_manager.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/internal/public/logging.h"
+#if defined(__linux__)
+#include "sharing/linux/stubs/sharing_rpc_client.h"
+#else
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#endif
 #include "sharing/proto/contact_rpc.pb.h"
 #include "sharing/proto/rpc_resources.pb.h"
 

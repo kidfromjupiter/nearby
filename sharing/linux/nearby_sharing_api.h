@@ -118,6 +118,7 @@ class __attribute__((visibility("default"))) NearbySharingApi {
   void Accept(int64_t share_target_id, std::function<void(StatusCode)> callback);
   void Reject(int64_t share_target_id, std::function<void(StatusCode)> callback);
   void Cancel(int64_t share_target_id, std::function<void(StatusCode)> callback);
+  void SetDeviceName(const std::string& device_name);
 
   void Shutdown(std::function<void(StatusCode)> callback);
   std::string GetQrCodeUrl() const;

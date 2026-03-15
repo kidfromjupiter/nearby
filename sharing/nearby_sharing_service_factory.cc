@@ -17,7 +17,6 @@
 #include <memory>
 #include <utility>
 
-#include "location/nearby/sharing/lib/rpc/grpc_async_client_factory.h"
 #include "internal/analytics/event_logger.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/analytics/analytics_recorder.h"
@@ -43,7 +42,7 @@ NearbySharingService* NearbySharingServiceFactory::CreateSharingService(
     analytics::AnalyticsRecorder* analytics_recorder,
     ::nearby::analytics::EventLogger* event_logger, bool supports_file_sync) {
   if (nearby_sharing_service_ != nullptr) {
-    return nullptr;
+    return nearby_sharing_service_.get();
   }
 
   context_ =

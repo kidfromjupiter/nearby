@@ -33,7 +33,6 @@ cc_library(
     visibility = [
         "//location/nearby/analytics/cpp/logging:__pkg__",
         "//location/nearby/cpp/sharing:__subpackages__",
-        "//location/nearby/sharing/lib:__subpackages__",
         "//location/nearby/sharing/sdk/test_client:__pkg__",
         "//sharing:__subpackages__",
     ],
@@ -42,9 +41,8 @@ cc_library(
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform/implementation:account_manager",
-        "//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
-        "//location/nearby/sharing/lib/sync:sync_config_prefs_cc_proto",
         "//sharing/proto:share_cc_proto",
+        "//sharing/proto:wire_format_cc_proto",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",

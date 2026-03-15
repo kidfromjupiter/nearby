@@ -17,7 +17,6 @@
 
 #include <memory>
 
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/base/nullability.h"
 #include "internal/platform/implementation/account_manager.h"
 #include "internal/platform/task_runner.h"
@@ -26,12 +25,15 @@
 
 namespace nearby {
 namespace sharing {
+namespace api {
+class SharingRpcClient;
+}  // namespace api
 
 class NearbyShareContactManagerImpl : public NearbyShareContactManager {
  public:
   NearbyShareContactManagerImpl(
       Context* absl_nonnull context, AccountManager& account_manager,
-      nearby::sharing::api::SharingRpcClient* absl_nonnull nearby_client);
+      api::SharingRpcClient* absl_nonnull nearby_client);
 
   ~NearbyShareContactManagerImpl() override = default;
 
@@ -40,7 +42,7 @@ class NearbyShareContactManagerImpl : public NearbyShareContactManager {
   void GetContacts(ContactsCallback callback) override;
 
   AccountManager& account_manager_;
-  nearby::sharing::api::SharingRpcClient& nearby_share_client_;
+  api::SharingRpcClient& nearby_share_client_;
 
   std::unique_ptr<TaskRunner> executor_ = nullptr;
 };

@@ -3,15 +3,27 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <utility>
 
+#include <openssl/bn.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+
+#include "absl/strings/escaping.h"
+#include "absl/time/time.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
+#include "internal/crypto_cros/ec_private_key.h"
 #include "internal/flags/nearby_flags.h"
+#include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
-#include "sharing/linux/nearby_sharing_service_linux.h"
+#include "sharing/linux/platform/linux_sharing_platform.h"
+#include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
+#include "sharing/nearby_sharing_service_factory.h"
+#include "sharing/proto/enums.pb.h"
 #include "sharing/share_target_discovered_callback.h"
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
@@ -20,7 +32,7 @@ namespace nearby::sharing::linux {
 
 namespace {
 
-using NativeService = nearby::sharing::linux::NearbySharingServiceLinux;
+using NativeService = nearby::sharing::NearbySharingService;
 
 void EnableBleL2capDefaults() {
   nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
@@ -113,14 +125,89 @@ NearbySharingApi::TextAttachmentType ToFacadeTextAttachmentType(
   return FacadeType::kUnknown;
 }
 
+std::string GenerateQrCodeUrl() {
+  auto ec_key = nearby::crypto::ECPrivateKey::Create();
+  if (!ec_key) {
+    return {};
+  }
+
+  const EC_KEY* raw_ec_key = EVP_PKEY_get0_EC_KEY(ec_key->key());
+  if (!raw_ec_key) {
+    return {};
+  }
+
+  const EC_GROUP* group = EC_KEY_get0_group(raw_ec_key);
+  const EC_POINT* public_key = EC_KEY_get0_public_key(raw_ec_key);
+  if (!group || !public_key) {
+    return {};
+  }
+
+  BIGNUM* x = BN_new();
+  BIGNUM* y = BN_new();
+  if (!x || !y) {
+    BN_free(x);
+    BN_free(y);
+    return {};
+  }
+
+  if (!EC_POINT_get_affine_coordinates_GFp(group, public_key, x, y, nullptr)) {
+    BN_free(x);
+    BN_free(y);
+    return {};
+  }
+
+  std::vector<uint8_t> x_bytes(32, 0);
+  const int x_len = BN_num_bytes(x);
+  if (x_len > static_cast<int>(x_bytes.size())) {
+    BN_free(x);
+    BN_free(y);
+    return {};
+  }
+  BN_bn2bin(x, x_bytes.data() + (x_bytes.size() - x_len));
+
+  const uint8_t prefix = BN_is_odd(y) ? 0x03 : 0x02;
+  BN_free(x);
+  BN_free(y);
+
+  std::vector<uint8_t> key_data;
+  key_data.reserve(35);
+  key_data.push_back(0x00);
+  key_data.push_back(0x00);
+  key_data.push_back(prefix);
+  key_data.insert(key_data.end(), x_bytes.begin(), x_bytes.end());
+
+  std::string encoded;
+  absl::WebSafeBase64Escape(
+      std::string(reinterpret_cast<const char*>(key_data.data()),
+                  key_data.size()),
+      &encoded);
+  return "https://quickshare.google/qrcode#key=" + encoded;
+}
+
 }  // namespace
 
 class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCallback,
                                public nearby::sharing::TransferUpdateCallback {
  public:
-  Impl() : service() {}
+  Impl()
+      : analytics_recorder(0, nullptr),
+        platform(),
+        service(NearbySharingServiceFactory::GetInstance()->CreateSharingService(
+            platform, &analytics_recorder, /*event_logger=*/nullptr,
+            /*supports_file_sync=*/false)) {}
+
   explicit Impl(std::string device_name_override)
-      : service(std::move(device_name_override)) {}
+      : analytics_recorder(0, nullptr),
+        device_name_override(device_name_override),
+        platform(device_name_override),
+        service(NearbySharingServiceFactory::GetInstance()->CreateSharingService(
+            platform, &analytics_recorder, /*event_logger=*/nullptr,
+            /*supports_file_sync=*/false)) {
+    if (service != nullptr && !device_name_override.empty() &&
+        service->GetLocalDeviceDataManager() != nullptr) {
+      service->GetLocalDeviceDataManager()->SetDeviceName(device_name_override);
+    }
+  }
 
   void OnShareTargetDiscovered(const nearby::sharing::ShareTarget& share_target)
       override {
@@ -214,9 +301,13 @@ class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCall
     return info;
   }
 
-  NativeService service;
+  nearby::sharing::analytics::AnalyticsRecorder analytics_recorder;
+  std::string device_name_override;
+  LinuxSharingPlatform platform;
+  NativeService* service = nullptr;
   bool send_mode_started = false;
   bool receive_mode_started = false;
+  std::string qr_code_url;
   std::mutex listener_mutex;
   NearbySharingApi::Listener listener;
 };
@@ -244,13 +335,19 @@ void NearbySharingApi::SetListener(Listener listener) {
 }
 
 void NearbySharingApi::StartSendMode(std::function<void(StatusCode)> callback) {
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
   if (impl_->send_mode_started) {
     if (callback) {
       callback(StatusCode::kOk);
     }
     return;
   }
-  impl_->service.RegisterSendSurface(
+  impl_->service->RegisterSendSurface(
       impl_.get(), impl_.get(),
       nearby::sharing::NearbySharingService::SendSurfaceState::kForeground,
       nearby::sharing::Advertisement::BlockedVendorId::kNone,
@@ -267,13 +364,19 @@ void NearbySharingApi::StartSendMode(std::function<void(StatusCode)> callback) {
 }
 
 void NearbySharingApi::StopSendMode(std::function<void(StatusCode)> callback) {
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
   if (!impl_->send_mode_started) {
     if (callback) {
       callback(StatusCode::kStatusAlreadyStopped);
     }
     return;
   }
-  impl_->service.UnregisterSendSurface(
+  impl_->service->UnregisterSendSurface(
       impl_.get(),
       [this, cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -287,35 +390,62 @@ void NearbySharingApi::StopSendMode(std::function<void(StatusCode)> callback) {
 }
 
 void NearbySharingApi::StartReceiveMode(std::function<void(StatusCode)> callback) {
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
   if (impl_->receive_mode_started) {
     if (callback) {
       callback(StatusCode::kOk);
     }
     return;
   }
-  impl_->service.RegisterReceiveSurface(
-      impl_.get(),
-      nearby::sharing::NearbySharingService::ReceiveSurfaceState::kForeground,
-      nearby::sharing::Advertisement::BlockedVendorId::kNone,
+  impl_->service->SetVisibility(
+      nearby::sharing::proto::DeviceVisibility::DEVICE_VISIBILITY_EVERYONE,
+      absl::Minutes(10),
       [this, cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
-        if (status == nearby::sharing::NearbySharingService::StatusCodes::kOk) {
-          impl_->receive_mode_started = true;
+        if (status != nearby::sharing::NearbySharingService::StatusCodes::kOk) {
+          if (cb) {
+            cb(ToFacadeStatus(status));
+          }
+          return;
         }
-        if (cb) {
-          cb(ToFacadeStatus(status));
-        }
+        impl_->service->RegisterReceiveSurface(
+            impl_.get(),
+            nearby::sharing::NearbySharingService::ReceiveSurfaceState::
+                kForeground,
+            nearby::sharing::Advertisement::BlockedVendorId::kNone,
+            [this, cb = std::move(cb)](
+                nearby::sharing::NearbySharingService::StatusCodes status)
+                mutable {
+              if (status ==
+                  nearby::sharing::NearbySharingService::StatusCodes::kOk) {
+                impl_->receive_mode_started = true;
+              }
+              if (cb) {
+                cb(ToFacadeStatus(status));
+              }
+            });
       });
 }
 
 void NearbySharingApi::StopReceiveMode(std::function<void(StatusCode)> callback) {
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
   if (!impl_->receive_mode_started) {
     if (callback) {
       callback(StatusCode::kStatusAlreadyStopped);
     }
     return;
   }
-  impl_->service.UnregisterReceiveSurface(
+  impl_->service->UnregisterReceiveSurface(
       impl_.get(),
       [this, cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -331,6 +461,12 @@ void NearbySharingApi::StopReceiveMode(std::function<void(StatusCode)> callback)
 void NearbySharingApi::SendFile(int64_t share_target_id,
                                 const std::string& file_path,
                                 std::function<void(StatusCode)> callback) {
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
   if (file_path.empty()) {
     if (callback) {
       callback(StatusCode::kInvalidArgument);
@@ -362,7 +498,7 @@ void NearbySharingApi::SendFile(int64_t share_target_id,
     return;
   }
 
-  impl_->service.SendAttachments(
+  impl_->service->SendAttachments(
       share_target_id, std::move(attachments),
       [cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -374,7 +510,13 @@ void NearbySharingApi::SendFile(int64_t share_target_id,
 
 void NearbySharingApi::Accept(int64_t share_target_id,
                               std::function<void(StatusCode)> callback) {
-  impl_->service.Accept(
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
+  impl_->service->Accept(
       share_target_id,
       [cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -386,7 +528,13 @@ void NearbySharingApi::Accept(int64_t share_target_id,
 
 void NearbySharingApi::Reject(int64_t share_target_id,
                               std::function<void(StatusCode)> callback) {
-  impl_->service.Reject(
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
+  impl_->service->Reject(
       share_target_id,
       [cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -398,7 +546,13 @@ void NearbySharingApi::Reject(int64_t share_target_id,
 
 void NearbySharingApi::Cancel(int64_t share_target_id,
                               std::function<void(StatusCode)> callback) {
-  impl_->service.Cancel(
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
+  impl_->service->Cancel(
       share_target_id,
       [cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
@@ -408,8 +562,24 @@ void NearbySharingApi::Cancel(int64_t share_target_id,
       });
 }
 
+void NearbySharingApi::SetDeviceName(const std::string& device_name) {
+  if (impl_->service == nullptr || device_name.empty()) {
+    return;
+  }
+  if (impl_->service->GetLocalDeviceDataManager() == nullptr) {
+    return;
+  }
+  impl_->service->GetLocalDeviceDataManager()->SetDeviceName(device_name);
+}
+
 void NearbySharingApi::Shutdown(std::function<void(StatusCode)> callback) {
-  impl_->service.Shutdown(
+  if (impl_->service == nullptr) {
+    if (callback) {
+      callback(StatusCode::kError);
+    }
+    return;
+  }
+  impl_->service->Shutdown(
       [this, cb = std::move(callback)](
           nearby::sharing::NearbySharingService::StatusCodes status) mutable {
         if (status == nearby::sharing::NearbySharingService::StatusCodes::kOk) {
@@ -423,7 +593,10 @@ void NearbySharingApi::Shutdown(std::function<void(StatusCode)> callback) {
 }
 
 std::string NearbySharingApi::GetQrCodeUrl() const {
-  return impl_->service.GetQrCodeUrl();
+  if (impl_->qr_code_url.empty()) {
+    impl_->qr_code_url = GenerateQrCodeUrl();
+  }
+  return impl_->qr_code_url;
 }
 
 std::string NearbySharingApi::StatusCodeToString(StatusCode status) {

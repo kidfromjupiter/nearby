@@ -15,31 +15,60 @@
 #ifndef THIRD_PARTY_NEARBY_SHARING_INTERNAL_BASE_UTF_STRING_CONVERSIONS_H_
 #define THIRD_PARTY_NEARBY_SHARING_INTERNAL_BASE_UTF_STRING_CONVERSIONS_H_
 
+#include <string>
+#include <string_view>
+
 #if defined(GITHUB_BUILD)
 // Stub out string conversion functions for github builds.
 namespace nearby::utils {
 
-bool IsStringUtf8(std::string_view str) { return true; }
+inline bool IsStringUtf8(std::string_view str) {
+  static_cast<void>(str);
+  return true;
+}
 
-void TruncateUtf8ToByteSize(const std::string& input, size_t byte_size,
-                            std::string* output) {}
+inline void TruncateUtf8ToByteSize(const std::string& input, size_t byte_size,
+                                   std::string* output) {
+  if (output == nullptr) {
+    return;
+  }
+  *output = input.substr(0, byte_size);
+}
 
 }  // namespace nearby::utils
 #elif defined(NEARBY_CHROMIUM)
 // Forward to chromium implementations.
 #include "base/strings/string_util.h"
 namespace nearby::utils {
-bool IsStringUtf8(std::string_view str) {
+inline bool IsStringUtf8(std::string_view str) {
   return base::IsStringUTF8(str);
 }
 
-void TruncateUtf8ToByteSize(const std::string& input, size_t byte_size,
-                            std::string* output) {
+inline void TruncateUtf8ToByteSize(const std::string& input, size_t byte_size,
+                                   std::string* output) {
   base::TruncateUTF8ToByteSize(input, byte_size, output);
 }
 }  // namespace nearby::utils
-#else  // defined(GITHUB_BUILD)
+#elif defined(__has_include) && \
+    __has_include("sharing/internal/base/strings/utf_string_conversions.h")
 #include "sharing/internal/base/strings/utf_string_conversions.h"  // IWYU pragma: export
+#else
+namespace nearby::utils {
+
+inline bool IsStringUtf8(std::string_view str) {
+  static_cast<void>(str);
+  return true;
+}
+
+inline void TruncateUtf8ToByteSize(const std::string& input, size_t byte_size,
+                                   std::string* output) {
+  if (output == nullptr) {
+    return;
+  }
+  *output = input.substr(0, byte_size);
+}
+
+}  // namespace nearby::utils
 #endif  // defined(GITHUB_BUILD)
 
 #endif  // THIRD_PARTY_NEARBY_SHARING_INTERNAL_BASE_UTF_STRING_CONVERSIONS_H_

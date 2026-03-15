@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/status/statusor.h"
@@ -43,8 +42,15 @@
 #include "sharing/proto/enums.pb.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
+namespace google::nearby::identity::v1 {
+class PublishDeviceRequest;
+}  // namespace google::nearby::identity::v1
+
 namespace nearby {
 namespace sharing {
+namespace api {
+class IdentityRpcClient;
+}  // namespace api
 
 class NearbyShareScheduler;
 

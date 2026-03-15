@@ -22,7 +22,6 @@ cc_library(
     hdrs = [
         "pref_names.h",
     ],
-    compatible_with = ["//buildenv/target:non_prod"],
     visibility = ["//visibility:public"],
     deps = [
         "@com_google_absl//absl/strings",
