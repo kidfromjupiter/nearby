@@ -50,6 +50,7 @@ ApplicationWindow {
                 topLeftRadius: 48
                 clip: true
 
+                readonly property bool isSendMode: fileShareController.pendingSendFilePath.length > 0
                 readonly property bool isIdle: fileShareController.discoveredTargets.length === 0
                                                && fileShareController.transfers.length === 0
 
@@ -73,6 +74,13 @@ ApplicationWindow {
                         width: mainFlickable.width - 96
                         spacing: 16
 
+                        SendUrlPanel {
+                            Layout.alignment: Qt.AlignHCenter
+                            width: Math.max(240, Math.min(mainCol.width, 420))
+                            visible: mainContent.isSendMode
+                        }
+
+
                         Label {
                             text: "Nearby devices"
                             font.pixelSize: 20
@@ -80,15 +88,23 @@ ApplicationWindow {
                             color: "#111827"
                         }
 
-                        Repeater {
-                            model: fileShareController.discoveredTargets
-                            delegate: DeviceCard {}
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: deviceFlow.childrenRect.height
+                            visible: fileShareController.discoveredTargets.length > 0
+
+                            Flow {
+                                id: deviceFlow
+                                width: parent.width
+                                spacing: 20
+
+                                Repeater {
+                                    model: fileShareController.discoveredTargets
+                                    delegate: DeviceCard {}
+                                }
+                            }
                         }
 
-                        Repeater {
-                            model: fileShareController.transfers
-                            delegate: TransferCard {}
-                        }
                     }
                 }
             }

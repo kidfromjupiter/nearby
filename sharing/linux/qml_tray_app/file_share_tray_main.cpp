@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "file_share_tray_controller.h"
+#include "notification_manager.h"
 
 namespace {
 
@@ -144,6 +145,7 @@ int main(int argc, char* argv[]) {
 
   QSystemTrayIcon tray(resolve_tray_icon());
   tray.setToolTip(QStringLiteral("Nearby File Tray"));
+  NotificationManager notification_manager(&tray, &app);
 
   QMenu tray_menu;
   QAction* send_action = tray_menu.addAction(QStringLiteral("Send"));
@@ -207,9 +209,15 @@ int main(int argc, char* argv[]) {
                    });
 
   QObject::connect(&controller, &FileShareTrayController::requestTrayMessage,
-                   &tray, [&tray](const QString& title, const QString& body) {
-                     tray.showMessage(title, body, QSystemTrayIcon::Information,
-                                      4000);
+                   &notification_manager, &NotificationManager::ShowNotification);
+  QObject::connect(&controller,
+                   &FileShareTrayController::requestCopyLinkTrayMessage,
+                   &notification_manager,
+                   [&notification_manager](const QString& title,
+                                           const QString& body,
+                                           const QString& link) {
+                     notification_manager.ShowCopyableNotification(
+                         title, body, link, QStringLiteral("Copy link"));
                    });
 
   QObject::connect(&app, &QCoreApplication::aboutToQuit, &controller,

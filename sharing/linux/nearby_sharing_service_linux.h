@@ -146,6 +146,8 @@ class NearbySharingServiceLinux : public NearbySharingService {
     nearby::sharing::AttachmentContainer attachments;
     TransferUpdateCallback* callback = nullptr;
     bool is_incoming = false;
+    connections::Medium current_medium = connections::Medium::UNKNOWN_MEDIUM;
+    float max_reported_progress = 0.0f;
 
     // Minimal Nearby Share frame protocol state.
     bool paired_key_encryption_sent = false;

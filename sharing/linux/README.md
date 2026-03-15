@@ -84,7 +84,7 @@ From `sharing/linux/qml_tray_app`:
 mkdir -p "$HOME/.local/share/applications"
 install -m 0644 nearby-file-share.desktop "$HOME/.local/share/applications/nearby-file-share.desktop"
 sed -i "s|^Exec=.*|Exec=$(pwd)/build/nearby_qml_file_tray_app|" "$HOME/.local/share/applications/nearby-file-share.desktop"
-sed -i "s|^Icon=.*|Icon=$(pwd)/tray_icon.png|" "$HOME/.local/share/applications/nearby-file-share.desktop"
+sed -i "s|^Icon=.*|Icon=$(pwd)/nearby-linux-desktop.png|" "$HOME/.local/share/applications/nearby-file-share.desktop"
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 ```
 
@@ -102,4 +102,3 @@ This README stays focused on status, installation, and known limitations.
 
 - Video demo of end-to-end sharing flow.
 - GIF showing the sharing process.
-

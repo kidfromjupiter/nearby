@@ -4,6 +4,7 @@
     <file>components/AppHeader.qml</file>
     <file>components/SideBar.qml</file>
     <file>components/AnimatedBlob.qml</file>
+    <file>components/SendUrlPanel.qml</file>
     <file>components/DeviceCard.qml</file>
     <file>components/TransferCard.qml</file>
     <file>components/SettingsPanel.qml</file>

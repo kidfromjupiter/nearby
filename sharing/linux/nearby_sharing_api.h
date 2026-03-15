@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 // Some toolchains define `linux` as a macro (e.g. `#define linux 1`), which
 // breaks namespace tokens like `nearby::sharing::linux`.
@@ -53,11 +54,25 @@ class __attribute__((visibility("default"))) NearbySharingApi {
     kIncompletePayloads = 14,
   };
 
+  enum class TextAttachmentType {
+    kUnknown = 0,
+    kText = 1,
+    kUrl = 2,
+    kPhoneNumber = 3,
+    kAddress = 4,
+  };
+
   struct ShareTargetInfo {
     int64_t id = 0;
     std::string device_name;
     bool is_incoming = false;
     int device_type = 0;
+  };
+
+  struct TextAttachmentInfo {
+    TextAttachmentType type = TextAttachmentType::kUnknown;
+    std::string text_title;
+    std::string text_body;
   };
 
   struct TransferUpdateInfo {
@@ -71,6 +86,7 @@ class __attribute__((visibility("default"))) NearbySharingApi {
     int transferred_attachments = 0;
     std::string first_file_name;
     std::string first_file_path;
+    std::vector<TextAttachmentInfo> text_attachments;
   };
 
   struct Listener {

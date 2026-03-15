@@ -95,6 +95,24 @@ NearbySharingApi::TransferStatus ToFacadeTransferStatus(
   return FacadeStatus::kUnknown;
 }
 
+NearbySharingApi::TextAttachmentType ToFacadeTextAttachmentType(
+    nearby::sharing::TextAttachment::Type type) {
+  using FacadeType = NearbySharingApi::TextAttachmentType;
+  switch (type) {
+    case nearby::sharing::service::proto::TextMetadata::TEXT:
+      return FacadeType::kText;
+    case nearby::sharing::service::proto::TextMetadata::URL:
+      return FacadeType::kUrl;
+    case nearby::sharing::service::proto::TextMetadata::PHONE_NUMBER:
+      return FacadeType::kPhoneNumber;
+    case nearby::sharing::service::proto::TextMetadata::ADDRESS:
+      return FacadeType::kAddress;
+    case nearby::sharing::service::proto::TextMetadata::UNKNOWN:
+      return FacadeType::kUnknown;
+  }
+  return FacadeType::kUnknown;
+}
+
 }  // namespace
 
 class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCallback,
@@ -172,6 +190,16 @@ class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCall
       if (file.file_path().has_value()) {
         info.first_file_path = file.file_path()->ToString();
       }
+    }
+    info.text_attachments.reserve(
+        attachment_container.GetTextAttachments().size());
+    for (const nearby::sharing::TextAttachment& text :
+         attachment_container.GetTextAttachments()) {
+      NearbySharingApi::TextAttachmentInfo text_info;
+      text_info.type = ToFacadeTextAttachmentType(text.type());
+      text_info.text_title = std::string(text.text_title());
+      text_info.text_body = std::string(text.text_body());
+      info.text_attachments.push_back(std::move(text_info));
     }
     listener_copy.transfer_update_cb(info);
   }

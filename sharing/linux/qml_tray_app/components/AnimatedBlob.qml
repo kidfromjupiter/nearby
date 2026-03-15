@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Item {
     anchors.fill: parent
@@ -80,48 +81,10 @@ Item {
         }
     }
 
-    // QR code URL panel shown when a file is pending to send
-    Column {
+    SendUrlPanel {
         anchors.centerIn: parent
-        visible: isSendMode
-        spacing: 16
         width: parent.width - 96
-
-        Label {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Scan to connect"
-            font.pixelSize: 16
-            font.weight: Font.Medium
-            color: textPrimary
-        }
-
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width
-            height: urlLabel.implicitHeight + 24
-            radius: 12
-            color: "#f0fdf4"
-            border.color: "#bbf7d0"
-            border.width: 1
-
-            Label {
-                id: urlLabel
-                anchors.centerIn: parent
-                width: parent.width - 32
-                text: fileShareController.qrCodeUrl
-                font.pixelSize: 12
-                font.family: "monospace"
-                color: "#166534"
-                wrapMode: Text.WrapAnywhere
-            }
-        }
-
-        Label {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Sending: " + fileShareController.pendingSendFileName
-            font.pixelSize: 13
-            color: textMuted
-        }
+        visible: isSendMode
     }
 
     Label {

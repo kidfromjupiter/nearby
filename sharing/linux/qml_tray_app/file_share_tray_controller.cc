@@ -1,16 +1,61 @@
 #include "file_share_tray_controller.h"
 
+#include <QByteArray>
+#include <QClipboard>
+#include <QDebug>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMetaObject>
 #include <QSettings>
 #include <QSysInfo>
+#include <QTimer>
 #include <QVariantMap>
+
+#include "third_party/libqrencode/qrencode_compat.h"
 
 namespace {
 
 QString TrimmedOrFallback(const QString& value, const QString& fallback) {
   const QString trimmed = value.trimmed();
   return trimmed.isEmpty() ? fallback : trimmed;
+}
+
+QString TrimmedStdString(const std::string& value) {
+  return QString::fromStdString(value).trimmed();
+}
+
+QString FirstReceivedUrl(const NearbySharingApi::TransferUpdateInfo& update) {
+  for (const NearbySharingApi::TextAttachmentInfo& text :
+       update.text_attachments) {
+    if (text.type != NearbySharingApi::TextAttachmentType::kUrl) {
+      continue;
+    }
+
+    const QString link = TrimmedStdString(text.text_body);
+    if (!link.isEmpty()) {
+      return link;
+    }
+  }
+
+  return {};
+}
+
+QString FirstReceivedTextSummary(
+    const NearbySharingApi::TransferUpdateInfo& update) {
+  for (const NearbySharingApi::TextAttachmentInfo& text :
+       update.text_attachments) {
+    const QString title = TrimmedStdString(text.text_title);
+    if (!title.isEmpty()) {
+      return title;
+    }
+
+    const QString body = TrimmedStdString(text.text_body);
+    if (!body.isEmpty()) {
+      return body;
+    }
+  }
+
+  return {};
 }
 
 }  // namespace
@@ -33,8 +78,49 @@ FileShareTrayController::~FileShareTrayController() {
 void FileShareTrayController::CreateService() {
   service_ = std::make_unique<NearbySharingApi>(device_name_.toStdString());
   qr_code_url_ = QString::fromStdString(service_->GetQrCodeUrl());
+  UpdateQrCodeData();
   emit qrCodeUrlChanged();
+  emit qrCodeChanged();
   AttachServiceListeners();
+}
+
+void FileShareTrayController::UpdateQrCodeData() {
+  qr_code_rows_.clear();
+  qr_code_size_ = 0;
+
+  const QByteArray encoded_url = qr_code_url_.trimmed().toUtf8();
+  if (encoded_url.isEmpty()) {
+    return;
+  }
+
+  QRcode* qr_code = QRcode_encodeData(
+      encoded_url.size(),
+      reinterpret_cast<const unsigned char*>(encoded_url.constData()), 0,
+      QR_ECLEVEL_M);
+  if (qr_code == nullptr || qr_code->data == nullptr || qr_code->width <= 0) {
+    if (qr_code != nullptr) {
+      QRcode_free(qr_code);
+    }
+    return;
+  }
+
+  qr_code_size_ = qr_code->width;
+  qr_code_rows_.reserve(qr_code_size_);
+
+  for (int row = 0; row < qr_code_size_; ++row) {
+    QString row_data;
+    row_data.reserve(qr_code_size_);
+
+    for (int col = 0; col < qr_code_size_; ++col) {
+      const unsigned char module =
+          qr_code->data[row * qr_code_size_ + col] & 0x1;
+      row_data.append(module ? QLatin1Char('1') : QLatin1Char('0'));
+    }
+
+    qr_code_rows_.append(row_data);
+  }
+
+  QRcode_free(qr_code);
 }
 
 void FileShareTrayController::AttachServiceListeners() {
@@ -95,6 +181,19 @@ void FileShareTrayController::AttachServiceListeners() {
                 file_name = pending_send_file_name_;
               }
 
+              qInfo().noquote()
+                  << QStringLiteral(
+                         "Transfer update target=%1 name=\"%2\" status=%3 "
+                         "progress=%4 bytes=%5 attachments=%6/%7 direction=%8")
+                         .arg(update.share_target_id)
+                         .arg(name)
+                         .arg(status)
+                         .arg(QString::number(update.progress, 'f', 4))
+                         .arg(update.transferred_bytes)
+                         .arg(update.transferred_attachments)
+                         .arg(update.total_attachments)
+                         .arg(direction);
+
               UpsertTransfer(update.share_target_id, name, status, update.progress,
                              update.transferred_bytes, direction, file_name);
               SetStatus(QStringLiteral("%1 (%2)")
@@ -118,11 +217,29 @@ void FileShareTrayController::AttachServiceListeners() {
 
               if (update.is_incoming) {
                 if (success) {
-                  const QString received_name =
-                      file_name.isEmpty() ? QStringLiteral("file") : file_name;
-                  emit requestTrayMessage(
-                      QStringLiteral("File received"),
-                      QStringLiteral("%1 from %2").arg(received_name, name));
+                  const QString received_link = FirstReceivedUrl(update);
+                  if (!received_link.isEmpty()) {
+                    emit requestCopyLinkTrayMessage(
+                        QStringLiteral("Link received"),
+                        QStringLiteral("%1 from %2")
+                            .arg(received_link, name),
+                        received_link);
+                  } else if (!update.text_attachments.empty()) {
+                    const QString received_text =
+                        TrimmedOrFallback(FirstReceivedTextSummary(update),
+                                          QStringLiteral("Text"));
+                    emit requestTrayMessage(
+                        QStringLiteral("Text received"),
+                        QStringLiteral("%1 from %2")
+                            .arg(received_text, name));
+                  } else {
+                    const QString received_name =
+                        file_name.isEmpty() ? QStringLiteral("file")
+                                            : file_name;
+                    emit requestTrayMessage(
+                        QStringLiteral("File received"),
+                        QStringLiteral("%1 from %2").arg(received_name, name));
+                  }
                 } else {
                   emit requestTrayMessage(
                       QStringLiteral("Receive failed"),
@@ -156,6 +273,16 @@ void FileShareTrayController::AttachServiceListeners() {
                   pending_send_file_name_.clear();
                   emit pendingSendFileNameChanged();
                 }
+              }
+
+              if (pending_target_removals_.contains(update.share_target_id)) {
+                QTimer::singleShot(1400, this, [this, target_id = update.share_target_id]() {
+                  if (!pending_target_removals_.contains(target_id)) {
+                    return;
+                  }
+                  pending_target_removals_.remove(target_id);
+                  RemoveTarget(target_id);
+                });
               }
             },
             Qt::QueuedConnection);
@@ -259,6 +386,7 @@ void FileShareTrayController::stop() {
 
   discovered_targets_.clear();
   discovered_row_by_target_.clear();
+  pending_target_removals_.clear();
   target_names_.clear();
   transfers_.clear();
   transfer_row_by_target_.clear();
@@ -381,6 +509,25 @@ void FileShareTrayController::sendPendingFileToTarget(qlonglong share_target_id)
       });
 }
 
+void FileShareTrayController::copyTextToClipboard(const QString& text) {
+  const QString trimmed = text.trimmed();
+  if (trimmed.isEmpty()) {
+    return;
+  }
+
+  QClipboard* clipboard = QGuiApplication::clipboard();
+  if (clipboard == nullptr) {
+    emit requestTrayMessage(QStringLiteral("Copy failed"),
+                            QStringLiteral("Clipboard is not available."));
+    return;
+  }
+
+  clipboard->setText(trimmed, QClipboard::Clipboard);
+  SetStatus(QStringLiteral("Connection URL copied to clipboard"));
+  emit requestTrayMessage(QStringLiteral("URL copied"),
+                          QStringLiteral("Connection URL copied to clipboard."));
+}
+
 void FileShareTrayController::clearTransfers() {
   transfers_.clear();
   transfer_row_by_target_.clear();
@@ -427,6 +574,7 @@ void FileShareTrayController::startReceiveMode() {
 void FileShareTrayController::UpsertTarget(qlonglong share_target_id,
                                            const QString& name,
                                            bool is_incoming) {
+  pending_target_removals_.remove(share_target_id);
   target_names_[share_target_id] = name;
   if (is_incoming) {
     return;
@@ -452,6 +600,12 @@ void FileShareTrayController::UpsertTarget(qlonglong share_target_id,
 }
 
 void FileShareTrayController::RemoveTarget(qlonglong share_target_id) {
+  if (HasActiveTransferForTarget(share_target_id)) {
+    pending_target_removals_.insert(share_target_id);
+    return;
+  }
+
+  pending_target_removals_.remove(share_target_id);
   target_names_.remove(share_target_id);
   if (!discovered_row_by_target_.contains(share_target_id)) {
     return;
@@ -475,6 +629,21 @@ void FileShareTrayController::RemoveTarget(qlonglong share_target_id) {
 QString FileShareTrayController::TargetName(qlonglong share_target_id) const {
   const QString name = target_names_.value(share_target_id).trimmed();
   return name.isEmpty() ? QStringLiteral("Unknown device") : name;
+}
+
+bool FileShareTrayController::HasActiveTransferForTarget(
+    qlonglong share_target_id) const {
+  for (const QVariant& row_value : transfers_) {
+    const QVariantMap row = row_value.toMap();
+    if (row.value(QStringLiteral("targetId")).toLongLong() != share_target_id) {
+      continue;
+    }
+
+    if (IsActiveTransferStatus(row.value(QStringLiteral("status")).toString())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void FileShareTrayController::UpsertTransfer(
@@ -517,14 +686,19 @@ bool FileShareTrayController::HasActiveTransfers() const {
   for (const QVariant& row_value : transfers_) {
     const QVariantMap row = row_value.toMap();
     const QString status = row.value(QStringLiteral("status")).toString();
-    if (status == QStringLiteral("Queued") || status == QStringLiteral("Connecting") ||
-        status == QStringLiteral("AwaitingLocalConfirmation") ||
-        status == QStringLiteral("AwaitingRemoteAcceptance") ||
-        status == QStringLiteral("InProgress")) {
+    if (IsActiveTransferStatus(status)) {
       return true;
     }
   }
   return false;
+}
+
+bool FileShareTrayController::IsActiveTransferStatus(const QString& status) {
+  return status == QStringLiteral("Queued") ||
+         status == QStringLiteral("Connecting") ||
+         status == QStringLiteral("AwaitingLocalConfirmation") ||
+         status == QStringLiteral("AwaitingRemoteAcceptance") ||
+         status == QStringLiteral("InProgress");
 }
 
 QString FileShareTrayController::StatusToString(NearbySharingApi::StatusCode status) {

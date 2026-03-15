@@ -116,6 +116,10 @@ bool IsControlFrameType(V1Frame::FrameType type) {
   }
 }
 
+std::string MediumToString(connections::Medium medium) {
+  return ::location::nearby::proto::connections::Medium_Name(medium);
+}
+
 bool TryParseControlFrame(const connections::Payload& payload, Frame* frame) {
   if (!frame || payload.GetType() != connections::PayloadType::kBytes) {
     return false;
@@ -607,7 +611,10 @@ void NearbySharingServiceLinux::SendAttachments(
   transfer_state.attachments = std::move(*attachment_container);
   transfer_state.callback = callback;
   transfer_state.is_incoming = false;
-  active_transfers_[*endpoint_id] = std::move(transfer_state);
+  active_transfers_.erase(*endpoint_id);
+  auto transfer_insert_result =
+      active_transfers_.emplace(*endpoint_id, std::move(transfer_state));
+  auto transfer_it = transfer_insert_result.first;
 
   TransferMetadata metadata =
       TransferMetadataBuilder().set_status(TransferMetadata::Status::kConnecting)
@@ -616,8 +623,7 @@ void NearbySharingServiceLinux::SendAttachments(
               attachment_container->GetAttachmentCount())
           .build();
   if (auto share_target = GetShareTarget(*endpoint_id)) {
-    NotifyTransferUpdate(*share_target, active_transfers_[*endpoint_id],
-                         metadata);
+    NotifyTransferUpdate(*share_target, transfer_it->second, metadata);
   }
 
   connections::ConnectionOptions options;
@@ -663,6 +669,15 @@ void NearbySharingServiceLinux::SendAttachments(
   request_info.listener.disconnected_cb = [this](const std::string& id) {
     HandleConnectionDisconnected(id);
   };
+  request_info.listener.bandwidth_changed_cb =
+      [this](const std::string& id, connections::Medium medium) {
+        auto transfer_it = active_transfers_.find(id);
+        if (transfer_it != active_transfers_.end()) {
+          transfer_it->second.current_medium = medium;
+        }
+        LOG(INFO) << "Transfer medium changed endpoint=" << id
+                  << " medium=" << MediumToString(medium);
+      };
 
   core_->RequestConnection(*endpoint_id, request_info, options,
                            [this, cb = std::move(status_codes_callback)](
@@ -845,6 +860,15 @@ void NearbySharingServiceLinux::StartAdvertisingIfNeeded() {
   request_info.listener.disconnected_cb = [this](const std::string& id) {
     HandleConnectionDisconnected(id);
   };
+  request_info.listener.bandwidth_changed_cb =
+      [this](const std::string& id, connections::Medium medium) {
+        auto transfer_it = active_transfers_.find(id);
+        if (transfer_it != active_transfers_.end()) {
+          transfer_it->second.current_medium = medium;
+        }
+        LOG(INFO) << "Transfer medium changed endpoint=" << id
+                  << " medium=" << MediumToString(medium);
+      };
 
   core_->StartAdvertising(
       kServiceId, options, std::move(request_info),
@@ -1152,13 +1176,16 @@ void NearbySharingServiceLinux::HandleIncomingConnectionInitiated(
   transfer_state.attachments = AttachmentContainer();
   transfer_state.callback = PickReceiveTransferCallback();
   transfer_state.is_incoming = true;
-  active_transfers_[endpoint_id] = std::move(transfer_state);
+  active_transfers_.erase(endpoint_id);
+  auto transfer_insert_result =
+      active_transfers_.emplace(endpoint_id, std::move(transfer_state));
+  auto transfer_it = transfer_insert_result.first;
 
   TransferMetadata metadata = TransferMetadataBuilder()
                                   .set_status(TransferMetadata::Status::kAwaitingLocalConfirmation)
                                   .set_progress(0)
                                   .build();
-  NotifyTransferUpdate(target, active_transfers_[endpoint_id], metadata);
+  NotifyTransferUpdate(target, transfer_it->second, metadata);
 }
 
 void NearbySharingServiceLinux::HandleOutgoingConnectionInitiated(
@@ -1477,6 +1504,22 @@ connections::PayloadListener NearbySharingServiceLinux::MakePayloadListener(
                        : TransferMetadata::Status::kInProgress;
         } else {
           status = StatusFromPayloadStatus(info.status);
+        }
+
+        if (progress + 0.0001f < transfer_state.max_reported_progress) {
+          LOG(WARNING) << "Transfer progress regressed target="
+                       << share_target->id << " endpoint=" << endpoint_id_string
+                       << " medium="
+                       << MediumToString(transfer_state.current_medium)
+                       << " payload_id=" << info.payload_id
+                       << " status=" << static_cast<int>(info.status)
+                       << " bytes=" << info.bytes_transferred << "/"
+                       << info.total_bytes << " completed=" << completed << "/"
+                       << transfer_state.expected_attachment_payload_count
+                       << " progress=" << progress << " max_seen="
+                       << transfer_state.max_reported_progress;
+        } else if (progress > transfer_state.max_reported_progress) {
+          transfer_state.max_reported_progress = progress;
         }
 
         TransferMetadata metadata =

@@ -4,6 +4,7 @@
 #include <QObject>
 
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -26,6 +27,8 @@ class FileShareTrayController : public QObject {
   Q_PROPERTY(QVariantList transfers READ transfers NOTIFY transfersChanged)
   Q_PROPERTY(bool autoAcceptIncoming READ autoAcceptIncoming WRITE setAutoAcceptIncoming NOTIFY autoAcceptIncomingChanged)
   Q_PROPERTY(QString qrCodeUrl READ qrCodeUrl NOTIFY qrCodeUrlChanged)
+  Q_PROPERTY(QStringList qrCodeRows READ qrCodeRows NOTIFY qrCodeChanged)
+  Q_PROPERTY(int qrCodeSize READ qrCodeSize NOTIFY qrCodeChanged)
   Q_PROPERTY(QString logPath READ logPath WRITE setLogPath NOTIFY logPathChanged)
 
  public:
@@ -50,6 +53,8 @@ class FileShareTrayController : public QObject {
   void setAutoAcceptIncoming(bool enabled);
 
   QString qrCodeUrl() const { return qr_code_url_; }
+  QStringList qrCodeRows() const { return qr_code_rows_; }
+  int qrCodeSize() const { return qr_code_size_; }
 
   QString logPath() const { return log_path_; }
   void setLogPath(const QString& path);
@@ -59,6 +64,7 @@ class FileShareTrayController : public QObject {
   Q_INVOKABLE void switchToReceiveMode();
   Q_INVOKABLE void switchToSendModeWithFile(const QString& file_path);
   Q_INVOKABLE void sendPendingFileToTarget(qlonglong share_target_id);
+  Q_INVOKABLE void copyTextToClipboard(const QString& text);
   Q_INVOKABLE void clearTransfers();
   Q_INVOKABLE void hideToTray();
 
@@ -73,9 +79,12 @@ class FileShareTrayController : public QObject {
   void transfersChanged();
   void autoAcceptIncomingChanged();
   void qrCodeUrlChanged();
+  void qrCodeChanged();
   void logPathChanged();
 
   void requestTrayMessage(const QString& title, const QString& body);
+  void requestCopyLinkTrayMessage(const QString& title, const QString& body,
+                                  const QString& link);
 
  private:
   void CreateService();
@@ -85,11 +94,13 @@ class FileShareTrayController : public QObject {
   void startReceiveMode();
   void LoadSettings();
   void SaveSettings() const;
+  void UpdateQrCodeData();
 
   void UpsertTarget(qlonglong share_target_id, const QString& name,
                     bool is_incoming);
   void RemoveTarget(qlonglong share_target_id);
   QString TargetName(qlonglong share_target_id) const;
+  bool HasActiveTransferForTarget(qlonglong share_target_id) const;
 
   void UpsertTransfer(qlonglong share_target_id, const QString& target_name,
                       const QString& status, double progress,
@@ -99,6 +110,7 @@ class FileShareTrayController : public QObject {
   void SetStatus(const QString& status);
   bool HasActiveTransfers() const;
 
+  static bool IsActiveTransferStatus(const QString& status);
   static QString StatusToString(NearbySharingApi::StatusCode status);
   static QString TransferStatusToString(NearbySharingApi::TransferStatus status);
   static bool IsFinalTransferStatus(NearbySharingApi::TransferStatus status);
@@ -112,6 +124,8 @@ class FileShareTrayController : public QObject {
 
   bool auto_accept_incoming_ = true;
   QString qr_code_url_;
+  QStringList qr_code_rows_;
+  int qr_code_size_ = 0;
   QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
 
   QString pending_send_file_path_;
@@ -120,6 +134,7 @@ class FileShareTrayController : public QObject {
 
   QVariantList discovered_targets_;
   QHash<qlonglong, int> discovered_row_by_target_;
+  QSet<qlonglong> pending_target_removals_;
   QHash<qlonglong, QString> target_names_;
 
   QVariantList transfers_;
