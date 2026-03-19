@@ -45,7 +45,7 @@ GattServer::CreateCharacteristic(
       system_bus_, count, service_uuid, server_cb_, devices_);
   try {
     service->emitInterfacesAddedSignal(
-        {org::bluez::GattService1_adaptor::INTERFACE_NAME});
+        {sdbus::InterfaceName(org::bluez::GattService1_adaptor::INTERFACE_NAME)});
   } catch (const sdbus::Error& e) {
     LOG(ERROR)
         << __func__
@@ -144,7 +144,7 @@ void GattServer::Stop() {
     LOG(INFO) << __func__ << ": Unregistering service "
                          << service->getObject().getObjectPath();
     try {
-      manager.UnregisterApplication("/");
+      manager.UnregisterApplication(sdbus::ObjectPath("/"));
     } catch (const sdbus::Error& e) {
       DBUS_LOG_METHOD_CALL_ERROR(&manager, "UnregisterApplication", e);
     }

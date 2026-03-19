@@ -26,8 +26,8 @@ void Server::onResolveServiceReply(const int32_t& interface,
     const std::string& host, const int32_t& aprotocol,
     const std::string& address, const uint16_t& port,
     const std::vector<std::vector<uint8_t>>& txt, const uint32_t& flags,
-    const sdbus::Error* error) {
-  if (error != nullptr && error->isValid()) {
+    std::optional<sdbus::Error> error) {
+  if (error.has_value()) {
     LOG(ERROR) << __func__ << ": ResolveService failed with error '"
                << error->getName() << "' message '" << error->getMessage()
                << "'";

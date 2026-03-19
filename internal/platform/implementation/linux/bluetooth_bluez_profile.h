@@ -72,10 +72,10 @@ class Profile final
     explicit FDProperties(const std::map<std::string, sdbus::Variant> &fd_props)
         : version(std::nullopt), features(std::nullopt) {
       if (fd_props.count("Version") == 1) {
-        version = fd_props.at("Version");
+        version = fd_props.at("Version").get<uint16_t>();
       }
       if (fd_props.count("Features") == 1) {
-        features = fd_props.at("Features");
+        features = fd_props.at("Features").get<uint16_t>();
       }
     }
 

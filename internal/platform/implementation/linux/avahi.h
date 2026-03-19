@@ -67,7 +67,7 @@ class Server final
     const std::string& host, const int32_t& aprotocol,
     const std::string& address, const uint16_t& port,
     const std::vector<std::vector<uint8_t>>& txt, const uint32_t& flags,
-    const sdbus::Error* error) override;
+    std::optional<sdbus::Error> error) override;
 };
 
 class EntryGroup final

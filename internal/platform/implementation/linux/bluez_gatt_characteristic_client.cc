@@ -22,14 +22,15 @@ namespace nearby {
 namespace linux {
 namespace bluez {
 void SubscribedGattCharacteristicClient::onPropertiesChanged(
-    const std::string& interfaceName,
-    const std::map<std::string, sdbus::Variant>& changedProperties,
-    const std::vector<std::string>& invalidatedProperties) {
+    const sdbus::InterfaceName& interfaceName,
+    const std::map<sdbus::PropertyName, sdbus::Variant>& changedProperties,
+    const std::vector<sdbus::PropertyName>& invalidatedProperties) {
   if (interfaceName != org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME)
     return;
 
-  if (changedProperties.count("Value") == 1) {
-    std::vector<uint8_t> value_bytes = changedProperties.at("Value");
+  if (changedProperties.count(sdbus::PropertyName("Value")) == 1) {
+    std::vector<uint8_t> value_bytes = changedProperties.at(sdbus::PropertyName("Value"))
+                                                        .get<std::vector<uint8_t>>();
     if (notify_callback_ != nullptr) {
       auto value = std::string(value_bytes.cbegin(), value_bytes.cend());
       notify_callback_(value);

@@ -120,10 +120,10 @@ bool GattClient::WriteCharacteristic(
         try {
           chr->WriteValue(
               value_bytes,
-              {{"type",
-                type == api::ble::GattClient::WriteType::kWithResponse
-                    ? "request"
-                    : "command"}});
+              {{sdbus::PropertyName("type"),
+                    sdbus::Variant(type == api::ble::GattClient::WriteType::kWithResponse
+                                       ? "request"
+                                       : "command")}});
           return true;
         } catch (const sdbus::Error &e) {
           DBUS_LOG_METHOD_CALL_ERROR(chr, "WriteValue", e);
@@ -199,7 +199,7 @@ void BluezGattDiscovery::Shutdown() {
 
 bool BluezGattDiscovery::InitializeKnownServices() {
   std::map<sdbus::ObjectPath,
-           std::map<std::string, std::map<std::string, sdbus::Variant>>>
+           std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
       objects;
   try {
     objects = GetManagedObjects();
@@ -213,16 +213,16 @@ bool BluezGattDiscovery::InitializeKnownServices() {
   auto chr_it = std::find_if(
       objects.cbegin(), objects.cend(),
       [](std::pair<sdbus::ObjectPath,
-                   std::map<std::string, std::map<std::string, sdbus::Variant>>>
+                   std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
              object) {
         return object.second.count(
-                   org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME) == 1;
+                   sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME)) == 1;
       });
 
 for (; chr_it != objects.cend(); ++chr_it) {
   const auto& [path, ifaces] = *chr_it;
 
-  auto iface_it = ifaces.find(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME);
+  auto iface_it = ifaces.find(sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME));
   if (iface_it == ifaces.end()) {
     // Not a GattCharacteristic1 object (or interfaces map incomplete) -> skip
     continue;
@@ -343,10 +343,11 @@ BluezGattDiscovery::GetSubscribedCharacteristic(
 std::optional<std::tuple<Uuid, Uuid, sdbus::ObjectPath>>
 BluezGattDiscovery::characteristicProperties(
     const sdbus::ObjectPath &char_path,
-    const std::map<std::string, sdbus::Variant> &properties) {
+    const std::map<sdbus::PropertyName, sdbus::Variant> &properties) {
   mutex_.AssertHeld();
 
-  const std::string &chr_uuid_str = properties.at("UUID");
+  const std::string &chr_uuid_str =
+      properties.at(sdbus::PropertyName("UUID")).get<std::string>();
   auto chr_uuid = UuidFromString(chr_uuid_str);
   if (!chr_uuid.has_value()) {
     LOG(ERROR) << ": Couldn't parse UUID '" << chr_uuid_str
@@ -354,7 +355,8 @@ BluezGattDiscovery::characteristicProperties(
     return std::nullopt;
   }
 
-  const sdbus::ObjectPath &service_path = properties.at("Service");
+  const sdbus::ObjectPath &service_path =
+      properties.at(sdbus::PropertyName("Service")).get<sdbus::ObjectPath>();
   if (cached_services_.count(service_path) == 0) {
     cached_services_.emplace(
         service_path, std::make_unique<GattServiceClient>(system_bus_, service_path));
@@ -403,11 +405,11 @@ void BluezGattDiscovery::onInterfacesAdded(
                    std::map<sdbus::PropertyName, sdbus::Variant>>
         &interfacesAndProperties) {
   if (interfacesAndProperties.count(
-          org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME) == 0)
+          sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME)) == 0)
     return;
 
   const auto &properties = interfacesAndProperties.at(
-      org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME);
+      sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME));
 
   absl::MutexLock lock(&mutex_);
   auto maybe_props = characteristicProperties(objectPath, properties);

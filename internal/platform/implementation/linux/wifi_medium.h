@@ -101,9 +101,9 @@ class NetworkManagerWifiMedium
 
  protected:
   void onPropertiesChanged(
-      const std::string &interfaceName,
-      const std::map<std::string, sdbus::Variant> &changedProperties,
-      const std::vector<std::string> &invalidatedProperties) override;
+      const sdbus::InterfaceName &interfaceName,
+      const std::map<sdbus::PropertyName, sdbus::Variant> &changedProperties,
+      const std::vector<sdbus::PropertyName> &invalidatedProperties) override;
 
   void onAccessPointAdded(const sdbus::ObjectPath &access_point) override
       ABSL_LOCKS_EXCLUDED(known_access_points_lock_) {

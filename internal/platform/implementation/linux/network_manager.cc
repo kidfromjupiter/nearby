@@ -26,7 +26,7 @@ ObjectManager::GetActiveConnectionForAccessPoint(
     const sdbus::ObjectPath &access_point,
     const sdbus::ObjectPath &device_path) {
   std::map<sdbus::ObjectPath,
-           std::map<std::string, std::map<std::string, sdbus::Variant>>>
+           std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
       objects;
   try {
     objects = GetManagedObjects();
@@ -38,13 +38,13 @@ ObjectManager::GetActiveConnectionForAccessPoint(
   for (auto &[object_path, interfaces] : objects) {
     if (object_path.find("/org/freedesktop/NetworkManager/ActiveConnection/") ==
         0) {
-      if (interfaces.count(org::freedesktop::NetworkManager::Connection::
-                               Active_proxy::INTERFACE_NAME) == 1) {
-        auto props = interfaces[org::freedesktop::NetworkManager::Connection::
-                                    Active_proxy::INTERFACE_NAME];
-        sdbus::ObjectPath specific_object = props["SpecificObject"];
+      if (interfaces.count(sdbus::InterfaceName(org::freedesktop::NetworkManager::Connection::
+                               Active_proxy::INTERFACE_NAME)) == 1) {
+        auto props = interfaces[sdbus::InterfaceName(org::freedesktop::NetworkManager::Connection::
+                                    Active_proxy::INTERFACE_NAME)];
+        sdbus::ObjectPath specific_object = props[sdbus::PropertyName("SpecificObject")].get<sdbus::ObjectPath>();
         if (specific_object == access_point) {
-          std::vector<sdbus::ObjectPath> devices = props["Devices"];
+          std::vector<sdbus::ObjectPath> devices = props[sdbus::PropertyName("Devices")].get<std::vector<sdbus::ObjectPath>>();
           for (auto &path : devices) {
             if (path == device_path) {
               return std::make_unique<ActiveConnection>(
@@ -61,7 +61,7 @@ ObjectManager::GetActiveConnectionForAccessPoint(
 std::unique_ptr<IP4Config> ObjectManager::GetIp4Config(
     const sdbus::ObjectPath &active_connection) {
   std::map<sdbus::ObjectPath,
-           std::map<std::string, std::map<std::string, sdbus::Variant>>>
+           std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
       objects;
   try {
     objects = GetManagedObjects();
@@ -73,13 +73,13 @@ std::unique_ptr<IP4Config> ObjectManager::GetIp4Config(
   for (auto &[object_path, interfaces] : objects) {
     if (object_path.find("/org/freedesktop/NetworkManager/ActiveConnection/",
                          0) == 0) {
-      if (interfaces.count(org::freedesktop::NetworkManager::Connection::
-                               Active_proxy::INTERFACE_NAME) == 1) {
-        auto props = interfaces[org::freedesktop::NetworkManager::Connection::
-                                    Active_proxy::INTERFACE_NAME];
-        sdbus::ObjectPath specific_object = props["SpecificObject"];
+      if (interfaces.count(sdbus::InterfaceName(org::freedesktop::NetworkManager::Connection::
+                               Active_proxy::INTERFACE_NAME)) == 1) {
+        auto props = interfaces[sdbus::InterfaceName(org::freedesktop::NetworkManager::Connection::
+                                    Active_proxy::INTERFACE_NAME)];
+        sdbus::ObjectPath specific_object = props[sdbus::PropertyName("SpecificObject")].get<sdbus::ObjectPath>();
         if (specific_object == active_connection) {
-          sdbus::ObjectPath ip4config = props["Ip4Config"];
+          sdbus::ObjectPath ip4config = sdbus::ObjectPath(props[sdbus::MemberName("Ip4Config")]);
           return std::make_unique<IP4Config>(system_bus_, ip4config);
         }
       }

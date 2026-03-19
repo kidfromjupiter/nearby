@@ -41,7 +41,7 @@ class BluetoothPairing final : public api::BluetoothPairing {
   bool IsPaired() override;
 
  private:
-  void pairing_reply_handler(const sdbus::Error *e);
+  void pairing_reply_handler(std::optional<sdbus::Error> e);
 
   sdbus::PendingAsyncCall pair_async_call_;
 

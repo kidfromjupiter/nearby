@@ -51,7 +51,7 @@ LEAdvertisement::LEAdvertisement(
     }
     // LOG(INFO)<< __func__ << ": " << uuid_string;
     // LOG(INFO)<< __func__ << ": " << BytesToHexString(data_bytes);
-    service_data_.insert({uuid_string, std::move(data_bytes)});
+    service_data_.insert({uuid_string, std::move(sdbus::Variant(data_bytes))});
     // service_data_.insert({"0000FE2C-0000-1000-8000-00805F9B34FB", std::move(data_bytes)});
   }
 

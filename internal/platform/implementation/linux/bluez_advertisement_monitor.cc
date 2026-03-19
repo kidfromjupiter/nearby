@@ -56,7 +56,7 @@ void AdvertisementMonitor::DeviceFound(const sdbus::ObjectPath &device) {
       continue;
     }
 
-    std::vector<uint8_t> bytes = data;
+    std::vector<uint8_t> bytes = data.get<std::vector<uint8_t>>();
     adv_data.service_data.emplace(*uuid,
                                   std::string(bytes.begin(), bytes.end()));
   }

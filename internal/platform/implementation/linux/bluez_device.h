@@ -35,7 +35,8 @@ class Device : public sdbus::ProxyInterfaces<org::bluez::Device1_proxy> {
   }
   ~Device() { unregisterProxy(); }
 
-  void SetPairReplyCallback(absl::AnyInvocable<void(const sdbus::Error *)> cb)
+  void SetPairReplyCallback(
+      absl::AnyInvocable<void(std::optional<sdbus::Error>)> cb)
       ABSL_LOCKS_EXCLUDED(pair_callback_lock_) {
     absl::MutexLock l(&pair_callback_lock_);
     on_pair_reply_cb_ = std::move(cb);
@@ -47,16 +48,16 @@ class Device : public sdbus::ProxyInterfaces<org::bluez::Device1_proxy> {
   }
 
  protected:
-  void onPairReply(const sdbus::Error *error) override
+  void onPairReply(std::optional<sdbus::Error> error) override
       ABSL_LOCKS_EXCLUDED(pair_callback_lock_) {
     absl::ReaderMutexLock l(&pair_callback_lock_);
-    if (on_pair_reply_cb_ != nullptr) on_pair_reply_cb_(error);
+    if (on_pair_reply_cb_ != nullptr) on_pair_reply_cb_(std::move(error));
   };
 
  private:
   std::shared_ptr<sdbus::IConnection> system_bus;
   absl::Mutex pair_callback_lock_;
-  absl::AnyInvocable<void(const sdbus::Error *)> on_pair_reply_cb_
+  absl::AnyInvocable<void(std::optional<sdbus::Error>)> on_pair_reply_cb_
       ABSL_GUARDED_BY(pair_callback_lock_) = nullptr;
 };
 }  // namespace bluez

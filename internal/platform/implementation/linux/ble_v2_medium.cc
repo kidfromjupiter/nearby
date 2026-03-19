@@ -72,7 +72,7 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
-    root_object_manager_(std::make_unique<RootObjectManager>(*system_bus_, "/com/google/nearby/medium/ble/advertisement/monitor")),
+    root_object_manager_(std::make_unique<RootObjectManager>(*system_bus_, sdbus::ObjectPath("/com/google/nearby/medium/ble/advertisement/monitor"))),
     adv_monitor_manager_(
       bluez::AdvertisementMonitorManager::
       DiscoverAdvertisementMonitorManager(*system_bus_, adapter_)),
@@ -268,7 +268,7 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
   try {
     // why is this emitted?
     monitor->emitInterfacesAddedSignal(
-      {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+      {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
 
     // adv_monitor_manager_ -> RegisterMonitor(monitor -> getObject().getObjectPath());
     LOG(INFO)<< __func__ << ": Registered advertisement monitor with path " << monitor -> getObject().getObjectPath();
@@ -289,7 +289,7 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
     device_watcher = nullptr;
     try {
       monitor->emitInterfacesRemovedSignal(
-        {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+        {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
     } catch (const sdbus::Error &e) {
       LOG(ERROR)
           << __func__
@@ -338,7 +338,7 @@ bool BleV2Medium::StopScanning() {
     LOG(INFO) << __func__ << ": Removing advertising monitor "
                          << adv_monitor->getObject().getObjectPath();
     adv_monitor->emitInterfacesRemovedSignal(
-      {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+      {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
   }
   active_adv_monitors_.erase(monitor_it);
   cur_monitored_service_uuid_ = std::nullopt;
@@ -366,7 +366,7 @@ bool BleV2Medium::StopScanning() {
       std::move(callback));
     try {
       monitor->emitInterfacesAddedSignal(
-        {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+        {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
     } catch (const sdbus::Error &e) {
       LOG(ERROR)
         << __func__
@@ -384,7 +384,7 @@ bool BleV2Medium::StopScanning() {
                        << adapter_.GetObjectPath();
       try {
         monitor->emitInterfacesRemovedSignal(
-          {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+          {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
       } catch (const sdbus::Error &e) {
         LOG(ERROR)
           << __func__
@@ -412,7 +412,7 @@ bool BleV2Medium::StopScanning() {
         auto &[monitor, watcher] = active_adv_monitors_[service_uuid];
         try {
           monitor->emitInterfacesRemovedSignal(
-            {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
+            {sdbus::InterfaceName(org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME)});
         } catch (const sdbus::Error &e) {
           LOG(ERROR)
               << __func__
@@ -497,8 +497,8 @@ bool BleV2Medium::IsExtendedAdvertisementsAvailable() {
 
 bool BleV2Medium::StartLEDiscovery() {
   std::map<std::string, sdbus::Variant> filter;
-  filter["Transport"] = "auto";
-  filter["DuplicateData"] = true;
+  filter["Transport"] = sdbus::Variant("auto");
+  filter["DuplicateData"] = sdbus::Variant(true);
   auto &adapter = adapter_.GetBluezAdapterObject();
 
   try {

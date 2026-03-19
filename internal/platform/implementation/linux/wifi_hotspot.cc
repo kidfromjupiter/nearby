@@ -192,40 +192,42 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
         connection_settings{
             {
                 "connection",
-                {{"uuid", *connection_id},
-                 {"id", "Google Nearby Hotspot"},
-                 {"type", "802-11-wireless"},
-                 {"zone", "Public"}},
+                {{"uuid", sdbus::Variant(*connection_id)},
+                 {"id", sdbus::Variant("Google Nearby Hotspot")},
+                 {"type", sdbus::Variant("802-11-wireless")},
+                 {"zone", sdbus::Variant("Public")}},
             },
             {"802-11-wireless",
-             {{"assigned-mac-address", "random"},
-              {"ap-isolation", networkmanager::constants::kNMTernaryFalse},
-              {"mode", "ap"},
-              {"band", selected_band},
-              {"channel", selected_channel},
-              {"ssid", std::vector<uint8_t>(ssid.begin(), ssid.end())},
-              {"security", "802-11-wireless-security"}}},
+             {{"assigned-mac-address", sdbus::Variant("random")},
+              {"ap-isolation", sdbus::Variant(networkmanager::constants::kNMTernaryFalse)},
+              {"mode", sdbus::Variant("ap")},
+              {"band", sdbus::Variant(selected_band)},
+              {"channel", sdbus::Variant(selected_channel)},
+              {"ssid", sdbus::Variant(std::vector<uint8_t>(ssid.begin(), ssid.end()))},
+              {"security", sdbus::Variant("802-11-wireless-security")}}},
             {"802-11-wireless-security",
-             {{"pmf",
-               networkmanager::constants::setting::kWirelessSecurityPMFDisable},
-              {"key-mgmt", "wpa-psk"},
-              {"psk", password}}},
-            {"ipv4", {{"method", "shared"}}},
+             {{"pmf", sdbus::Variant(networkmanager::constants::setting::kWirelessSecurityPMFDisable)},
+              {"key-mgmt", sdbus::Variant("wpa-psk")},
+              {"psk", sdbus::Variant(password)}}},
+            {"ipv4", {{"method", sdbus::Variant("shared")}}},
             {"ipv6",
              {
-                 {"addr-gen-mode", networkmanager::constants::setting::
-                                       kIP6ConfigAddrGenModeStablePrivacy},
-                 {"method", "shared"},
+                 {"addr-gen-mode",
+                  sdbus::Variant(networkmanager::constants::setting::kIP6ConfigAddrGenModeStablePrivacy)},
+                 {"method", sdbus::Variant("shared")},
              }}};
     if (include_channel_width) {
       connection_settings["802-11-wireless"]["channel-width"] =
-          fallback_channel_width;
+          sdbus::Variant(fallback_channel_width);
     }
     try {
       auto [path, active_path, result] =
           network_manager_->AddAndActivateConnection2(
-              connection_settings, wireless_device_->getProxy().getObjectPath(), "/",
-              {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
+              connection_settings,
+              wireless_device_->getProxy().getObjectPath(),
+              sdbus::ObjectPath("/"),
+              {{"persist", sdbus::Variant("volatile")},
+               {"bind-activation", sdbus::Variant("dbus-client")}});
       active_conn = std::make_unique<networkmanager::ActiveConnection>(
           system_bus_, active_path);
       break;

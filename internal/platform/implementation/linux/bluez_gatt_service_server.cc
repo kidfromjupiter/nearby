@@ -36,7 +36,7 @@ bool GattServiceServer::AddCharacteristic(
           server_cb_, devices_);
   try {
     chr->emitInterfacesAddedSignal(
-        {org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME});
+        {sdbus::InterfaceName(org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME)});
   } catch (const sdbus::Error &e) {
     LOG(ERROR)
         << __func__

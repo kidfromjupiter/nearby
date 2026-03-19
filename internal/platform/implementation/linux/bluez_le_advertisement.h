@@ -73,9 +73,9 @@ class LEAdvertisement final
   std::map<std::string, sdbus::Variant> ServiceData() override {
     return service_data_;
   }
-  std::map<std::string, sdbus::Variant> ScanResponseServiceData() override {
-    return {};
-  }
+  //std::map<std::string, sdbus::Variant> ScanResponseServiceData() override {
+  //  return {};
+  //}
   std::vector<std::string> Includes() override {
     return {};
   }

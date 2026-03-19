@@ -41,9 +41,9 @@ class GattCharacteristicClient
 
  protected:
   void onPropertiesChanged(
-      const std::string& interfaceName,
-      const std::map<std::string, sdbus::Variant>& changedProperties,
-      const std::vector<std::string>& invalidatedProperties) override {}
+      const sdbus::InterfaceName& interfaceName,
+      const std::map<sdbus::PropertyName, sdbus::Variant>& changedProperties,
+      const std::vector<sdbus::PropertyName>& invalidatedProperties) override {}
 
   std::shared_ptr<sdbus::IConnection> system_bus_;
 };
@@ -58,9 +58,9 @@ class SubscribedGattCharacteristicClient : public GattCharacteristicClient {
 
  protected:
   void onPropertiesChanged(
-      const std::string& interfaceName,
-      const std::map<std::string, sdbus::Variant>& changedProperties,
-      const std::vector<std::string>& invalidatedProperties) override;
+      const sdbus::InterfaceName& interfaceName,
+      const std::map<sdbus::PropertyName, sdbus::Variant>& changedProperties,
+      const std::vector<sdbus::PropertyName>& invalidatedProperties) override;
 
  private:
   absl::AnyInvocable<void(absl::string_view value)> notify_callback_;

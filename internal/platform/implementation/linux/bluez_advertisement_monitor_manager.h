@@ -56,7 +56,7 @@ class AdvertisementMonitorManager final
       const ::nearby::linux::BluetoothAdapter &adapter) {
     bluez::BluezObjectManager manager(system_bus);
     std::map<sdbus::ObjectPath,
-             std::map<std::string, std::map<std::string, sdbus::Variant>>>
+             std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
         objects;
     try {
       objects = manager.GetManagedObjects();
@@ -71,7 +71,7 @@ class AdvertisementMonitorManager final
     }
 
     if (objects[adapter.GetObjectPath()].count(
-            org::bluez::AdvertisementMonitorManager1_proxy::INTERFACE_NAME) ==
+            sdbus::InterfaceName(org::bluez::AdvertisementMonitorManager1_proxy::INTERFACE_NAME)) ==
         0) {
       LOG(ERROR)
           << __func__ << ": Adapter " << adapter.GetObjectPath()

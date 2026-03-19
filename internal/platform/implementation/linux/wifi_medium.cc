@@ -43,7 +43,7 @@ api::WifiCapability &NetworkManagerWifiMedium::GetCapability() {
     capability_.supports_6_ghz = (cap_mask & 0x00008000) != 0;
     capability_.support_wifi_direct = true;
   } catch (const sdbus::Error &e) {
-    DBUS_LOG_PROPERTY_GET_ERROR(&getProxy(), "WirelessCapabilities", e);
+    DBUS_LOG_PROPERTY_GET_ERROR(this, "WirelessCapabilities", e);
   }
 
   return capability_;
@@ -93,17 +93,17 @@ api::WifiInformation &NetworkManagerWifiMedium::GetInformation() {
 }
 
 void NetworkManagerWifiMedium::onPropertiesChanged(
-    const std::string &interfaceName,
-    const std::map<std::string, sdbus::Variant> &changedProperties,
-    const std::vector<std::string> &invalidatedProperties) {
+    const sdbus::InterfaceName &interfaceName,
+    const std::map<sdbus::PropertyName, sdbus::Variant> &changedProperties,
+    const std::vector<sdbus::PropertyName> &invalidatedProperties) {
   if (interfaceName != org::freedesktop::NetworkManager::Device::
                            Wireless_proxy::INTERFACE_NAME) {
     return;
   }
 
-  if (changedProperties.count("LastScan") == 1) {
+  if (changedProperties.count(sdbus::PropertyName("LastScan")) == 1) {
     absl::MutexLock l(&last_scan_lock_);
-    last_scan_ = changedProperties.at("LastScan");
+    last_scan_ = changedProperties.at(sdbus::PropertyName("LastScan")).get<int64_t>();
   }
 }
 
@@ -148,7 +148,7 @@ NetworkManagerWifiMedium::SearchBySSID(absl::string_view ssid,
   // Otherwise, request a Scan first and wait for it to finish.
   try {
     RequestScan(
-        {{"ssids", std::vector<std::vector<std::uint8_t>>{ssid_bytes}}});
+        {{"ssids", sdbus::Variant(std::vector<std::vector<std::uint8_t>>{ssid_bytes})}});
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(this, "RequestScan", e);
   }
@@ -211,33 +211,33 @@ NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::Connect
       connection_settings{
           {"connection",
            {
-               {"uuid", *connection_id},
-               {"autoconnect", true},
-               {"id", std::string(ssid)},
-               {"type", "802-11-wireless"},
-               {"zone", "Public"},
+               {"uuid", sdbus::Variant(*connection_id)},
+               {"autoconnect", sdbus::Variant(true)},
+               {"id", sdbus::Variant(std::string(ssid))},
+               {"type", sdbus::Variant(std::string("802-11-wireless"))},
+               {"zone", sdbus::Variant(std::string("Public"))},
            }},
           {"802-11-wireless",
            {
-               {"ssid", std::vector<uint8_t>(ssid.begin(), ssid.end())},
-               {"mode", "infrastructure"},
-               {"security", "802-11-wireless-security"},
-               {"assigned-mac-address", "random"},
+               {"ssid", sdbus::Variant(std::vector<uint8_t>(ssid.begin(), ssid.end()))},
+               {"mode", sdbus::Variant(std::string("infrastructure"))},
+               {"security", sdbus::Variant(std::string("802-11-wireless-security"))},
+               {"assigned-mac-address", sdbus::Variant(std::string("random"))},
            }},
-          {"802-11-wireless-security", {{"key-mgmt", key_mgmt}}}};
+          {"802-11-wireless-security", {{"key-mgmt", sdbus::Variant(key_mgmt)}}}};
   if (!password.empty()) {
     connection_settings["802-11-wireless-security"]["psk"] =
-        std::string(password);
+        sdbus::Variant(std::string(password));
   }
   if (auth_alg.has_value()) {
-    connection_settings["802-11-wireless-security"]["auth-alg"] = *auth_alg;
+    connection_settings["802-11-wireless-security"]["auth-alg"] = sdbus::Variant(*auth_alg);
   }
 
   sdbus::ObjectPath connection_path, active_conn_path;
   try {
     auto [cp, acp, _r] = network_manager_->AddAndActivateConnection2(
         connection_settings, getProxy().getObjectPath(), ap->getProxy().getObjectPath(),
-        {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
+        {{"persist", sdbus::Variant(std::string("volatile"))}, {"bind-activation", sdbus::Variant(std::string("dbus-client"))}});
     connection_path = std::move(cp);
     active_conn_path = std::move(acp);
   } catch (const sdbus::Error &e) {

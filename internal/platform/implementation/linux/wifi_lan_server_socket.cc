@@ -63,7 +63,7 @@ std::string WifiLanServerSocket::GetIPAddress() const {
       }
 
       if (address_data.size() > 0) {
-        std::string ip_address = address_data[0]["address"];
+        std::string ip_address = address_data[0]["address"].get<std::string>();
         struct in_addr addr {};
         if (inet_aton(ip_address.c_str(), &addr) == 0) {
           LOG(ERROR) << __func__

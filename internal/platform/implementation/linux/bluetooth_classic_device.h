@@ -108,7 +108,8 @@ class BluetoothDevice : public api::BluetoothDevice {
     }
   }
 
-  void SetPairReplyCallback(absl::AnyInvocable<void(const sdbus::Error *)> cb) {
+  void SetPairReplyCallback(
+      absl::AnyInvocable<void(std::optional<sdbus::Error>)> cb) {
     auto device = device_;
     if (device) device->SetPairReplyCallback(std::move(cb));
   }
@@ -137,7 +138,10 @@ class MonitoredBluetoothDevice final
  public:
   using sdbus::ProxyInterfaces<sdbus::Properties_proxy>::registerProxy;
   using sdbus::ProxyInterfaces<sdbus::Properties_proxy>::unregisterProxy;
-  using sdbus::ProxyInterfaces<sdbus::Properties_proxy>::getObjectPath;
+
+  sdbus::ObjectPath getObjectPath() const {
+    return getProxy().getObjectPath();
+  }
 
   MonitoredBluetoothDevice(const MonitoredBluetoothDevice &) = delete;
   MonitoredBluetoothDevice(MonitoredBluetoothDevice &&) = delete;
@@ -159,9 +163,9 @@ class MonitoredBluetoothDevice final
 
  protected:
   void onPropertiesChanged(
-      const std::string &interfaceName,
-      const std::map<std::string, sdbus::Variant> &changedProperties,
-      const std::vector<std::string> &invalidatedProperties) override;
+      const sdbus::InterfaceName &interfaceName,
+      const std::map<sdbus::PropertyName, sdbus::Variant> &changedProperties,
+      const std::vector<sdbus::PropertyName> &invalidatedProperties) override;
 
  private:
   std::shared_ptr<sdbus::IConnection> system_bus_;

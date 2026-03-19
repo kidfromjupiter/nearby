@@ -58,7 +58,7 @@ bool BluetoothClassicMedium::StartDiscovery(
       observers_);
 
   std::map<std::string, sdbus::Variant> filter;
-  filter["Transport"] = "auto";
+  filter["Transport"] = sdbus::Variant("auto");
   auto &adapter = adapter_.GetBluezAdapterObject();
 
   try {

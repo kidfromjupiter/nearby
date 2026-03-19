@@ -57,8 +57,8 @@ absl::Status GattCharacteristicServer::NotifyChanged(
   }
 
   try {
-    emitPropertiesChangedSignal(GattCharacteristic1_adaptor::INTERFACE_NAME,
-                                {"Value"});
+    emitPropertiesChangedSignal(sdbus::InterfaceName(GattCharacteristic1_adaptor::INTERFACE_NAME),
+                                {sdbus::PropertyName("Value")});
     return absl::OkStatus();
   } catch (const sdbus::Error &e) {
     LOG(ERROR) << __func__
@@ -84,13 +84,13 @@ void GattCharacteristicServer::ReadValue(
     }
   }
 
-  uint16_t offset = options["offset"];
-  sdbus::ObjectPath device_path = options["device"];
+  uint16_t offset = options["offset"].get<uint16_t>();
+  sdbus::ObjectPath device_path = options["device"].get<sdbus::ObjectPath>();
 
   auto device = devices_->get_device_by_path(device_path);
   if (device == nullptr) {
     result.returnError(
-        sdbus::Error("org.bluez.Error.NotAuthorized", "device does not exist"));
+        sdbus::Error(sdbus::Error::Name("org.bluez.Error.NotAuthorized"), "device does not exist"));
     return;
   }
   auto characteristic = characteristic_;
@@ -132,16 +132,16 @@ void GattCharacteristicServer::ReadValue(
 void GattCharacteristicServer::WriteValue(
     sdbus::Result<> &&result, std::vector<uint8_t> value,
     std::map<std::string, sdbus::Variant> options) {
-  uint16_t offset = options["offset"];
-  sdbus::ObjectPath device_path = options["device"];
+  uint16_t offset = options["offset"].get<uint16_t>();
+  sdbus::ObjectPath device_path = options["device"].get<sdbus::ObjectPath>();
 
   auto device = devices_->get_device_by_path(device_path);
   if (device == nullptr) {
     result.returnError(
-        sdbus::Error("org.bluez.Error.NotAuthorized", "device does not exist"));
+        sdbus::Error(sdbus::Error::Name("org.bluez.Error.NotAuthorized"), "device does not exist"));
     return;
   }
-  std::string type = options["type"];
+  std::string type = options["type"].get<std::string>();
 
   std::string data(value.begin(), value.end());
   auto characteristic = characteristic_;
@@ -183,7 +183,7 @@ void GattCharacteristicServer::StartNotify() {
       notifying_ = true;
     }
   } else {
-    throw(sdbus::Error("org.bluez.Error.NotSupported"));
+    throw(sdbus::Error(sdbus::Error::Name("org.bluez.Error.NotSupported")));
   }
 }
 
@@ -198,7 +198,7 @@ void GattCharacteristicServer::StopNotify() {
       notifying_ = false;
     }
   } else {
-    throw(sdbus::Error("org.bluez.Error.Failed"));
+    throw(sdbus::Error(sdbus::Error::Name("org.bluez.Error.Failed")));
   }
 }
 

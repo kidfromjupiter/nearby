@@ -151,7 +151,8 @@ bool BluetoothDevice::ConnectToProfile(absl::string_view service_uuid) {
     std::shared_ptr<bluez::Device> device,
     ObserverList<api::BluetoothClassicMedium::Observer> &observers)
     : BluetoothDevice(device),
-      ProxyInterfaces<sdbus::Properties_proxy>(*system_bus, bluez::SERVICE_DEST,
+      ProxyInterfaces<sdbus::Properties_proxy>(*system_bus,
+                                               sdbus::ServiceName(bluez::SERVICE_DEST),
                                                device->getProxy().getObjectPath()),
       system_bus_(std::move(system_bus)),
       observers_(observers) {
@@ -159,9 +160,9 @@ bool BluetoothDevice::ConnectToProfile(absl::string_view service_uuid) {
 }
 
 void MonitoredBluetoothDevice::onPropertiesChanged(
-    const std::string &interfaceName,
-    const std::map<std::string, sdbus::Variant> &changedProperties,
-    const std::vector<std::string> &invalidatedProperties) {
+    const sdbus::InterfaceName &interfaceName,
+    const std::map<sdbus::PropertyName, sdbus::Variant> &changedProperties,
+    const std::vector<sdbus::PropertyName> &invalidatedProperties) {
   if (interfaceName != bluez::DEVICE_INTERFACE) {
     return;
   }
@@ -172,7 +173,7 @@ void MonitoredBluetoothDevice::onPropertiesChanged(
     if (it->first == bluez::DEVICE_PROP_ADDRESS) {
       LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                            << ": Notifying observers about address change";
-      std::string address = it->second;
+      std::string address = it->second.get<std::string>();
       for (const auto &observer : observers_.GetObservers()) {
         observer->DeviceAddressChanged(*this, address);
       }
@@ -181,17 +182,17 @@ void MonitoredBluetoothDevice::onPropertiesChanged(
       LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                            << "Notifying observers about paired status change.";
       for (const auto &observer : observers_.GetObservers()) {
-        observer->DevicePairedChanged(*this, it->second);
+        observer->DevicePairedChanged(*this, it->second.get<bool>());
       }
     } else if (it->first == bluez::DEVICE_PROP_CONNECTED) {
       LOG(INFO)
           << __func__ << ": " << getProxy().getObjectPath()
           << "Notifying observers about connected status change";
       for (const auto &observer : observers_.GetObservers()) {
-        observer->DeviceConnectedStateChanged(*this, it->second);
+        observer->DeviceConnectedStateChanged(*this, it->second.get<bool>());
       }
     } else if ( it -> first == "ServicesResolved"){
-      LOG(INFO) << ": ServicesResolved :" << std::string(it->second);
+      LOG(INFO) << ": ServicesResolved :" << it->second.get<std::string>();
   }else if (it->first == bluez::DEVICE_NAME) {
       auto callback = GetDiscoveryCallback();
       if (callback != nullptr && callback->device_name_changed_cb != nullptr)

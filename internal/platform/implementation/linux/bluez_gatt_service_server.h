@@ -66,7 +66,7 @@ class GattServiceServer final
                            << characteristic->getObject().getObjectPath();
       try {
         characteristic->emitInterfacesRemovedSignal(
-            {org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME});
+            {sdbus::InterfaceName(org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME)});
       } catch (const sdbus::Error &e) {
         LOG(ERROR)
             << __func__
@@ -90,7 +90,7 @@ class GattServiceServer final
   // Properties
   std::string UUID() override { return uuid_; }
   bool Primary() override { return primary_; }
-  sdbus::ObjectPath Device() override { return "/"; }
+  sdbus::ObjectPath Device() override { return sdbus::ObjectPath("/"); }
   std::vector<sdbus::ObjectPath> Includes() override { return {}; }
 
   absl::Mutex characterstics_mutex_;

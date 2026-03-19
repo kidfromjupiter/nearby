@@ -224,7 +224,7 @@ ImplementationPlatform::CreateBluetoothAdapter() {
   try {
     auto interfaces = manager.GetManagedObjects();
     for (auto &[object, properties] : interfaces) {
-      if (properties.count(org::bluez::Adapter1_proxy::INTERFACE_NAME) == 1) {
+      if (properties.count(sdbus::InterfaceName(org::bluez::Adapter1_proxy::INTERFACE_NAME)) == 1) {
         LOG(INFO) << __func__ << ": found bluetooth adapter " << object;
         return std::make_unique<linux::BluetoothAdapter>(system_bus, object);
       }
@@ -273,7 +273,7 @@ static std::unique_ptr<linux::NetworkManagerWifiMedium> createWifiMedium(
   auto manager = linux::networkmanager::ObjectManager(nm->GetConnection());
 
   std::map<sdbus::ObjectPath,
-           std::map<std::string, std::map<std::string, sdbus::Variant>>>
+           std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
       objects;
   try {
     objects = manager.GetManagedObjects();
@@ -285,8 +285,8 @@ static std::unique_ptr<linux::NetworkManagerWifiMedium> createWifiMedium(
   for (auto &device_path : device_paths) {
     if (objects.count(device_path) == 1) {
       auto device = objects[device_path];
-      if (device.count(org::freedesktop::NetworkManager::Device::
-                           Wireless_proxy::INTERFACE_NAME) == 1) {
+      if (device.count(sdbus::InterfaceName(org::freedesktop::NetworkManager::Device::
+                           Wireless_proxy::INTERFACE_NAME)) == 1) {
         LOG(INFO) << __func__
                           << ": Found a wireless device at :" << device_path;
         return std::make_unique<linux::NetworkManagerWifiMedium>(nm,

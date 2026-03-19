@@ -96,7 +96,7 @@ std::vector<std::string> ActiveConnection::GetIP4Addresses() {
   std::vector<std::string> ip4addresses;
   for (auto &data : address_data) {
     if (data.count("address") == 1) {
-      ip4addresses.push_back(data["address"]);
+      ip4addresses.push_back(data["address"].get<std::string>());
     }
   }
   return ip4addresses;

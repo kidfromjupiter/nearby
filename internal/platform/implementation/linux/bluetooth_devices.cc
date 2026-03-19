@@ -93,7 +93,7 @@ std::shared_ptr<BluetoothDevice> BluetoothDevices::get_device_by_address(
     const MacAddress &addr) {
   auto device_object_path =
       bluez::device_object_path(adapter_object_path_, addr.ToString());
-  return get_device_by_path(device_object_path);
+  return get_device_by_path(sdbus::ObjectPath(device_object_path));
 }
 
 void BluetoothDevices::remove_device_by_path(
@@ -152,7 +152,7 @@ void DeviceWatcher::onInterfacesAdded(
     return;
   }
 
-  if (interfacesAndProperties.count(org::bluez::Device1_proxy::INTERFACE_NAME) ==
+  if (interfacesAndProperties.count(sdbus::InterfaceName(org::bluez::Device1_proxy::INTERFACE_NAME)) ==
       0)
     return;
 
@@ -181,16 +181,16 @@ void DeviceWatcher::onInterfacesRemoved(
   auto removed_device_it = std::find(interfaces.begin(), interfaces.end(),
                                      org::bluez::Device1_proxy::INTERFACE_NAME);
   if (removed_device_it != interfaces.end()) {
-    auto device = devices_->get_device_by_path(object);
+    auto device = devices_->get_device_by_path(objectPath);
     if (device == nullptr) {
       LOG(WARNING) << __func__
                            << ": received InterfacesRemoved for a device "
                               "we don't know about: "
-                           << object;
+                           << objectPath;
       return;
     }
 
-    LOG(INFO) << __func__ << ": Device " << object
+    LOG(INFO) << __func__ << ": Device " << objectPath
                       << " has been removed";
     if (discovery_cb_ != nullptr && discovery_cb_->device_lost_cb != nullptr) {
       discovery_cb_->device_lost_cb(*device);
@@ -200,16 +200,16 @@ void DeviceWatcher::onInterfacesRemoved(
       for (const auto &observer : observers_->GetObservers()) {
         observer->DeviceRemoved(*device);
       }
-      devices_->remove_device_by_path(object);
+      devices_->remove_device_by_path(objectPath);
     } else {
-      devices_->mark_peripheral_lost(object);
+      devices_->mark_peripheral_lost(objectPath);
     }
   }
 }
 
 void DeviceWatcher::notifyExistingDevices() {
   std::map<sdbus::ObjectPath,
-           std::map<std::string, std::map<std::string, sdbus::Variant>>>
+           std::map<sdbus::InterfaceName, std::map<sdbus::PropertyName, sdbus::Variant>>>
       objects;
   try {
     objects = GetManagedObjects();
@@ -222,15 +222,15 @@ void DeviceWatcher::notifyExistingDevices() {
 
   for (const auto& [device_path, interfaces] : objects) {
     if (device_path.find(absl::Substitute("$0/dev_", adapter_object_path_)) == 0 &&
-        interfaces.count(org::bluez::Device1_proxy::INTERFACE_NAME) == 1) {
+        interfaces.count(sdbus::InterfaceName(org::bluez::Device1_proxy::INTERFACE_NAME)) == 1) {
       
       // Don't remove bonded, paired, connected, or trusted devices
       bool should_skip = false;
-      auto device_interface_it = interfaces.find(org::bluez::Device1_proxy::INTERFACE_NAME);
+      auto device_interface_it = interfaces.find(sdbus::InterfaceName(org::bluez::Device1_proxy::INTERFACE_NAME));
       if (device_interface_it != interfaces.end()) {
         const auto& properties = device_interface_it->second;
         
-        auto check_bool_property = [&properties](const std::string& prop_name) -> bool {
+        auto check_bool_property = [&properties](const sdbus::PropertyName& prop_name) -> bool {
           auto it = properties.find(prop_name);
           if (it != properties.end()) {
             try {
@@ -242,10 +242,10 @@ void DeviceWatcher::notifyExistingDevices() {
           return false;
         };
         
-        if (check_bool_property("Bonded") || 
-            check_bool_property("Paired") ||
-            check_bool_property("Connected") ||
-            check_bool_property("Trusted")) {
+        if (check_bool_property(sdbus::PropertyName("Bonded")) || 
+            check_bool_property(sdbus::PropertyName("Paired")) ||
+            check_bool_property(sdbus::PropertyName("Connected")) ||
+            check_bool_property(sdbus::PropertyName("Trusted"))) {
           should_skip = true;
           LOG(INFO) << __func__ << ": Skipping device " << device_path 
                     << " (bonded/paired/connected/trusted)";

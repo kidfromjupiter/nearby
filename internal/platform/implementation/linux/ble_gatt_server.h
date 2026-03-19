@@ -65,7 +65,8 @@ class GattServer : public api::ble::GattServer {
         devices_(std::move(devices)),
         adapter_(adapter),
         local_peripheral_(adapter_),
-        gatt_service_root_object_manager(std::make_unique<RootObjectManager>(system_bus_, "/com/google/nearby/medium/ble/gatt")),
+        gatt_service_root_object_manager(std::make_unique<RootObjectManager>(system_bus_,
+                                        sdbus::ObjectPath("/com/google/nearby/medium/ble/gatt"))),
         gatt_manager_(std::make_unique<bluez::GattManager>(system_bus_, adapter_.GetObjectPath())),
         server_cb_(std::make_shared<api::ble::ServerGattConnectionCallback>(
             std::move(server_cb))) {}

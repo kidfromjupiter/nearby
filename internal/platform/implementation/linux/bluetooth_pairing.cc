@@ -26,8 +26,8 @@
 namespace nearby {
 namespace linux {
 
-void BluetoothPairing::pairing_reply_handler(const sdbus::Error *error) {
-  if (error != nullptr && error->isValid()) {
+void BluetoothPairing::pairing_reply_handler(std::optional<sdbus::Error> error) {
+  if (error.has_value() && error->isValid()) {
     const auto &name = error->getName();
     api::BluetoothPairingCallback::PairingError err =
         api::BluetoothPairingCallback::PairingError::kAuthFailed;
@@ -78,8 +78,8 @@ bool BluetoothPairing::InitiatePairing(
 
 bool BluetoothPairing::FinishPairing(
     std::optional<absl::string_view> pin_code) {
-  device_->SetPairReplyCallback([this](const sdbus::Error *error) {
-    this->pairing_reply_handler(error);
+  device_->SetPairReplyCallback([this](std::optional<sdbus::Error> error) {
+    this->pairing_reply_handler(std::move(error));
   });
 
   auto call = device_->Pair();

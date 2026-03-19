@@ -58,7 +58,7 @@ void Profile::NewConnection(
     LOG(ERROR) << __func__
                        << ": NewConnection called on released object "
                        << getObject().getObjectPath();
-    throw sdbus::Error("org.bluez.Error.Rejected",
+    throw sdbus::Error(sdbus::Error::Name("org.bluez.Error.Rejected"),
                        "NewConnection called on released object");
   }
 
@@ -95,7 +95,7 @@ void Profile::RequestDisconnection(
                        << ": RequestDisconnection called with a device object "
                           "we don't know about: "
                        << device_object_path;
-    throw sdbus::Error("org.bluez.Error.Rejected", "Unknown object");
+    throw sdbus::Error(sdbus::Error::Name("org.bluez.Error.Rejected"), "Unknown object");
   }
 
   auto mac_addr = device -> GetMacAddress();
@@ -128,17 +128,17 @@ bool ProfileManager::Register(std::optional<absl::string_view> name,
   try {
     std::map<std::string, sdbus::Variant> options;
     if (name.has_value()) {
-      options["Name"] = std::string(*name);
+      options["Name"] = sdbus::Variant(std::string(*name));
     }
-    options["RequireAuthorization"] = false;
-    options["RequireAuthentication"] = false;
-    options["Channel"] = static_cast<uint16_t>(0);
-    options["PSM"] = static_cast<uint16_t>(0);
+    options["RequireAuthorization"] = sdbus::Variant(false);
+    options["RequireAuthentication"] = sdbus::Variant(false);
+    options["Channel"] = sdbus::Variant(static_cast<uint16_t>(0));
+    options["PSM"] = sdbus::Variant(static_cast<uint16_t>(0));
 
     RegisterProfile(profile->getObject().getObjectPath(),
                     std::string(service_uuid), options);
   } catch (const sdbus::Error &e) {
-    BLUEZ_LOG_METHOD_CALL_ERROR(&getProxy(), "RegisterProfile", e);
+    BLUEZ_LOG_METHOD_CALL_ERROR(this, "RegisterProfile", e);
     return false;
   }
 
@@ -167,7 +167,7 @@ void ProfileManager::Unregister(absl::string_view service_uuid) {
   try {
     UnregisterProfile(profile_object_path);
   } catch (const sdbus::Error &e) {
-    BLUEZ_LOG_METHOD_CALL_ERROR(&getProxy(), "UnregisterProfile", e);
+    BLUEZ_LOG_METHOD_CALL_ERROR(this, "UnregisterProfile", e);
   }
 
   registered_services_.erase(std::string(service_uuid));
