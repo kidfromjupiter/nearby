@@ -58,7 +58,7 @@ void ServiceBrowser::onItemNew(const int32_t &interface,
                                const std::string &type,
                                const std::string &domain,
                                const uint32_t &flags) {
-  LOG(INFO) << __func__ << ": " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                        << ": Found new item through the ServiceBrowser: "
                        << "interface: " << interface << ", protocol: "
                        << protocol << ", name: '" << name << "', type: '"
@@ -123,18 +123,18 @@ void ServiceBrowser::onItemRemove(
 }
 
 void ServiceBrowser::onFailure(const std::string &error) {
-  LOG(ERROR) << __func__ << ": " << getObjectPath()
+  LOG(ERROR) << __func__ << ": " << getProxy().getObjectPath()
                      << ": ServiceBrowser reported a failure: " << error;
 }
 
 void ServiceBrowser::onAllForNow() {
-  LOG(INFO) << __func__ << ": " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                        << ": notified via ServiceBrowser that all records have "
                           "been added for now";
 }
 
 void ServiceBrowser::onCacheExhausted() {
-  LOG(INFO) << __func__ << ": " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                        << ": notified via ServiceBrowser of cache exhaustion";
 }
 

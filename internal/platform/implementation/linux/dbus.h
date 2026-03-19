@@ -25,7 +25,7 @@
     LOG(ERROR) << __func__ << ": Got error '" << (e).getName() \
                        << "' with message '" << (e).getMessage()       \
                        << "' while calling " << (m) << " on object "   \
-                       << (p)->getObjectPath();                        \
+                       << (p)->getProxy().getObjectPath();                        \
   } while (false)
 
 #define DBUS_LOG_PROPERTY_GET_ERROR(p, prop, e)                        \
@@ -33,7 +33,7 @@
     LOG(ERROR) << __func__ << ": Got error '" << (e).getName() \
                        << "' with message '" << (e).getMessage()       \
                        << "' while getting property " << (prop)        \
-                       << " on object " << (p)->getObjectPath();       \
+                       << " on object " << (p)->getProxy().getObjectPath();       \
   } while (false)
 
 #define DBUS_LOG_PROPERTY_SET_ERROR(p, prop, e)                        \
@@ -41,7 +41,7 @@
     LOG(ERROR) << __func__ << ": Got error '" << (e).getName() \
                        << "' with message '" << (e).getMessage()       \
                        << "' while setting property " << (prop)        \
-                       << " on object " << (p)->getObjectPath();       \
+                       << " on object " << (p)->getProxy().getObjectPath();       \
   } while (false)
 
 namespace nearby {

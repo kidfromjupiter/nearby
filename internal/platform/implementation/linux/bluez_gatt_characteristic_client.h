@@ -32,7 +32,8 @@ class GattCharacteristicClient
  public:
   GattCharacteristicClient(std::shared_ptr<sdbus::IConnection> system_bus,
                            sdbus::ObjectPath path)
-      : ProxyInterfaces(*system_bus, "org.bluez", std::move(path)),
+      : ProxyInterfaces(*system_bus, sdbus::ServiceName("org.bluez"),
+                        std::move(path)),
         system_bus_(std::move(system_bus)) {
     registerProxy();
   }

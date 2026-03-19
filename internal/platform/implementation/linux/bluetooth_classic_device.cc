@@ -152,7 +152,7 @@ bool BluetoothDevice::ConnectToProfile(absl::string_view service_uuid) {
     ObserverList<api::BluetoothClassicMedium::Observer> &observers)
     : BluetoothDevice(device),
       ProxyInterfaces<sdbus::Properties_proxy>(*system_bus, bluez::SERVICE_DEST,
-                                               device->getObjectPath()),
+                                               device->getProxy().getObjectPath()),
       system_bus_(std::move(system_bus)),
       observers_(observers) {
   registerProxy();
@@ -170,7 +170,7 @@ void MonitoredBluetoothDevice::onPropertiesChanged(
        it++)
   {
     if (it->first == bluez::DEVICE_PROP_ADDRESS) {
-      LOG(INFO) << __func__ << ": " << getObjectPath()
+      LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                            << ": Notifying observers about address change";
       std::string address = it->second;
       for (const auto &observer : observers_.GetObservers()) {
@@ -178,14 +178,14 @@ void MonitoredBluetoothDevice::onPropertiesChanged(
       }
 
     } else if (it->first == bluez::DEVICE_PROP_PAIRED) {
-      LOG(INFO) << __func__ << ": " << getObjectPath()
+      LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                            << "Notifying observers about paired status change.";
       for (const auto &observer : observers_.GetObservers()) {
         observer->DevicePairedChanged(*this, it->second);
       }
     } else if (it->first == bluez::DEVICE_PROP_CONNECTED) {
       LOG(INFO)
-          << __func__ << ": " << getObjectPath()
+          << __func__ << ": " << getProxy().getObjectPath()
           << "Notifying observers about connected status change";
       for (const auto &observer : observers_.GetObservers()) {
         observer->DeviceConnectedStateChanged(*this, it->second);

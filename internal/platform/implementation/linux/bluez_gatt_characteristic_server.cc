@@ -63,8 +63,9 @@ absl::Status GattCharacteristicServer::NotifyChanged(
   } catch (const sdbus::Error &e) {
     LOG(ERROR) << __func__
                        << ": Error emitting PropertiesChanged signal on "
-                       << getObjectPath() << " with name '" << e.getName()
-                       << "' and message '" << e.getMessage() << "'";
+                       << getObject().getObjectPath() << " with name '"
+                       << e.getName() << "' and message '" << e.getMessage()
+                       << "'";
     return absl::UnknownError(e.getMessage());
   }
 }

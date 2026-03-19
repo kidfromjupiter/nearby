@@ -27,7 +27,7 @@ std::string NetworkManagerWifiDirectServerSocket::GetIPAddress() const {
     LOG(ERROR)
         << __func__
         << ": Could not find any IPv4 addresses for active connection "
-        << active_conn_->getObjectPath();
+        << active_conn_->getProxy().getObjectPath();
     return std::string();
   }
   return ip4addresses[0];

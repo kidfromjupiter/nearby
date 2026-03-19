@@ -61,7 +61,7 @@ class Profile final
         devices_(devices) {
     registerAdaptor();
     LOG(INFO) << __func__ << ": Created a new BlueZ profile at :"
-                         << getObjectPath();
+                         << getObject().getObjectPath();
   }
   ~Profile() { unregisterAdaptor(); }
 
@@ -110,7 +110,8 @@ class ProfileManager final
   ProfileManager &operator=(const ProfileManager &) = delete;
   ProfileManager &operator=(ProfileManager &&) = delete;
   ProfileManager(sdbus::IConnection &system_bus, BluetoothDevices &devices)
-      : ProxyInterfaces(system_bus, bluez::SERVICE_DEST, "/org/bluez"),
+      : ProxyInterfaces(system_bus, sdbus::ServiceName(bluez::SERVICE_DEST),
+                        sdbus::ObjectPath("/org/bluez")),
         devices_(devices) {
     registerProxy();
   }

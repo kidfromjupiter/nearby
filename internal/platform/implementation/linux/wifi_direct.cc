@@ -50,7 +50,7 @@ NetworkManagerWifiDirectMedium::ListenForService(int port) {
     LOG(ERROR)
         << __func__
         << "Could not find any IPv4 addresses for active connection "
-        << active_connection->getObjectPath();
+        << active_connection->getProxy().getObjectPath();
     return nullptr;
   }
 
@@ -88,7 +88,7 @@ bool NetworkManagerWifiDirectMedium::DisconnectWifiDirect() {
   }
 
   try {
-    network_manager_->DeactivateConnection(active_connection->getObjectPath());
+    network_manager_->DeactivateConnection(active_connection->getProxy().getObjectPath());
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "DeactivateConnection", e);
     return false;
@@ -112,7 +112,7 @@ bool NetworkManagerWifiDirectMedium::StartWifiDirect(
   // According to the comments in the windows implementation, the wifi direct
   // medium is currently just a regular wifi hotspot.
   auto wireless_device = std::make_unique<NetworkManagerWifiMedium>(
-      network_manager_, wireless_device_->getObjectPath());
+      network_manager_, wireless_device_->getProxy().getObjectPath());
   auto hotspot = NetworkManagerWifiHotspotMedium(network_manager_,
                                                  std::move(wireless_device));
 
@@ -127,7 +127,7 @@ bool NetworkManagerWifiDirectMedium::StartWifiDirect(
 
 bool NetworkManagerWifiDirectMedium::StopWifiDirect() {
   auto wireless_device = std::make_unique<NetworkManagerWifiMedium>(
-      network_manager_, wireless_device_->getObjectPath());
+      network_manager_, wireless_device_->getProxy().getObjectPath());
   auto hotspot = NetworkManagerWifiHotspotMedium(network_manager_,
                                                  std::move(wireless_device));
 

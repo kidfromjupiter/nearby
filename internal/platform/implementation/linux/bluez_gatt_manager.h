@@ -32,7 +32,7 @@ class GattManager
 
   GattManager(sdbus::IConnection &system_bus,
               sdbus::ObjectPath adapter_object_path)
-      : ProxyInterfaces(system_bus, "org.bluez",
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.bluez"),
                         std::move(adapter_object_path)) {
     registerProxy();
   }

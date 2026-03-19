@@ -35,7 +35,8 @@ class LEBearerClient
  public:
   LEBearerClient(std::shared_ptr<sdbus::IConnection> system_bus,
                  sdbus::ObjectPath bearer_path)
-      : ProxyInterfaces(*system_bus, "org.bluez", std::move(bearer_path)),
+      : ProxyInterfaces(*system_bus, sdbus::ServiceName("org.bluez"),
+                        std::move(bearer_path)),
         system_bus_(std::move(system_bus)) {
     registerProxy();
   }

@@ -74,7 +74,7 @@ class NetworkManagerWifiMedium
       std::shared_ptr<networkmanager::NetworkManager> network_manager,
       const sdbus::ObjectPath &wireless_device_object_path)
       : ProxyInterfaces(*network_manager->GetConnection(),
-                        "org.freedesktop.NetworkManager",
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
                         wireless_device_object_path),
         system_bus_(network_manager->GetConnection()),
         network_manager_(std::move(network_manager)),

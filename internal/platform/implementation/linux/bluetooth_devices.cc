@@ -143,17 +143,20 @@ std::shared_ptr<MonitoredBluetoothDevice> BluetoothDevices::add_new_device(
 }
 
 void DeviceWatcher::onInterfacesAdded(
-    const sdbus::ObjectPath &object,
-    const std::map<std::string, std::map<std::string, sdbus::Variant>>
-        &interfaces) {
+    const sdbus::ObjectPath &objectPath,
+    const std::map<sdbus::InterfaceName,
+                   std::map<sdbus::PropertyName, sdbus::Variant>>
+        &interfacesAndProperties) {
   auto path_prefix = absl::Substitute("$0/dev_", adapter_object_path_);
-  if (object.find(path_prefix) != 0) {
+  if (objectPath.find(path_prefix) != 0) {
     return;
   }
 
-  if (interfaces.count(org::bluez::Device1_proxy::INTERFACE_NAME) == 0) return;
+  if (interfacesAndProperties.count(org::bluez::Device1_proxy::INTERFACE_NAME) ==
+      0)
+    return;
 
-  auto device = devices_->add_new_device(object);
+  auto device = devices_->add_new_device(objectPath);
   device->SetDiscoveryCallback(discovery_cb_);
   if (discovery_cb_ != nullptr &&
       discovery_cb_->device_discovered_cb != nullptr) {
@@ -168,10 +171,10 @@ void DeviceWatcher::onInterfacesAdded(
 }
 
 void DeviceWatcher::onInterfacesRemoved(
-    const sdbus::ObjectPath &object,
-    const std::vector<std::string> &interfaces) {
+    const sdbus::ObjectPath &objectPath,
+    const std::vector<sdbus::InterfaceName> &interfaces) {
   auto path_prefix = absl::Substitute("$0/dev_", adapter_object_path_);
-  if (object.find(path_prefix) != 0) {
+  if (objectPath.find(path_prefix) != 0) {
     return;
   }
 

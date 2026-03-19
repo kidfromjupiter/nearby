@@ -29,7 +29,8 @@ class BluezAdapter : public sdbus::ProxyInterfaces<org::bluez::Adapter1_proxy> {
  public:
   BluezAdapter(sdbus::IConnection &system_bus,
                const sdbus::ObjectPath &adapter_object_path)
-      : ProxyInterfaces(system_bus, bluez::SERVICE_DEST, adapter_object_path) {
+      : ProxyInterfaces(system_bus, sdbus::ServiceName(bluez::SERVICE_DEST),
+                        adapter_object_path) {
     registerProxy();
   }
   ~BluezAdapter() { unregisterProxy(); }
@@ -68,7 +69,7 @@ class BluetoothAdapter : public api::BluetoothAdapter {
   }
 
   sdbus::ObjectPath GetObjectPath() const {
-    return bluez_adapter_->getObjectPath();
+    return bluez_adapter_->getProxy().getObjectPath();
   }
 
   BluezAdapter &GetBluezAdapterObject() { return *bluez_adapter_; }

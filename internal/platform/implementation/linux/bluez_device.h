@@ -29,7 +29,7 @@ class Device : public sdbus::ProxyInterfaces<org::bluez::Device1_proxy> {
  public:
   Device(std::shared_ptr<sdbus::IConnection> system_bus,
          const sdbus::ObjectPath &device_path)
-      : ProxyInterfaces(*system_bus, "org.bluez", device_path),
+      : ProxyInterfaces(*system_bus, sdbus::ServiceName("org.bluez"), device_path),
         system_bus(std::move(system_bus)) {
     registerProxy();
   }

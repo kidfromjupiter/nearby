@@ -29,7 +29,7 @@
     LOG(ERROR) << __func__ << ": Got error '" << (err).getName() \
                        << "' with message '" << (err).getMessage()       \
                        << "' while calling " << method << " on object "  \
-                       << (proxy)->getObjectPath();                      \
+                       << (proxy)->getProxy().getObjectPath();                      \
   } while (false)
 
 namespace nearby {
@@ -67,7 +67,7 @@ class BluezObjectManager
     : public sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {
  public:
   explicit BluezObjectManager(sdbus::IConnection &system_bus)
-      : ProxyInterfaces(system_bus, "org.bluez", "/") {
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.bluez"), sdbus::ObjectPath("/")) {
     registerProxy();
   }
   virtual ~BluezObjectManager() { unregisterProxy(); }
@@ -75,11 +75,12 @@ class BluezObjectManager
  protected:
   void onInterfacesAdded(
       const sdbus::ObjectPath &objectPath,
-      const std::map<std::string, std::map<std::string, sdbus::Variant>>
+      const std::map<sdbus::InterfaceName,
+                     std::map<sdbus::PropertyName, sdbus::Variant>>
           &interfacesAndProperties) override {}
   void onInterfacesRemoved(
       const sdbus::ObjectPath &objectPath,
-      const std::vector<std::string> &interfaces) override {}
+      const std::vector<sdbus::InterfaceName> &interfaces) override {}
 };
 
 }  // namespace bluez

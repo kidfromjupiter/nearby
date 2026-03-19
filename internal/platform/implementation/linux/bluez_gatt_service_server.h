@@ -56,14 +56,14 @@ class GattServiceServer final
     registerAdaptor();
     LOG(INFO) << __func__ << ": Created a "
                          << org::bluez::GattService1_adaptor::INTERFACE_NAME
-                         << " object at " << getObjectPath();
+                         << " object at " << getObject().getObjectPath();
   }
 
   ~GattServiceServer() {
     absl::MutexLock lock(&characterstics_mutex_);
     for (auto &[_uuid, characteristic] : characteristics_) {
       LOG(INFO) << __func__ << ": Removing characteristic "
-                           << characteristic->getObjectPath();
+                           << characteristic->getObject().getObjectPath();
       try {
         characteristic->emitInterfacesRemovedSignal(
             {org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME});
@@ -71,8 +71,8 @@ class GattServiceServer final
         LOG(ERROR)
             << __func__
             << ": error emitting InterfacesRemoved signal for object path "
-            << characteristic->getObjectPath() << " with name '" << e.getName()
-            << "' and message '" << e.getMessage() << "'";
+            << characteristic->getObject().getObjectPath() << " with name '"
+            << e.getName() << "' and message '" << e.getMessage() << "'";
       }
     }
     unregisterAdaptor();

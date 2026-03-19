@@ -88,9 +88,9 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
     LOG(INFO)
         << __func__
         << ": Registering path /com/google/nearby/medium/ble/advertisement/monitor with AdvertisementMonitorManager at "
-        << adv_monitor_manager_->getObjectPath();
+        << adv_monitor_manager_->getProxy().getObjectPath();
     try {
-      adv_monitor_manager_->RegisterMonitor(root_object_manager_->getObjectPath());
+      adv_monitor_manager_->RegisterMonitor(root_object_manager_->getObject().getObjectPath());
     } catch (const sdbus::Error &e) {
       DBUS_LOG_METHOD_CALL_ERROR(adv_monitor_manager_, "RegisterMonitor", e);
     }
@@ -131,11 +131,11 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
 
 
     LOG(INFO) << __func__ << ": Registering advertisement, is_extended: " << advertising_data.is_extended_advertisement
-                  << " " << (*it) -> getObjectPath() << " on bluetooth adapter "
+                  << " " << (*it) -> getObject().getObjectPath() << " on bluetooth adapter "
                     << adapter_.GetObjectPath();
 
     try {
-      adv_manager_->RegisterAdvertisement((*it)->getObjectPath(), {});
+      adv_manager_->RegisterAdvertisement((*it)->getObject().getObjectPath(), {});
     } catch (const sdbus::Error &e) {
       advs_.erase(it);
       DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisement", e);
@@ -175,7 +175,7 @@ BleV2Medium::StartAdvertising(
   // Keep async API surface, but register using the same typed DBus path as the
   // working sync implementation to avoid signature mismatch (oa{sv} vs sa{sv}).
   try {
-    adv_manager_->RegisterAdvertisement((*adv_it)->getObjectPath(), {});
+    adv_manager_->RegisterAdvertisement((*adv_it)->getObject().getObjectPath(), {});
     shared_cb->start_advertising_result(absl::OkStatus());
   } catch (const sdbus::Error &e) {
     advs_.erase(adv_it);
@@ -199,10 +199,10 @@ BleV2Medium::StartAdvertising(
 
   absl::AnyInvocable<absl::Status()> stop_adv = [&, adv_it]() {
     LOG(INFO) << __func__ << ": Unregistering advertisement object "
-                         << (*adv_it)->getObjectPath();
+                         << (*adv_it)->getObject().getObjectPath();
     absl::MutexLock lock(&advs_mutex_);
     try {
-      adv_manager_->UnregisterAdvertisement((*adv_it)->getObjectPath());
+      adv_manager_->UnregisterAdvertisement((*adv_it)->getObject().getObjectPath());
     } catch (const sdbus::Error &e) {
       DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisement", e);
       return absl::UnknownError(e.getMessage());
@@ -219,7 +219,7 @@ BleV2Medium::StartAdvertising(
     try {
       for (auto& adv: advs_)
       {
-        adv_manager_->UnregisterAdvertisement(adv->getObjectPath());
+        adv_manager_->UnregisterAdvertisement(adv->getObject().getObjectPath());
       }
     } catch (const sdbus::Error &e) {
       DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisement", e);
@@ -270,13 +270,13 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
     monitor->emitInterfacesAddedSignal(
       {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
 
-    // adv_monitor_manager_ -> RegisterMonitor(monitor -> getObjectPath());
-    LOG(INFO)<< __func__ << ": Registered advertisement monitor with path " << monitor -> getObjectPath();
+    // adv_monitor_manager_ -> RegisterMonitor(monitor -> getObject().getObjectPath());
+    LOG(INFO)<< __func__ << ": Registered advertisement monitor with path " << monitor -> getObject().getObjectPath();
   } catch (const sdbus::Error &e) {
     LOG(ERROR)
         << __func__
         << ": error emitting InterfacesAdded signal for object path "
-        << monitor->getObjectPath() << " with name '" << e.getName()
+        << monitor->getObject().getObjectPath() << " with name '" << e.getName()
         << "' and message '" << e.getMessage() << "'";
     return false;
   }
@@ -294,7 +294,7 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
       LOG(ERROR)
           << __func__
           << ": error emitting InterfacesRemoved signal for object path "
-          << monitor->getObjectPath() << " with name '" << e.getName()
+          << monitor->getObject().getObjectPath() << " with name '" << e.getName()
           << "' and message '" << e.getMessage() << "'";
     }
     return false;
@@ -321,7 +321,7 @@ bool BleV2Medium::StopScanning() {
 
   auto &adapter = adapter_.GetBluezAdapterObject();
   LOG(INFO) << __func__ << ": Stopping discovery for adapter "
-                       << adapter.getObjectPath();
+                       << adapter.getProxy().getObjectPath();
   try {
     adapter.StopDiscovery(); // this will stop bluetooth classic discovery as well. do we want this?
   } catch (const sdbus::Error &e) {
@@ -336,7 +336,7 @@ bool BleV2Medium::StopScanning() {
     auto &[adv_monitor, _watcher] = session;
 
     LOG(INFO) << __func__ << ": Removing advertising monitor "
-                         << adv_monitor->getObjectPath();
+                         << adv_monitor->getObject().getObjectPath();
     adv_monitor->emitInterfacesRemovedSignal(
       {org::bluez::AdvertisementMonitor1_adaptor::INTERFACE_NAME});
   }
@@ -371,7 +371,7 @@ bool BleV2Medium::StopScanning() {
       LOG(ERROR)
         << __func__
         << ": error emitting InterfacesAdded signal for object path "
-        << monitor->getObjectPath() << " with name '" << e.getName()
+        << monitor->getObject().getObjectPath() << " with name '" << e.getName()
         << "' and message '" << e.getMessage() << "'";
       return nullptr;
     }
@@ -389,7 +389,7 @@ bool BleV2Medium::StopScanning() {
         LOG(ERROR)
           << __func__
           << ": error emitting InterfacesRemoved signal for object path "
-          << monitor->getObjectPath() << " with name '" << e.getName()
+          << monitor->getObject().getObjectPath() << " with name '" << e.getName()
           << "' and message '" << e.getMessage() << "'";
       }
       return nullptr;
@@ -417,7 +417,7 @@ bool BleV2Medium::StopScanning() {
           LOG(ERROR)
               << __func__
               << ": error emitting InterfacesRemoved signal for object path "
-              << monitor->getObjectPath() << " with name '" << e.getName()
+              << monitor->getObject().getObjectPath() << " with name '" << e.getName()
               << "' and message '" << e.getMessage() << "'";
         }
 
@@ -510,7 +510,7 @@ bool BleV2Medium::StartLEDiscovery() {
 
   try {
     LOG(INFO) << __func__ << ": Starting LE discovery on "
-                      << adapter.getObjectPath();
+                      << adapter.getProxy().getObjectPath();
     adapter.StartDiscovery();
   } catch (const sdbus::Error &e) {
     if (e.getName() != "org.bluez.Error.InProgress") {

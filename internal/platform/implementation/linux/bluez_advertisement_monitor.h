@@ -53,7 +53,8 @@ class AdvertisementMonitor final
   // Methods
   void Release() override {}
   void Activate() override {
-    LOG(INFO) <<__func__ << ": bluez advertisement monitor activated at path: " << getObjectPath();
+    LOG(INFO) <<__func__ << ": bluez advertisement monitor activated at path: "
+              << getObject().getObjectPath();
     if (start_scanning_result_callback_ != nullptr) {
       start_scanning_result_callback_(absl::OkStatus());
     }

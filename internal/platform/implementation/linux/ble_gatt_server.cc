@@ -50,7 +50,7 @@ GattServer::CreateCharacteristic(
     LOG(ERROR)
         << __func__
         << ": error emitting InterfacesAdded signal for object path "
-        << service->getObjectPath() << " with name '" << e.getName()
+        << service->getObject().getObjectPath() << " with name '" << e.getName()
         << "' and message '" << e.getMessage() << "'";
     return std::nullopt;
   }
@@ -64,12 +64,12 @@ GattServer::CreateCharacteristic(
     LOG(INFO)<< __func__ << ": Registering service on gattmanager with characteristic_uuid: "
           << std::string(characteristic_uuid) << " and service_uuid: " << std::string(service_uuid);
 
-    gatt_manager_ -> RegisterApplication(gatt_service_root_object_manager -> getObjectPath(), {});
+    gatt_manager_ -> RegisterApplication(gatt_service_root_object_manager -> getObject().getObjectPath(), {});
   } catch (const sdbus::Error& e) {
     LOG(ERROR)
         << __func__
         << ": error calling RegisterAplication for GattManager with object path "
-        << gatt_manager_->getObjectPath() << " with name '" << e.getName()
+        << gatt_manager_->getProxy().getObjectPath() << " with name '" << e.getName()
         << "' and message '" << e.getMessage() << "'";
     return std::nullopt;
   }
@@ -142,7 +142,7 @@ void GattServer::Stop() {
   absl::MutexLock lock(&services_mutex_);
   for (auto& [uuid, service] : services_) {
     LOG(INFO) << __func__ << ": Unregistering service "
-                         << service->getObjectPath();
+                         << service->getObject().getObjectPath();
     try {
       manager.UnregisterApplication("/");
     } catch (const sdbus::Error& e) {

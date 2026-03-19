@@ -399,7 +399,8 @@ try {
 
 void BluezGattDiscovery::onInterfacesAdded(
     const sdbus::ObjectPath &objectPath,
-    const std::map<std::string, std::map<std::string, sdbus::Variant>>
+    const std::map<sdbus::InterfaceName,
+                   std::map<sdbus::PropertyName, sdbus::Variant>>
         &interfacesAndProperties) {
   if (interfacesAndProperties.count(
           org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME) == 0)
@@ -421,7 +422,7 @@ void BluezGattDiscovery::onInterfacesAdded(
 
 void BluezGattDiscovery::onInterfacesRemoved(
     const sdbus::ObjectPath &objectPath,
-    const std::vector<std::string> &interfaces) {
+    const std::vector<sdbus::InterfaceName> &interfaces) {
   auto begin = interfaces.cbegin();
   auto end = interfaces.cend();
 

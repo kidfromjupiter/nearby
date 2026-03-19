@@ -79,14 +79,14 @@ api::WifiInformation &NetworkManagerWifiMedium::GetInformation() {
         api::WifiInformation{true, ssid, active_access_point->HwAddress(),
                              to_signed(active_access_point->Frequency())};
     networkmanager::ObjectManager manager(system_bus_);
-    auto ip4config = manager.GetIp4Config(active_access_point->getObjectPath());
+    auto ip4config = manager.GetIp4Config(active_access_point->getProxy().getObjectPath());
 
   } catch (const sdbus::Error &e) {
     LOG(ERROR)
-        << __func__ << ": " << getObjectPath() << ": Got error '" << e.getName()
+        << __func__ << ": " << getProxy().getObjectPath() << ": Got error '" << e.getName()
         << "' with message '" << e.getMessage()
         << "' while populating network information for access point "
-        << active_access_point->getObjectPath();
+        << active_access_point->getProxy().getObjectPath();
   }
 
   return information_;
@@ -135,8 +135,8 @@ NetworkManagerWifiMedium::SearchBySSID(absl::string_view ssid,
     return ap;
   }
 
-  LOG(INFO) << __func__ << ": " << getObjectPath() << ": SSID " << ssid
-                    << " not currently known by device " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getProxy().getObjectPath() << ": SSID " << ssid
+                    << " not currently known by device " << getProxy().getObjectPath()
                     << ", requesting a scan";
 
   std::int64_t cur_last_scan;
@@ -163,13 +163,13 @@ NetworkManagerWifiMedium::SearchBySSID(absl::string_view ssid,
   last_scan_lock_.ReaderUnlock();
 
   if (!success) {
-    LOG(WARNING) << __func__ << ": " << getObjectPath()
+    LOG(WARNING) << __func__ << ": " << getProxy().getObjectPath()
                          << ": timed out waiting for scan to finish";
   }
 
   ap = SearchBySSIDNoScan(ssid_bytes);
   if (ap == nullptr) {
-    LOG(WARNING) << __func__ << ": " << getObjectPath()
+    LOG(WARNING) << __func__ << ": " << getProxy().getObjectPath()
                          << ": Couldn't find SSID " << ssid;
   }
 
@@ -194,7 +194,7 @@ NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::Connect
     NetworkManagerWifiMedium::WifiAuthType auth_type) {
   auto ap = SearchBySSID(ssid);
   if (ap == nullptr) {
-    LOG(ERROR) << __func__ << ": " << getObjectPath()
+    LOG(ERROR) << __func__ << ": " << getProxy().getObjectPath()
                        << ": Couldn't find SSID " << ssid;
     return NetworkManagerWifiMedium::WifiConnectionStatus::kConnectionFailure;
   }
@@ -236,7 +236,7 @@ NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::Connect
   sdbus::ObjectPath connection_path, active_conn_path;
   try {
     auto [cp, acp, _r] = network_manager_->AddAndActivateConnection2(
-        connection_settings, getObjectPath(), ap->getObjectPath(),
+        connection_settings, getProxy().getObjectPath(), ap->getProxy().getObjectPath(),
         {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
     connection_path = std::move(cp);
     active_conn_path = std::move(acp);
@@ -245,14 +245,14 @@ NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::Connect
     return NetworkManagerWifiMedium::WifiConnectionStatus::kUnknown;
   }
 
-  LOG(INFO) << __func__ << ": " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getProxy().getObjectPath()
                     << ": Added a new connection at " << connection_path;
   auto active_connection =
       networkmanager::ActiveConnection(system_bus_, active_conn_path);
   auto [reason, timeout] = active_connection.WaitForConnection();
   if (timeout) {
     LOG(ERROR)
-        << __func__ << ": " << getObjectPath()
+        << __func__ << ": " << getProxy().getObjectPath()
         << ": timed out while waiting for connection " << active_conn_path
         << " to be activated, last NMActiveConnectionStateReason: "
         << reason->ToString();
@@ -260,7 +260,7 @@ NetworkManagerWifiMedium::WifiConnectionStatus NetworkManagerWifiMedium::Connect
   }
 
   if (reason.has_value()) {
-    LOG(ERROR) << __func__ << ": " << getObjectPath() << ": connection "
+    LOG(ERROR) << __func__ << ": " << getProxy().getObjectPath() << ": connection "
                        << active_conn_path
                        << " failed to activate, NMActiveConnectionStateReason:"
                        << reason->ToString();
@@ -286,7 +286,7 @@ NetworkManagerWifiMedium::GetActiveConnection() {
     active_ap_path = ActiveAccessPoint();
     if (active_ap_path.empty()) {
       LOG(ERROR) << __func__ << ": No active access points on "
-                         << getObjectPath();
+                         << getProxy().getObjectPath();
       return nullptr;
     }
   } catch (const sdbus::Error &e) {
@@ -296,13 +296,13 @@ NetworkManagerWifiMedium::GetActiveConnection() {
 
   auto object_manager = networkmanager::ObjectManager(system_bus_);
   auto conn = object_manager.GetActiveConnectionForAccessPoint(active_ap_path,
-                                                               getObjectPath());
+                                                               getProxy().getObjectPath());
 
   if (conn == nullptr) {
     LOG(ERROR)
         << __func__
         << ": Could not find an active connection using the access point "
-        << active_ap_path << " and device " << getObjectPath();
+        << active_ap_path << " and device " << getProxy().getObjectPath();
   }
   return conn;
 }

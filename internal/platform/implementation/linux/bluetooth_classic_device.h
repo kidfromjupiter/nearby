@@ -118,7 +118,7 @@ class BluetoothDevice : public api::BluetoothDevice {
   void MarkLost() { lost_ = true; }
   void UnmarkLost() { lost_ = false; }
   bool Lost() const { return lost_; }
-  sdbus::ObjectPath GetObjectPath() {return device_->getObjectPath();}
+  sdbus::ObjectPath GetObjectPath() {return device_->getProxy().getObjectPath();}
 
  private:
   UniqueId unique_id_;

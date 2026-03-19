@@ -36,7 +36,8 @@ class AdvertisementMonitorManager final
   AdvertisementMonitorManager(
       sdbus::IConnection &system_bus,
       const ::nearby::linux::BluetoothAdapter &adapter)
-      : ProxyInterfaces(system_bus, "org.bluez", adapter.GetObjectPath()) {
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.bluez"),
+                        adapter.GetObjectPath()) {
     registerProxy();
   }
 

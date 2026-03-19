@@ -192,7 +192,7 @@ bool WifiLanMedium::StartDiscovery(
       auto &object = service_browsers_[service_type];
       LOG(ERROR) << __func__ << ": A service browser for service type "
                          << service_type << " already exists at "
-                         << object->getObjectPath();
+                         << object->getProxy().getObjectPath();
       return false;
     }
   }
@@ -225,7 +225,7 @@ bool WifiLanMedium::StartDiscovery(
 
   try {
     LOG(INFO) << __func__ << ": Starting service discovery for "
-                         << browser->getObjectPath();
+                         << browser->getProxy().getObjectPath();
     browser->Start();
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(browser, "Start", e);

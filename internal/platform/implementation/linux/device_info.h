@@ -43,8 +43,8 @@ class CurrentUserSession final
   CurrentUserSession &operator=(CurrentUserSession &&) = delete;
   ~CurrentUserSession() { unregisterProxy(); }
   explicit CurrentUserSession(sdbus::IConnection &system_bus)
-      : ProxyInterfaces(system_bus, "org.freedesktop.login1",
-                        "/org/freedesktop/login1/session/auto") {
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.freedesktop.login1"),
+                        sdbus::ObjectPath("/org/freedesktop/login1/session/auto")) {
     registerProxy();
   }
 
@@ -79,8 +79,9 @@ class Hostnamed
   Hostnamed &operator=(const Hostnamed &) = delete;
   Hostnamed &operator=(Hostnamed &&) = delete;
   explicit Hostnamed(sdbus::IConnection &system_bus)
-      : ProxyInterfaces(system_bus, "org.freedesktop.hostname1",
-                        "/org/freedesktop/hostname1") {
+      : ProxyInterfaces(system_bus,
+                        sdbus::ServiceName("org.freedesktop.hostname1"),
+                        sdbus::ObjectPath("/org/freedesktop/hostname1")) {
     registerProxy();
   }
   ~Hostnamed() { unregisterProxy(); }
@@ -94,8 +95,9 @@ class LoginManager final
   LoginManager &operator=(const LoginManager &) = delete;
   LoginManager &operator=(LoginManager &&) = delete;
   explicit LoginManager(sdbus::IConnection &system_bus)
-      : ProxyInterfaces(system_bus, "org.freedesktop.login1",
-                        "/org/freedesktop/login1") {
+      : ProxyInterfaces(system_bus,
+                        sdbus::ServiceName("org.freedesktop.login1"),
+                        sdbus::ObjectPath("/org/freedesktop/login1")) {
     registerProxy();
   }
   ~LoginManager() { unregisterProxy(); }

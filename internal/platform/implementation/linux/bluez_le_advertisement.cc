@@ -59,7 +59,7 @@ LEAdvertisement::LEAdvertisement(
 
   LOG(INFO) << __func__
                        << ": Created a org.bluez.LEAdvertisement1 instance at "
-                       << getObjectPath();
+                       << getObject().getObjectPath();
 }
 }  // namespace bluez
 }  // namespace linux

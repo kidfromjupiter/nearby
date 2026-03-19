@@ -52,7 +52,7 @@ void AdvertisementMonitor::DeviceFound(const sdbus::ObjectPath &device) {
       LOG(ERROR)
           << __func__
           << ": Could not parse UUID string in ServiceData for peripheral "
-          << peripheral->getObjectPath();
+          << peripheral->getProxy().getObjectPath();
       continue;
     }
 

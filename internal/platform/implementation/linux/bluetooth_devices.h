@@ -109,7 +109,8 @@ class DeviceWatcher final : sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {
           discovery_callback,
       std::shared_ptr<ObserverList<api::BluetoothClassicMedium::Observer>>
           observers)
-      : ProxyInterfaces(system_bus, "org.bluez", "/"),
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.bluez"),
+                        sdbus::ObjectPath("/")),
         adapter_object_path_(adapter_object_path),
         adapter_(adapter),
         devices_(std::move(devices)),
@@ -127,11 +128,13 @@ class DeviceWatcher final : sdbus::ProxyInterfaces<sdbus::ObjectManager_proxy> {
   ~DeviceWatcher() { unregisterProxy(); }
 
   void onInterfacesAdded(
-      const sdbus::ObjectPath &object,
-      const std::map<std::string, std::map<std::string, sdbus::Variant>>
-          &interfaces) override;
-  void onInterfacesRemoved(const sdbus::ObjectPath &object,
-                           const std::vector<std::string> &interfaces) override;
+      const sdbus::ObjectPath &objectPath,
+      const std::map<sdbus::InterfaceName,
+                     std::map<sdbus::PropertyName, sdbus::Variant>>
+          &interfacesAndProperties) override;
+  void onInterfacesRemoved(const sdbus::ObjectPath &objectPath,
+                           const std::vector<sdbus::InterfaceName> &interfaces)
+      override;
 
  private:
   void notifyExistingDevices();

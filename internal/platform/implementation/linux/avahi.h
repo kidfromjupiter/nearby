@@ -44,7 +44,8 @@ class Server final
  public:
   Server(sdbus::IConnection &system_bus,
   api::WifiLanMedium::DiscoveredServiceCallback callback)
-      : ProxyInterfaces(system_bus, "org.freedesktop.Avahi", "/"),
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.freedesktop.Avahi"),
+                        sdbus::ObjectPath("/")),
         discovery_cb_(std::move(callback))
   {
     registerProxy();
@@ -74,13 +75,13 @@ class EntryGroup final
  public:
   EntryGroup(sdbus::IConnection &system_bus,
              const sdbus::ObjectPath &entry_group_object_path)
-      : ProxyInterfaces(system_bus, "org.freedesktop.Avahi",
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.freedesktop.Avahi"),
                         entry_group_object_path) {
     registerProxy();
   }
   ~EntryGroup() {
     LOG(INFO) << __func__ << ": Freeing entry group "
-                         << getObjectPath();
+                         << getProxy().getObjectPath();
 
     try {
       Free();
@@ -103,14 +104,14 @@ class ServiceBrowser final
   ServiceBrowser(sdbus::IConnection &system_bus,
                  const sdbus::ObjectPath &service_browser_object_path,
                  std::shared_ptr<Server> avahi_server)
-      : ProxyInterfaces(system_bus, "org.freedesktop.Avahi",
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.freedesktop.Avahi"),
                         service_browser_object_path),
         server_(avahi_server) {
     registerProxy();
   }
   ~ServiceBrowser() {
     LOG(INFO) << __func__ << ": Freeing service browser "
-                         << getObjectPath();
+                         << getProxy().getObjectPath();
 
     try {
       Free();

@@ -67,7 +67,8 @@ class ActiveConnection
   ActiveConnection &operator=(ActiveConnection &&) = delete;
   explicit ActiveConnection(std::shared_ptr<sdbus::IConnection> system_bus,
                             sdbus::ObjectPath active_connection_path)
-      : ProxyInterfaces(*system_bus, "org.freedesktop.NetworkManager",
+      : ProxyInterfaces(*system_bus,
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
                         std::move(active_connection_path)),
         system_bus_(std::move(system_bus)),
         state_(kStateUnknown),

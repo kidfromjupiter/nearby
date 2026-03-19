@@ -32,7 +32,7 @@ bool GattServiceServer::AddCharacteristic(
   auto count = characteristics_.size();
   std::shared_ptr<GattCharacteristicServer> chr =
       std::make_shared<GattCharacteristicServer>(
-          getObject().getConnection(), getObjectPath(), count, characteristic,
+          getObject().getConnection(), getObject().getObjectPath(), count, characteristic,
           server_cb_, devices_);
   try {
     chr->emitInterfacesAddedSignal(
@@ -41,7 +41,7 @@ bool GattServiceServer::AddCharacteristic(
     LOG(ERROR)
         << __func__
         << ": error emitting InterfacesAdded signal for object path "
-        << chr->getObjectPath() << " with name '" << e.getName()
+        << chr->getObject().getObjectPath() << " with name '" << e.getName()
         << "' and message '" << e.getMessage() << "'";
     return false;
   }

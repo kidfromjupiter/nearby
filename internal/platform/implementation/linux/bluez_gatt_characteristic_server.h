@@ -68,7 +68,7 @@ class GattCharacteristicServer final
     LOG(INFO)
         << __func__ << "Creating a "
         << org::bluez::GattCharacteristic1_adaptor::INTERFACE_NAME
-        << " object at " << getObjectPath();
+        << " object at " << getObject().getObjectPath();
   }
   ~GattCharacteristicServer() { unregisterAdaptor(); }
 

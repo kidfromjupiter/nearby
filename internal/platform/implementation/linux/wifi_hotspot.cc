@@ -100,7 +100,7 @@ NetworkManagerWifiHotspotMedium::ListenForService(int port) {
     LOG(ERROR)
         << __func__
         << "Could not find any IPv4 addresses for active connection "
-        << active_connection->getObjectPath();
+        << active_connection->getProxy().getObjectPath();
     return nullptr;
   }
 
@@ -126,7 +126,7 @@ NetworkManagerWifiHotspotMedium::ListenForService(int port) {
 
   LOG(INFO) << __func__ << ": Listening for services on "
                        << ip4addresses[0] << ":" << port << " on device "
-                       << wireless_device_->getObjectPath();
+                       << wireless_device_->getProxy().getObjectPath();
 
   ret = listen(sock, 0);
   if (ret < 0) {
@@ -142,7 +142,7 @@ NetworkManagerWifiHotspotMedium::ListenForService(int port) {
 bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
     HotspotCredentials *hotspot_credentials) {
   if (WifiHotspotActive()) {
-    LOG(ERROR) << __func__ << ": " << wireless_device_->getObjectPath()
+    LOG(ERROR) << __func__ << ": " << wireless_device_->getProxy().getObjectPath()
                        << ": cannot start WiFi hotspot, a hotspot is already "
                           "active on this device";
     return false;
@@ -224,7 +224,7 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
     try {
       auto [path, active_path, result] =
           network_manager_->AddAndActivateConnection2(
-              connection_settings, wireless_device_->getObjectPath(), "/",
+              connection_settings, wireless_device_->getProxy().getObjectPath(), "/",
               {{"persist", "volatile"}, {"bind-activation", "dbus-client"}});
       active_conn = std::make_unique<networkmanager::ActiveConnection>(
           system_bus_, active_path);
@@ -253,7 +253,7 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
     LOG(ERROR)
         << __func__ << ": "
         << ": timed out while waiting for connection "
-        << active_conn->getObjectPath()
+        << active_conn->getProxy().getObjectPath()
         << " to be activated, last NMActiveConnectionStateReason: "
         << reason->ToString();
     DisconnectWifiHotspot();
@@ -279,15 +279,15 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
   }
 
   LOG(INFO) << __func__ << ": Started a WiFi hotspot on device "
-                    << wireless_device_->getObjectPath() << " at "
-                    << active_conn->getObjectPath();
+                    << wireless_device_->getProxy().getObjectPath() << " at "
+                    << active_conn->getProxy().getObjectPath();
   return true;
 }
 
 bool NetworkManagerWifiHotspotMedium::StopWifiHotspot() {
   if (!WifiHotspotActive()) {
     LOG(ERROR)
-        << __func__ << ": " << wireless_device_->getObjectPath()
+        << __func__ << ": " << wireless_device_->getProxy().getObjectPath()
         << ": Cannot stop WiFi hotspot as a WiFi hotspot is not active";
   }
 
@@ -298,7 +298,7 @@ bool NetworkManagerWifiHotspotMedium::StopWifiHotspot() {
     active_ap_path = wireless_device_->ActiveAccessPoint();
     if (active_ap_path.empty()) {
       LOG(ERROR) << __func__ << ": No active access points on "
-                         << wireless_device_->getObjectPath();
+                         << wireless_device_->getProxy().getObjectPath();
       return false;
     }
   } catch (const sdbus::Error &e) {
@@ -315,12 +315,12 @@ bool NetworkManagerWifiHotspotMedium::StopWifiHotspot() {
     return false;
   }
 
-  LOG(INFO) << __func__ << ": " << wireless_device_->getObjectPath()
+  LOG(INFO) << __func__ << ": " << wireless_device_->getProxy().getObjectPath()
                     << ": Deactivating active connection "
-                    << active_connection->getObjectPath();
+                    << active_connection->getProxy().getObjectPath();
 
   try {
-    network_manager_->DeactivateConnection(active_connection->getObjectPath());
+    network_manager_->DeactivateConnection(active_connection->getProxy().getObjectPath());
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "DeactivateConnection", e);
     return false;
@@ -352,7 +352,7 @@ bool NetworkManagerWifiHotspotMedium::DisconnectWifiHotspot() {
   }
 
   try {
-    network_manager_->DeactivateConnection(active_connection->getObjectPath());
+    network_manager_->DeactivateConnection(active_connection->getProxy().getObjectPath());
   } catch (const sdbus::Error &e) {
     DBUS_LOG_METHOD_CALL_ERROR(network_manager_, "DeactivateConnection", e);
     return false;

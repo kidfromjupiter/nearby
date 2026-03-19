@@ -87,7 +87,7 @@ bool BluetoothClassicMedium::StartDiscovery(
 bool BluetoothClassicMedium::StopDiscovery() {
   auto &adapter = adapter_.GetBluezAdapterObject();
   LOG(INFO) << __func__ << "Stopping discovery on "
-                    << adapter.getObjectPath();
+                    << adapter.getProxy().getObjectPath();
   auto ret = true;
   try {
     adapter.StopDiscovery();

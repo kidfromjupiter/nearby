@@ -67,11 +67,12 @@ class BluezGattDiscovery final : public bluez::BluezObjectManager {
  protected:
   void onInterfacesAdded(
       const sdbus::ObjectPath &objectPath,
-      const std::map<std::string, std::map<std::string, sdbus::Variant>>
+      const std::map<sdbus::InterfaceName,
+                     std::map<sdbus::PropertyName, sdbus::Variant>>
           &interfacesAndProperties) override ABSL_LOCKS_EXCLUDED(mutex_);
   void onInterfacesRemoved(const sdbus::ObjectPath &objectPath,
-                           const std::vector<std::string> &interfaces) override
-      ABSL_LOCKS_EXCLUDED(mutex_);
+                           const std::vector<sdbus::InterfaceName> &interfaces)
+      override ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
   std::optional<std::tuple<Uuid, Uuid, sdbus::ObjectPath>>

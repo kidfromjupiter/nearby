@@ -28,7 +28,7 @@ class GattServiceClient final
  public:
   GattServiceClient(std::shared_ptr<sdbus::IConnection> system_bus,
                     sdbus::ObjectPath service_object_path)
-      : ProxyInterfaces(*system_bus, "org.bluez",
+      : ProxyInterfaces(*system_bus, sdbus::ServiceName("org.bluez"),
                         std::move(service_object_path)) {
     registerProxy();
   }

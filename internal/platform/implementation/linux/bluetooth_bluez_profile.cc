@@ -47,7 +47,7 @@ bool ProfileManager::ProfileRegistered(absl::string_view service_uuid) {
 
 void Profile::Release() {
   released_ = true;
-  LOG(INFO) << __func__ << ": Profile object " << getObjectPath()
+  LOG(INFO) << __func__ << ": Profile object " << getObject().getObjectPath()
                        << " has been released";
 }
 
@@ -57,7 +57,7 @@ void Profile::NewConnection(
   if (released_) {
     LOG(ERROR) << __func__
                        << ": NewConnection called on released object "
-                       << getObjectPath();
+                       << getObject().getObjectPath();
     throw sdbus::Error("org.bluez.Error.Rejected",
                        "NewConnection called on released object");
   }
@@ -70,7 +70,7 @@ void Profile::NewConnection(
 
   auto alias = device->GetName();
   auto mac_addr = device->GetAddress();
-  LOG(INFO) << __func__ << ": " << getObjectPath()
+  LOG(INFO) << __func__ << ": " << getObject().getObjectPath()
                        << ": Connected to " << mac_addr.ToString();
 
   FDProperties props(fd_props);
@@ -79,7 +79,7 @@ void Profile::NewConnection(
             << " alias=" << alias;
   LOG(INFO) << "PUSH_ENTER profile=" << this
           << " mutex=" << &connections_lock_
-          << " obj=" << getObjectPath()
+          << " obj=" << getObject().getObjectPath()
           << " path=" << device_object_path;
   {
     absl::MutexLock l(&connections_lock_);
@@ -91,7 +91,7 @@ void Profile::RequestDisconnection(
     const sdbus::ObjectPath &device_object_path) {
   auto device = devices_.get_device_by_path(device_object_path);
   if (device == nullptr) {
-    LOG(ERROR) << __func__ << ": " << getObjectPath()
+    LOG(ERROR) << __func__ << ": " << getObject().getObjectPath()
                        << ": RequestDisconnection called with a device object "
                           "we don't know about: "
                        << device_object_path;
@@ -135,8 +135,8 @@ bool ProfileManager::Register(std::optional<absl::string_view> name,
     options["Channel"] = static_cast<uint16_t>(0);
     options["PSM"] = static_cast<uint16_t>(0);
 
-    RegisterProfile(profile->getObjectPath(), std::string(service_uuid),
-                    options);
+    RegisterProfile(profile->getObject().getObjectPath(),
+                    std::string(service_uuid), options);
   } catch (const sdbus::Error &e) {
     BLUEZ_LOG_METHOD_CALL_ERROR(&getProxy(), "RegisterProfile", e);
     return false;
@@ -200,13 +200,13 @@ std::optional<sdbus::UnixFd> ProfileManager::GetServiceRecordFD(
 }
 );
 
-  LOG(INFO) << __func__ << ": " << profile->getObjectPath()
+  LOG(INFO) << __func__ << ": " << profile->getObject().getObjectPath()
                        << ": Attempting to get a FD for service "
                        << service_uuid << " on device " << mac_addr.ToString();
 
   LOG(INFO) << "WAIT profile=" << profile.get()
             << " mutex=" << &profile->connections_lock_
-            << " obj=" << profile->getObjectPath()
+            << " obj=" << profile->getObject().getObjectPath()
             << " key=" << mac_addr.ToString();
   auto cond = [mac_addr, profile, cancellation_flag]() {
     profile->connections_lock_.AssertHeld();
@@ -228,7 +228,7 @@ std::optional<sdbus::UnixFd> ProfileManager::GetServiceRecordFD(
 
   if (cancellation_flag != nullptr && cancellation_flag->Cancelled()) {
     LOG(INFO)
-        << __func__ << ": " << profile->getObjectPath() << ": "
+        << __func__ << ": " << profile->getObject().getObjectPath() << ": "
         << remote_device.GetMacAddress().ToString()
         << ": Cancelled waiting for a new connection on profile "
         << service_uuid;
@@ -261,7 +261,7 @@ ProfileManager::GetServiceRecordFD(absl::string_view service_uuid,
     profile = registered_services_[std::string(service_uuid)];
   }
 
-  LOG(INFO) << __func__ << ": " << profile->getObjectPath()
+  LOG(INFO) << __func__ << ": " << profile->getObject().getObjectPath()
                        << ": Attempting to get a FD for service "
                        << service_uuid;
 
@@ -291,7 +291,7 @@ ProfileManager::GetServiceRecordFD(absl::string_view service_uuid,
   if (cancellation_flag != nullptr && cancellation_flag->Cancelled()) {
     LOG(INFO)
         << __func__ << ": Cancelled waiting for new connections on profile "
-        << profile->getObjectPath();
+        << profile->getObject().getObjectPath();
     profile->connections_lock_.Unlock();
     return std::nullopt;
   }

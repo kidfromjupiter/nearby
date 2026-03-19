@@ -31,7 +31,8 @@ class NetworkManagerAccessPoint
   NetworkManagerAccessPoint &operator=(NetworkManagerAccessPoint &&) = delete;
   NetworkManagerAccessPoint(sdbus::IConnection &system_bus,
                             sdbus::ObjectPath access_point_object_path)
-      : ProxyInterfaces(system_bus, "org.freedesktop.NetworkManager",
+      : ProxyInterfaces(system_bus,
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
                         std::move(access_point_object_path)) {
     registerProxy();
   }

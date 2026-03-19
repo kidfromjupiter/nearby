@@ -36,8 +36,9 @@ class NetworkManager final
   NetworkManager &operator=(const NetworkManager &) = delete;
   NetworkManager &operator=(NetworkManager &&) = delete;
   explicit NetworkManager(std::shared_ptr<sdbus::IConnection> system_bus)
-      : ProxyInterfaces(*system_bus, "org.freedesktop.NetworkManager",
-                        "/org/freedesktop/NetworkManager"),
+      : ProxyInterfaces(*system_bus,
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
+                        sdbus::ObjectPath("/org/freedesktop/NetworkManager")),
         system_bus_(std::move(system_bus)),
         state_(kNMStateUnknown) {
     registerProxy();
@@ -106,7 +107,8 @@ class IP4Config : public sdbus::ProxyInterfaces<
   IP4Config &operator=(IP4Config &&) = delete;
   IP4Config(std::shared_ptr<sdbus::IConnection> system_bus,
             const sdbus::ObjectPath &config_object_path)
-      : ProxyInterfaces(*system_bus, "org.freedesktop.NetworkManager",
+      : ProxyInterfaces(*system_bus,
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
                         config_object_path),
         system_bus_(std::move(system_bus)) {
     registerProxy();
@@ -125,8 +127,9 @@ class ObjectManager final
   ObjectManager &operator=(const ObjectManager &) = delete;
   ObjectManager &operator=(ObjectManager &&) = delete;
   explicit ObjectManager(std::shared_ptr<sdbus::IConnection> system_bus)
-      : ProxyInterfaces(*system_bus, "org.freedesktop.NetworkManager",
-                        "/org/freedesktop"),
+      : ProxyInterfaces(*system_bus,
+                        sdbus::ServiceName("org.freedesktop.NetworkManager"),
+                        sdbus::ObjectPath("/org/freedesktop")),
         system_bus_(std::move(system_bus)) {
     registerProxy();
   }
@@ -141,11 +144,12 @@ class ObjectManager final
  protected:
   void onInterfacesAdded(
       const sdbus::ObjectPath &objectPath,
-      const std::map<std::string, std::map<std::string, sdbus::Variant>>
+      const std::map<sdbus::InterfaceName,
+                     std::map<sdbus::PropertyName, sdbus::Variant>>
           &interfacesAndProperties) override {}
   void onInterfacesRemoved(
       const sdbus::ObjectPath &objectPath,
-      const std::vector<std::string> &interfaces) override {}
+      const std::vector<sdbus::InterfaceName> &interfaces) override {}
 
  private:
   std::shared_ptr<sdbus::IConnection> system_bus_;

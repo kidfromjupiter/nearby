@@ -59,7 +59,8 @@ class LEAdvertisement final
   // Methods
   void Release() override {
     LOG(INFO) << __func__
-                      << ": LE Advertisement released: " << getObjectPath();
+                      << ": LE Advertisement released: "
+                      << getObject().getObjectPath();
   }
 
   // Properties  
@@ -100,7 +101,8 @@ class LEAdvertisementManager final
  public:
   LEAdvertisementManager(sdbus::IConnection& system_bus,
                          BluetoothAdapter& adapter)
-      : ProxyInterfaces(system_bus, "org.bluez", adapter.GetObjectPath()) {
+      : ProxyInterfaces(system_bus, sdbus::ServiceName("org.bluez"),
+                        adapter.GetObjectPath()) {
     registerProxy();
   }
   ~LEAdvertisementManager() { unregisterProxy(); }
