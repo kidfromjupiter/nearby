@@ -20,6 +20,7 @@
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
+#include "sharing/flags/generated/nearby_sharing_feature_flags.h"
 #include "sharing/linux/platform/linux_sharing_platform.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/nearby_sharing_service_factory.h"
@@ -38,6 +39,10 @@ void EnableBleL2capDefaults() {
   nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
       nearby::connections::config_package_nearby::nearby_connections_feature::
           kEnableBleL2cap,
+      true);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::sharing::config_package_nearby::nearby_sharing_feature::
+          kEnableBleForTransfer,
       true);
   //nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
   //    nearby::connections::config_package_nearby::nearby_connections_feature::
