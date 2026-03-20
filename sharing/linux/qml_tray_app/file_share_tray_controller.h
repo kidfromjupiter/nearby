@@ -123,15 +123,19 @@ class FileShareTrayController : public QObject {
   bool running_ = false;
 
   bool auto_accept_incoming_ = true;
+
+ // qr stuff
   QString qr_code_url_;
   QStringList qr_code_rows_;
   int qr_code_size_ = 0;
   QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
 
+ // pending send stuff
   QString pending_send_file_path_;
   QString pending_send_file_name_;
   qlonglong pending_send_target_id_ = 0;
 
+ // send targets
   QVariantList discovered_targets_;
   QHash<qlonglong, int> discovered_row_by_target_;
   QSet<qlonglong> pending_target_removals_;

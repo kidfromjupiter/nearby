@@ -539,33 +539,48 @@ void FileShareTrayController::hideToTray() {
 }
 
 void FileShareTrayController::startSendMode() {
-  service_->StartSendMode([this](NearbySharingApi::StatusCode status) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, status]() {
-          SetStatus(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
-          if (status != NearbySharingApi::StatusCode::kOk) {
-            running_ = false;
-            emit runningChanged();
-          }
-        },
-        Qt::QueuedConnection);
+  service_->StopReceiveMode([this](NearbySharingApi::StatusCode status)
+  {
+    if (status == NearbySharingApi::StatusCode::kOk || status == NearbySharingApi::StatusCode::kStatusAlreadyStopped)
+    {
+      service_->StartSendMode([this](NearbySharingApi::StatusCode status) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, status]() {
+              SetStatus(QStringLiteral("StartSendMode: %1").arg(StatusToString(status)));
+              if (status != NearbySharingApi::StatusCode::kOk) {
+                running_ = false;
+                emit runningChanged();
+              }
+            },
+            Qt::QueuedConnection);
+      });
+      }
+
   });
 }
 
 void FileShareTrayController::startReceiveMode() {
-  service_->StartReceiveMode([this](NearbySharingApi::StatusCode status) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, status]() {
-          SetStatus(
-              QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
-          if (status != NearbySharingApi::StatusCode::kOk) {
-            running_ = false;
-            emit runningChanged();
-          }
-        },
-        Qt::QueuedConnection);
+  service_->StopSendMode([this](NearbySharingApi::StatusCode status)
+  {
+    if (status == NearbySharingApi::StatusCode::kOk || status == NearbySharingApi::StatusCode::kStatusAlreadyStopped)
+    {
+
+      service_->StartReceiveMode([this](NearbySharingApi::StatusCode status) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, status]() {
+              SetStatus(
+                  QStringLiteral("StartReceiveMode: %1").arg(StatusToString(status)));
+              if (status != NearbySharingApi::StatusCode::kOk) {
+                running_ = false;
+                emit runningChanged();
+              }
+            },
+            Qt::QueuedConnection);
+      });
+      }
+
   });
 }
 
