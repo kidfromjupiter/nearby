@@ -107,11 +107,11 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   bool BleV2Medium::StartAdvertising(
     const api::ble::BleAdvertisementData &advertising_data,
     api::ble::AdvertiseParameters advertise_set_parameters) {
-    if (!advertising_data.is_extended_advertisement)
-    {
-      // can't send two LE advertisements at the same
-      return true;
-    }
+    //if (!advertising_data.is_extended_advertisement)
+    //{
+    //  // can't send two LE advertisements at the same
+    //  return true;
+    //}
     if (!adapter_.IsEnabled()) {
       LOG(WARNING) << "BLE cannot start advertising because the "
                             "bluetooth adapter is not enabled.";
@@ -135,10 +135,10 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
                     << adapter_.GetObjectPath();
 
     try {
-      adv_manager_->RegisterAdvertisement((*it)->getObject().getObjectPath(), {});
+      adv_manager_->RegisterAdvertisementSync((*it)->getObject().getObjectPath(), {});
     } catch (const sdbus::Error &e) {
       advs_.erase(it);
-      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisement", e);
+      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisementSync", e);
       return false;
     }
 
@@ -175,11 +175,11 @@ BleV2Medium::StartAdvertising(
   // Keep async API surface, but register using the same typed DBus path as the
   // working sync implementation to avoid signature mismatch (oa{sv} vs sa{sv}).
   try {
-    adv_manager_->RegisterAdvertisement((*adv_it)->getObject().getObjectPath(), {});
+    adv_manager_->RegisterAdvertisementSync((*adv_it)->getObject().getObjectPath(), {});
     shared_cb->start_advertising_result(absl::OkStatus());
   } catch (const sdbus::Error &e) {
     advs_.erase(adv_it);
-    DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisement", e);
+    DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "RegisterAdvertisementSync", e);
     auto name = e.getName();
     std::string msg = e.getMessage();
     absl::Status status;
@@ -202,9 +202,9 @@ BleV2Medium::StartAdvertising(
                          << (*adv_it)->getObject().getObjectPath();
     absl::MutexLock lock(&advs_mutex_);
     try {
-      adv_manager_->UnregisterAdvertisement((*adv_it)->getObject().getObjectPath());
+      adv_manager_->UnregisterAdvertisementSync((*adv_it)->getObject().getObjectPath());
     } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisement", e);
+      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisementSync", e);
       return absl::UnknownError(e.getMessage());
     }
     advs_.erase(adv_it);
@@ -219,10 +219,10 @@ BleV2Medium::StartAdvertising(
     try {
       for (auto& adv: advs_)
       {
-        adv_manager_->UnregisterAdvertisement(adv->getObject().getObjectPath());
+        adv_manager_->UnregisterAdvertisementSync(adv->getObject().getObjectPath());
       }
     } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisement", e);
+      DBUS_LOG_METHOD_CALL_ERROR(adv_manager_, "UnregisterAdvertisementSync", e);
       return false;
     }
 

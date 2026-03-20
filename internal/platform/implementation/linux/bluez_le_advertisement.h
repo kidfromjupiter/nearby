@@ -15,6 +15,7 @@
 #ifndef PLATFORM_IMPL_LINUX_API_BLUEZ_BLE_ADVERTISEMENT_H_
 #define PLATFORM_IMPL_LINUX_API_BLUEZ_BLE_ADVERTISEMENT_H_
 
+#include <future>
 #include <sdbus-c++/AdaptorInterfaces.h>
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/ProxyInterfaces.h>
@@ -111,6 +112,67 @@ class LEAdvertisementManager final
   LEAdvertisementManager(LEAdvertisementManager&&) = delete;
   LEAdvertisementManager& operator=(const LEAdvertisementManager&) = delete;
   LEAdvertisementManager& operator=(LEAdvertisementManager&&) = delete;
+
+  // Synchronous wrapper for RegisterAdvertisement
+  void RegisterAdvertisementSync(const sdbus::ObjectPath& advertisement, 
+                                  const std::map<std::string, sdbus::Variant>& options) {
+    std::promise<std::optional<sdbus::Error>> promise;
+    auto future = promise.get_future();
+    
+    {
+      absl::MutexLock lock(&pending_ops_mutex_);
+      pending_register_op_ = std::move(promise);
+    }
+    
+    RegisterAdvertisement(advertisement, options);
+    
+    auto error = future.get();
+    if (error) {
+      throw *error;
+    }
+  }
+
+  // Synchronous wrapper for UnregisterAdvertisement  
+  void UnregisterAdvertisementSync(const sdbus::ObjectPath& service) {
+    std::promise<std::optional<sdbus::Error>> promise;
+    auto future = promise.get_future();
+    
+    {
+      absl::MutexLock lock(&pending_ops_mutex_);
+      pending_unregister_op_ = std::move(promise);
+    }
+    
+    UnregisterAdvertisement(service);
+    
+    auto error = future.get();
+    if (error) {
+      throw *error;
+    }
+  }
+
+ protected:
+  void onRegisterAdvertisementReply(std::optional<sdbus::Error> error) override {
+    absl::MutexLock lock(&pending_ops_mutex_);
+    if (pending_register_op_) {
+      pending_register_op_->set_value(std::move(error));
+      pending_register_op_.reset();
+    }
+  }
+
+  void onUnregisterAdvertisementReply(std::optional<sdbus::Error> error) override {
+    absl::MutexLock lock(&pending_ops_mutex_);
+    if (pending_unregister_op_) {
+      pending_unregister_op_->set_value(std::move(error));
+      pending_unregister_op_.reset();
+    }
+  }
+
+ private:
+  absl::Mutex pending_ops_mutex_;
+  std::optional<std::promise<std::optional<sdbus::Error>>> pending_register_op_ 
+      ABSL_GUARDED_BY(pending_ops_mutex_);
+  std::optional<std::promise<std::optional<sdbus::Error>>> pending_unregister_op_
+      ABSL_GUARDED_BY(pending_ops_mutex_);
 };
 }  // namespace bluez
 }  // namespace linux

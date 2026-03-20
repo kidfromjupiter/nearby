@@ -3,10 +3,12 @@
 <node>
    <interface name="org.bluez.LEAdvertisingManager1">
       <method name="RegisterAdvertisement">
+         <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
          <arg name="advertisement" type="o" direction="in" />
          <arg name="options" type="a{sv}" direction="in" />
       </method>
       <method name="UnregisterAdvertisement">
+         <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
          <arg name="service" type="o" direction="in" />
       </method>
       <property name="ActiveInstances" type="y" access="read" />

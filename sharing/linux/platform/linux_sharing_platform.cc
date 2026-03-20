@@ -1065,7 +1065,7 @@ class LinuxFastInitiationManager final
             advertising_parameters);
 
     try {
-      adv_manager_->RegisterAdvertisement(advertisement_->getObject().getObjectPath(), {});
+      adv_manager_->RegisterAdvertisementSync(advertisement_->getObject().getObjectPath(), {});
     } catch (const sdbus::Error& e) {
       advertisement_.reset();
       if (error_callback) {
@@ -1090,9 +1090,9 @@ class LinuxFastInitiationManager final
     absl::MutexLock lock(&mutex_);
     if (advertisement_ != nullptr && adv_manager_ != nullptr) {
       try {
-        adv_manager_->UnregisterAdvertisement(advertisement_->getObject().getObjectPath());
+        adv_manager_->UnregisterAdvertisementSync(advertisement_->getObject().getObjectPath());
       } catch (const sdbus::Error& e) {
-        DBUS_LOG_METHOD_CALL_ERROR(adv_manager_.get(), "UnregisterAdvertisement",
+        DBUS_LOG_METHOD_CALL_ERROR(adv_manager_.get(), "UnregisterAdvertisementSync",
                                    e);
       }
       advertisement_.reset();
