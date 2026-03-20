@@ -153,7 +153,7 @@ std::unique_ptr<::nearby::linux::BluetoothAdapter> CreateFastInitBluetoothAdapte
   try {
     auto interfaces = manager.GetManagedObjects();
     for (auto& [object, properties] : interfaces) {
-      if (properties.count(org::bluez::Adapter1_proxy::INTERFACE_NAME) == 1) {
+      if (properties.count(sdbus::InterfaceName(org::bluez::Adapter1_proxy::INTERFACE_NAME)) == 1) {
         LOG(INFO) << __func__ << ": found bluetooth adapter " << object;
         return std::make_unique<::nearby::linux::BluetoothAdapter>(system_bus,
                                                                    object);
@@ -1065,7 +1065,7 @@ class LinuxFastInitiationManager final
             advertising_parameters);
 
     try {
-      adv_manager_->RegisterAdvertisement(advertisement_->getObjectPath(), {});
+      adv_manager_->RegisterAdvertisement(advertisement_->getObject().getObjectPath(), {});
     } catch (const sdbus::Error& e) {
       advertisement_.reset();
       if (error_callback) {
@@ -1090,7 +1090,7 @@ class LinuxFastInitiationManager final
     absl::MutexLock lock(&mutex_);
     if (advertisement_ != nullptr && adv_manager_ != nullptr) {
       try {
-        adv_manager_->UnregisterAdvertisement(advertisement_->getObjectPath());
+        adv_manager_->UnregisterAdvertisement(advertisement_->getObject().getObjectPath());
       } catch (const sdbus::Error& e) {
         DBUS_LOG_METHOD_CALL_ERROR(adv_manager_.get(), "UnregisterAdvertisement",
                                    e);
