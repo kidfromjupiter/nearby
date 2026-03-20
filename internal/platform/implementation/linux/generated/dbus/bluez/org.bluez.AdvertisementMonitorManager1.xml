@@ -3,9 +3,11 @@
 <node>
    <interface name="org.bluez.AdvertisementMonitorManager1">
       <method name="RegisterMonitor">
+         <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
          <arg name="application" type="o" direction="in" />
       </method>
       <method name="UnregisterMonitor">
+         <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
          <arg name="application" type="o" direction="in" />
       </method>
       <property name="SupportedMonitorTypes" type="as" access="read" />

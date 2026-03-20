@@ -17,8 +17,11 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/synchronization/notification.h"
 #include <sdbus-c++/IConnection.h>
 
 #include "absl/base/attributes.h"
@@ -118,6 +121,8 @@ class BleV2Medium final : public api::ble::BleMedium {
 
  private:
   bool StartLEDiscovery();
+  bool WaitForAdvertisementMonitorManager();
+  void OnRegisterMonitorReply(std::optional<sdbus::Error> error);
 
   bool MonitorManagerSupportsOr() {
     std::vector<std::string> supported_types;
@@ -148,6 +153,14 @@ class BleV2Medium final : public api::ble::BleMedium {
 
   std::unique_ptr<RootObjectManager> root_object_manager_;
   std::unique_ptr<bluez::AdvertisementMonitorManager> adv_monitor_manager_;
+  absl::Notification adv_monitor_manager_ready_notification_;
+  absl::Mutex adv_monitor_manager_ready_mutex_;
+  bool adv_monitor_manager_ready_ ABSL_GUARDED_BY(adv_monitor_manager_ready_mutex_) =
+      false;
+  std::string adv_monitor_manager_error_name_
+      ABSL_GUARDED_BY(adv_monitor_manager_ready_mutex_);
+  std::string adv_monitor_manager_error_message_
+      ABSL_GUARDED_BY(adv_monitor_manager_ready_mutex_);
   absl::Mutex active_adv_monitors_mutex_;
   absl::flat_hash_map<
       Uuid,

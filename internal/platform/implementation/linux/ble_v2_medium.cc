@@ -68,7 +68,7 @@ BleL2capSocket::ProtocolMode GetL2capProtocolMode() {
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   : system_bus_(adapter.GetConnection()),
     adapter_(adapter),
-    gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
+    //gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
@@ -89,16 +89,59 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
         << __func__
         << ": Registering path /com/google/nearby/medium/ble/advertisement/monitor with AdvertisementMonitorManager at "
         << adv_monitor_manager_->getProxy().getObjectPath();
-    try {
-      adv_monitor_manager_->RegisterMonitor(root_object_manager_->getObject().getObjectPath());
-    } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(adv_monitor_manager_, "RegisterMonitor", e);
-    }
+    adv_monitor_manager_->SetRegisterMonitorReplyCallback(
+        [this](std::optional<sdbus::Error> error) {
+          OnRegisterMonitorReply(std::move(error));
+        });
+    adv_monitor_manager_->RegisterMonitor(
+        root_object_manager_->getObject().getObjectPath());
+  } else {
+    adv_monitor_manager_ready_notification_.Notify();
   }
   // if (gatt_discovery_->InitializeKnownServices()) {
   //   LOG(ERROR) << __func__
   //                      << ": Could not initialize known GATT services";
   // }
+}
+
+void BleV2Medium::OnRegisterMonitorReply(std::optional<sdbus::Error> error) {
+  {
+    absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+    adv_monitor_manager_ready_ = !error.has_value() || !error->isValid();
+    if (error.has_value() && error->isValid()) {
+      adv_monitor_manager_error_name_ = error->getName();
+      adv_monitor_manager_error_message_ = error->getMessage();
+    }
+  }
+
+  if (error.has_value() && error->isValid()) {
+    LOG(ERROR) << __func__ << ": Got error '" << error->getName()
+               << "' with message '" << error->getMessage()
+               << "' while calling RegisterMonitor on object "
+               << adv_monitor_manager_->getProxy().getObjectPath();
+  }
+
+  adv_monitor_manager_ready_notification_.Notify();
+}
+
+bool BleV2Medium::WaitForAdvertisementMonitorManager() {
+  if (adv_monitor_manager_ == nullptr) {
+    LOG(WARNING) << __func__ << ": Advertising monitor not supported by BlueZ";
+    return false;
+  }
+
+  adv_monitor_manager_ready_notification_.WaitForNotification();
+
+  absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+  if (adv_monitor_manager_ready_) {
+    return true;
+  }
+
+  LOG(WARNING) << __func__
+               << ": AdvertisementMonitorManager registration failed with name '"
+               << adv_monitor_manager_error_name_ << "' and message '"
+               << adv_monitor_manager_error_message_ << "'";
+  return false;
 }
 
   // sync api
@@ -240,9 +283,7 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
     return false;
   }
 
-  if (adv_monitor_manager_ == nullptr) {
-    LOG(WARNING) << __func__
-                         << ": Advertising monitor not supported by BlueZ";
+  if (!WaitForAdvertisementMonitorManager()) {
     // TODO: Implement manual monitoring.
     return false;
   }
@@ -314,7 +355,7 @@ bool BleV2Medium::StopScanning() {
     return false;
   }
 
-  if (adv_monitor_manager_ == nullptr) {
+  if (!WaitForAdvertisementMonitorManager()) {
     // TODO: Implement manual monitoring.
     return false;
   }
@@ -349,7 +390,7 @@ bool BleV2Medium::StopScanning() {
   BleV2Medium::StartScanning(const Uuid &service_uuid,
                              api::ble::TxPowerLevel tx_power_level,
                              ScanningCallback callback) {
-    if (adv_monitor_manager_ == nullptr) {
+    if (!WaitForAdvertisementMonitorManager()) {
       // TODO: Implement manual monitoring.
       return nullptr;
     }
