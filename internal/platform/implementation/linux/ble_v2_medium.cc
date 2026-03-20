@@ -34,8 +34,8 @@
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "absl/types/span.h"
 #include "absl/time/time.h"
-#include "ble_gatt_client.h"
-#include "ble_gatt_server.h"
+//#include "ble_gatt_client.h"
+//#include "ble_gatt_server.h"
 #include "ble_l2cap_server_socket.h"
 #include "ble_l2cap_socket.h"
 #include "internal/base/observer_list.h"
@@ -479,11 +479,11 @@ bool BleV2Medium::StopScanning() {
 std::unique_ptr<api::ble::GattServer> BleV2Medium::StartGattServer(
   api::ble::ServerGattConnectionCallback callback) {
   // (void)callback;
-  // return nullptr;
+  return nullptr;
 
-  return std::make_unique<GattServer>(
-  *system_bus_, adapter_, devices_,std::move(callback)
-  );
+  //return std::make_unique<GattServer>(
+  //*system_bus_, adapter_, devices_,std::move(callback)
+  //);
 }
 
 std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
