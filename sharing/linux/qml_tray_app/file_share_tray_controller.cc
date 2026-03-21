@@ -296,11 +296,6 @@ void FileShareTrayController::start() {
   state_.SetRunning(true);
   emit runningChanged();
 
-  if (state_.mode() == QStringLiteral("Send")) {
-    startSendMode();
-  } else {
-    startReceiveMode();
-  }
 }
 
 void FileShareTrayController::stop() {
@@ -371,19 +366,11 @@ void FileShareTrayController::switchToReceiveMode() {
         QStringLiteral("Wait for the current transfer to complete."));
     return;
   }
-
-  if (state_.mode() != QStringLiteral("Receive")) {
+  if (state_.running())
+  {
+    startReceiveMode();
     state_.SetMode(QStringLiteral("Receive"));
     emit modeChanged();
-    if (state_.running()) {
-      stop();
-      start();
-      return;
-    }
-  }
-
-  if (!state_.running()) {
-    start();
   }
 }
 
@@ -409,18 +396,11 @@ void FileShareTrayController::switchToSendModeWithFile(const QString& file_path)
         QStringLiteral("Wait for the current transfer to complete."));
     return;
   }
-
-  if (state_.mode() != QStringLiteral("Send")) {
+  if (state_.running())
+  {
+    startSendMode();
     state_.SetMode(QStringLiteral("Send"));
     emit modeChanged();
-    if (state_.running()) {
-      stop();
-      start();
-    }
-  }
-
-  if (!state_.running()) {
-    start();
   }
 
   setStatus(QStringLiteral("Discovery started. Choose a nearby device."));

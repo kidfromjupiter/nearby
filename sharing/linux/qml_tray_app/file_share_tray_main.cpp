@@ -232,6 +232,7 @@ int main(int argc, char* argv[]) {
   tray.setContextMenu(&tray_menu);
   tray.show();
 
+  controller.start();
   controller.switchToReceiveMode();
 
   return app.exec();
