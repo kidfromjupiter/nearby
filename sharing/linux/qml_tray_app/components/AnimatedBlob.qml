@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 
 Item {
     anchors.fill: parent
@@ -52,9 +53,9 @@ Item {
             for (var i = 0; i < n; i++) {
                 var a = (i / n) * Math.PI * 2 - Math.PI / 2
                 var r = 130
-                      + Math.sin(a * 2 + t)          * 11
-                      + Math.cos(a * 3 - t * 0.6)    *  8
-                      + Math.sin(a * 1.5 + t * 0.35) *  6
+                    + Math.sin(a * 2 + t)          * 11
+                    + Math.cos(a * 3 - t * 0.6)    *  8
+                    + Math.sin(a * 1.5 + t * 0.35) *  6
                 pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r })
             }
 
@@ -81,10 +82,17 @@ Item {
         }
     }
 
-    SendUrlPanel {
+    MultiEffect {
         anchors.centerIn: parent
-        width: parent.width - 96
-        visible: isSendMode
+        width: blobCanvas.width + 10
+        height: blobCanvas.height + 10
+        source: blobCanvas
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 40
+        saturation: 0.1
+        brightness: 0.05
+        autoPaddingEnabled: true
     }
 
     Label {
