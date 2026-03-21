@@ -16,6 +16,8 @@ jobs:
   build-and-release-linux:
     name: Build and Release Linux Bundle
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:25.04
 
     steps:
       - name: Checkout

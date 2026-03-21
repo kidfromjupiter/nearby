@@ -23,6 +23,8 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:25.04
     steps:
     - uses: actions/checkout@v6
     - name: Build Connections
