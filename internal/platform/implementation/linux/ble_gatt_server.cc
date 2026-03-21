@@ -24,6 +24,19 @@
 
 namespace nearby {
 namespace linux {
+namespace {
+
+void LogAsyncGattManagerError(const bluez::GattManager& manager,
+                              const char* method_name,
+                              const sdbus::Error& error) {
+  LOG(ERROR) << method_name << ": Got error '" << error.getName()
+             << "' with message '" << error.getMessage()
+             << "' while calling " << method_name << " on object "
+             << manager.getProxy().getObjectPath();
+}
+
+}  // namespace
+
 absl::optional<api::ble::GattCharacteristic>
 GattServer::CreateCharacteristic(
     const Uuid& service_uuid, const Uuid& characteristic_uuid,
@@ -60,23 +73,53 @@ GattServer::CreateCharacteristic(
 
   if (service->AddCharacteristic(service_uuid, characteristic_uuid, permission,
                                  property)) {
-  try {
-    LOG(INFO)<< __func__ << ": Registering service on gattmanager with characteristic_uuid: "
-          << std::string(characteristic_uuid) << " and service_uuid: " << std::string(service_uuid);
-
-    gatt_manager_ -> RegisterApplication(gatt_service_root_object_manager -> getObject().getObjectPath(), {});
-  } catch (const sdbus::Error& e) {
-    LOG(ERROR)
-        << __func__
-        << ": error calling RegisterAplication for GattManager with object path "
-        << gatt_manager_->getProxy().getObjectPath() << " with name '" << e.getName()
-        << "' and message '" << e.getMessage() << "'";
-    return std::nullopt;
-  }
-
-
     services_.insert({service_uuid, std::move(service)});
+    {
+      absl::MutexLock profile_lock(&profiles_mutex_);
+      gatt_profiles_.insert({service_uuid, std::move(profile)});
+    }
 
+    bool should_register_application = false;
+    {
+      absl::MutexLock registration_lock(&registration_mutex_);
+      should_register_application =
+          !gatt_application_registered_ && !gatt_application_register_pending_;
+      if (should_register_application) {
+        gatt_application_register_pending_ = true;
+      }
+    }
+
+    if (should_register_application) {
+      try {
+        LOG(INFO) << __func__
+                  << ": Registering GATT application root "
+                  << gatt_service_root_object_manager->getObject().getObjectPath()
+                  << " with characteristic_uuid: "
+                  << std::string(characteristic_uuid)
+                  << " and service_uuid: " << std::string(service_uuid);
+        auto call = gatt_manager_->RegisterApplication(
+            gatt_service_root_object_manager->getObject().getObjectPath(), {});
+        absl::MutexLock registration_lock(&registration_mutex_);
+        register_application_call_ = std::move(call);
+      } catch (const sdbus::Error& e) {
+        {
+          absl::MutexLock registration_lock(&registration_mutex_);
+          gatt_application_register_pending_ = false;
+          register_application_call_.reset();
+        }
+        services_.erase(service_uuid);
+        {
+          absl::MutexLock profile_lock(&profiles_mutex_);
+          gatt_profiles_.erase(service_uuid);
+        }
+        LOG(ERROR)
+            << __func__
+            << ": error calling RegisterApplication for GattManager with object path "
+            << gatt_manager_->getProxy().getObjectPath() << " with name '"
+            << e.getName() << "' and message '" << e.getMessage() << "'";
+        return std::nullopt;
+      }
+    }
 
     api::ble::GattCharacteristic characteristic{
         characteristic_uuid, service_uuid, permission, property};
@@ -137,19 +180,86 @@ absl::Status GattServer::NotifyCharacteristicChanged(
   return chr->NotifyChanged(confirm, new_value);
 }
 
+void GattServer::OnRegisterApplicationReply(std::optional<sdbus::Error> error) {
+  {
+    absl::MutexLock lock(&registration_mutex_);
+    gatt_application_register_pending_ = false;
+    register_application_call_.reset();
+    gatt_application_registered_ = !error.has_value() || !error->isValid();
+  }
+
+  if (error.has_value() && error->isValid()) {
+    LogAsyncGattManagerError(*gatt_manager_, "RegisterApplication", *error);
+  }
+}
+
+void GattServer::OnUnregisterApplicationReply(
+    std::optional<sdbus::Error> error) {
+  {
+    absl::MutexLock lock(&registration_mutex_);
+    gatt_application_unregister_pending_ = false;
+    unregister_application_call_.reset();
+  }
+
+  if (error.has_value() && error->isValid()) {
+    LogAsyncGattManagerError(*gatt_manager_, "UnregisterApplication", *error);
+  }
+}
+
 void GattServer::Stop() {
-  bluez::GattManager manager(system_bus_, adapter_.GetObjectPath());
-  absl::MutexLock lock(&services_mutex_);
-  for (auto& [uuid, service] : services_) {
-    LOG(INFO) << __func__ << ": Unregistering service "
-                         << service->getObject().getObjectPath();
-    try {
-      manager.UnregisterApplication(sdbus::ObjectPath("/"));
-    } catch (const sdbus::Error& e) {
-      DBUS_LOG_METHOD_CALL_ERROR(&manager, "UnregisterApplication", e);
+  sdbus::ObjectPath app_path =
+      gatt_service_root_object_manager->getObject().getObjectPath();
+  bool should_unregister = false;
+
+  {
+    absl::MutexLock registration_lock(&registration_mutex_);
+    if (register_application_call_.has_value() &&
+        register_application_call_->isPending()) {
+      register_application_call_->cancel();
+    }
+    register_application_call_.reset();
+    gatt_application_register_pending_ = false;
+
+    should_unregister = gatt_application_registered_ &&
+                        !gatt_application_unregister_pending_;
+    if (should_unregister) {
+      gatt_application_registered_ = false;
+      gatt_application_unregister_pending_ = true;
     }
   }
-  // services_.clear();
+
+  {
+    absl::MutexLock lock(&services_mutex_);
+    for (auto& [uuid, service] : services_) {
+      LOG(INFO) << __func__ << ": Unregistering service "
+                << service->getObject().getObjectPath();
+    }
+  }
+
+  if (should_unregister) {
+    try {
+      auto call = gatt_manager_->UnregisterApplication(app_path);
+      absl::MutexLock registration_lock(&registration_mutex_);
+      unregister_application_call_ = std::move(call);
+    } catch (const sdbus::Error& e) {
+      {
+        absl::MutexLock registration_lock(&registration_mutex_);
+        gatt_application_unregister_pending_ = false;
+        unregister_application_call_.reset();
+      }
+      DBUS_LOG_METHOD_CALL_ERROR(gatt_manager_.get(), "UnregisterApplication",
+                                 e);
+    }
+  }
+
+  {
+    absl::MutexLock lock(&services_mutex_);
+    services_.clear();
+  }
+  {
+    absl::MutexLock profile_lock(&profiles_mutex_);
+    gatt_profiles_.clear();
+  }
 }
 
 }  // namespace linux

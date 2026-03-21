@@ -22,11 +22,11 @@
 #include "internal/base/observer_list.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
+#include "internal/platform/implementation/linux/bluez_agent.h"
 #include "internal/platform/implementation/linux/bluetooth_bluez_profile.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_device.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_medium.h"
 
-// #include "bluez_agent.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_server_socket.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_socket.h"
 #include "internal/platform/implementation/linux/bluetooth_pairing.h"
@@ -34,13 +34,19 @@
 
 namespace nearby {
 namespace linux {
+namespace {
+
+constexpr char kBluezAgentPath[] = "/com/google/nearby/bluetooth/agent";
+
+}  // namespace
+
 BluetoothClassicMedium::BluetoothClassicMedium(BluetoothAdapter &adapter)
     : system_bus_(adapter.GetConnection()),
       adapter_(adapter),
       observers_(nullptr),
       devices_(nullptr),
       device_watcher_(nullptr),
-      // agent_manager_(std::make_unique<AgentManager>(*system_bus_)),
+      agent_manager_(std::make_unique<AgentManager>(*system_bus_)),
       profile_manager_(nullptr) {
   auto shared =
       GetSharedBluetoothDevices(system_bus_, adapter_.GetObjectPath());
@@ -48,6 +54,14 @@ BluetoothClassicMedium::BluetoothClassicMedium(BluetoothAdapter &adapter)
   devices_ = shared->devices;
   profile_manager_ =
       std::make_unique<ProfileManager>(*system_bus_, *devices_);
+
+  if (!agent_manager_->Register(
+          /*capability=*/absl::string_view("NoInputNoOutput"),
+          sdbus::ObjectPath(kBluezAgentPath))) {
+    LOG(WARNING) << __func__
+                 << ": Failed to register default BlueZ agent at "
+                 << kBluezAgentPath;
+  }
 }
 
 bool BluetoothClassicMedium::StartDiscovery(
@@ -148,8 +162,6 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
 std::unique_ptr<api::BluetoothServerSocket>
 BluetoothClassicMedium::ListenForService(const std::string &service_name,
                                          const std::string &service_uuid) {
-  LOG(INFO) << __func__ << ": Creating bluez agent on path: " << "/com/example/bluez_agent" ;
-
   if (!profile_manager_->ProfileRegistered(service_uuid)) {
     if (!profile_manager_->Register(service_name, service_uuid)) {
       LOG(ERROR) << __func__ << ": Could not register profile "

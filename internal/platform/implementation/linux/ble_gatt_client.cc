@@ -208,7 +208,6 @@ bool BluezGattDiscovery::InitializeKnownServices() {
     return false;
   }
 
-  absl::flat_hash_map<sdbus::ObjectPath, GattServiceClient> cached_services;
   absl::MutexLock lock(&mutex_);
   auto chr_it = std::find_if(
       objects.cbegin(), objects.cend(),
@@ -219,28 +218,26 @@ bool BluezGattDiscovery::InitializeKnownServices() {
                    sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME)) == 1;
       });
 
-for (; chr_it != objects.cend(); ++chr_it) {
-  const auto& [path, ifaces] = *chr_it;
+  for (; chr_it != objects.cend(); ++chr_it) {
+    const auto& [path, ifaces] = *chr_it;
 
-  auto iface_it = ifaces.find(sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME));
-  if (iface_it == ifaces.end()) {
-    // Not a GattCharacteristic1 object (or interfaces map incomplete) -> skip
-    continue;
+    auto iface_it = ifaces.find(sdbus::InterfaceName(
+        org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME));
+    if (iface_it == ifaces.end()) {
+      continue;
+    }
+
+    const auto& properties = iface_it->second;
+    auto maybe_props = characteristicProperties(path, properties);
+    if (!maybe_props.has_value()) continue;
+
+    auto [service_uuid, chr_uuid, device_path] = *maybe_props;
+
+    discovered_characteristics_.emplace(
+        std::make_tuple(service_uuid, chr_uuid, device_path), path);
+    characteristics_properties_.emplace(
+        path, std::make_tuple(service_uuid, chr_uuid, device_path));
   }
-
-  const auto& properties = iface_it->second;
-
-  auto maybe_props = characteristicProperties(path, properties);
-  if (!maybe_props.has_value()) continue;
-
-  auto [chr_uuid, service_uuid, device_path] = *maybe_props;
-
-  discovered_characteristics_.emplace(
-      std::make_tuple(chr_uuid, service_uuid, device_path), path);
-
-  characteristics_properties_.emplace(
-      path, std::make_tuple(chr_uuid, service_uuid, device_path));
-}
 
   return true;
 }
@@ -337,7 +334,7 @@ BluezGattDiscovery::GetSubscribedCharacteristic(
   }
 
   return std::make_unique<bluez::SubscribedGattCharacteristicClient>(
-      system_bus_, device_object_path, std::move(on_characteristic_changed_cb));
+      system_bus_, path_it->second, std::move(on_characteristic_changed_cb));
 }
 
 std::optional<std::tuple<Uuid, Uuid, sdbus::ObjectPath>>
@@ -396,7 +393,7 @@ try {
     return std::nullopt;
   }
 
-  return std::make_tuple(*chr_uuid, service_uuid, device_path);
+  return std::make_tuple(service_uuid, *chr_uuid, device_path);
 }
 
 void BluezGattDiscovery::onInterfacesAdded(
@@ -414,12 +411,12 @@ void BluezGattDiscovery::onInterfacesAdded(
   absl::MutexLock lock(&mutex_);
   auto maybe_props = characteristicProperties(objectPath, properties);
   if (!maybe_props.has_value()) return;
-  auto [chr_uuid, service_uuid, device_path] = *maybe_props;
+  auto [service_uuid, chr_uuid, device_path] = *maybe_props;
 
   discovered_characteristics_.emplace(
-      std::make_tuple(chr_uuid, service_uuid, device_path), objectPath);
+      std::make_tuple(service_uuid, chr_uuid, device_path), objectPath);
   characteristics_properties_.emplace(
-      objectPath, std::make_tuple(chr_uuid, service_uuid, device_path));
+      objectPath, std::make_tuple(service_uuid, chr_uuid, device_path));
 }
 
 void BluezGattDiscovery::onInterfacesRemoved(

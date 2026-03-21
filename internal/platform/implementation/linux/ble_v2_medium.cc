@@ -27,17 +27,14 @@
 
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/ble.h"
-// #include "internal/platform/implementation/linux/ble_gatt_client.h"
-// #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "internal/platform/implementation/linux/ble_v2_medium.h"
 
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "absl/types/span.h"
 #include "absl/time/time.h"
-//#include "ble_gatt_client.h"
-//#include "ble_gatt_server.h"
 #include "ble_l2cap_server_socket.h"
 #include "ble_l2cap_socket.h"
+#include "ble_gatt_server.h"
 #include "internal/base/observer_list.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_device.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
@@ -68,7 +65,6 @@ BleL2capSocket::ProtocolMode GetL2capProtocolMode() {
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   : system_bus_(adapter.GetConnection()),
     adapter_(adapter),
-    //gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
@@ -98,10 +94,6 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   } else {
     adv_monitor_manager_ready_notification_.Notify();
   }
-  // if (gatt_discovery_->InitializeKnownServices()) {
-  //   LOG(ERROR) << __func__
-  //                      << ": Could not initialize known GATT services";
-  // }
 }
 
 void BleV2Medium::OnRegisterMonitorReply(std::optional<sdbus::Error> error) {
@@ -478,12 +470,9 @@ bool BleV2Medium::StopScanning() {
 
 std::unique_ptr<api::ble::GattServer> BleV2Medium::StartGattServer(
   api::ble::ServerGattConnectionCallback callback) {
-  // (void)callback;
+  (void)callback;
+  LOG(INFO) << __func__ << ": GATT is disabled on linux.";
   return nullptr;
-
-  //return std::make_unique<GattServer>(
-  //*system_bus_, adapter_, devices_,std::move(callback)
-  //);
 }
 
 std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
@@ -493,8 +482,7 @@ std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
   (void)peripheral_id;
   (void)tx_power_level;
   (void)callback;
-  LOG(WARNING) << __func__
-               << ": GATT client connection is not supported on Linux yet.";
+  LOG(INFO) << __func__ << ": GATT is disabled on linux.";
   return nullptr;
 }
 

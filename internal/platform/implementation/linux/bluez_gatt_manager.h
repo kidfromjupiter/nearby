@@ -14,10 +14,15 @@
 
 #ifndef PLATFORM_IMPL_LINUX_API_BLUEZ_GATT_MANAGER_H_
 #define PLATFORM_IMPL_LINUX_API_BLUEZ_GATT_MANAGER_H_
+
+#include <optional>
+
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/ProxyInterfaces.h>
 #include <sdbus-c++/Types.h>
 
+#include "absl/functional/any_invocable.h"
+#include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/gatt_manager_client.h"
 namespace nearby {
 namespace linux {
@@ -25,6 +30,8 @@ namespace bluez {
 class GattManager
     : public sdbus::ProxyInterfaces<org::bluez::GattManager1_proxy> {
  public:
+  using ReplyCallback = absl::AnyInvocable<void(std::optional<sdbus::Error>)>;
+
   GattManager(const GattManager &) = delete;
   GattManager(GattManager &&) = delete;
   GattManager &operator=(const GattManager &) = delete;
@@ -37,6 +44,38 @@ class GattManager
     registerProxy();
   }
   ~GattManager() { unregisterProxy(); }
+
+  void SetRegisterApplicationReplyCallback(ReplyCallback callback) {
+    absl::MutexLock lock(&callbacks_mutex_);
+    register_application_reply_callback_ = std::move(callback);
+  }
+
+  void SetUnregisterApplicationReplyCallback(ReplyCallback callback) {
+    absl::MutexLock lock(&callbacks_mutex_);
+    unregister_application_reply_callback_ = std::move(callback);
+  }
+
+ protected:
+  void onRegisterApplicationReply(std::optional<sdbus::Error> error) override {
+    absl::MutexLock lock(&callbacks_mutex_);
+    if (register_application_reply_callback_.has_value()) {
+      (*register_application_reply_callback_)(std::move(error));
+    }
+  }
+
+  void onUnregisterApplicationReply(std::optional<sdbus::Error> error) override {
+    absl::MutexLock lock(&callbacks_mutex_);
+    if (unregister_application_reply_callback_.has_value()) {
+      (*unregister_application_reply_callback_)(std::move(error));
+    }
+  }
+
+ private:
+  absl::Mutex callbacks_mutex_;
+  std::optional<ReplyCallback> register_application_reply_callback_
+      ABSL_GUARDED_BY(callbacks_mutex_);
+  std::optional<ReplyCallback> unregister_application_reply_callback_
+      ABSL_GUARDED_BY(callbacks_mutex_);
 };
 }  // namespace bluez
 }  // namespace linux

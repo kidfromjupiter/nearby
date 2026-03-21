@@ -3,10 +3,12 @@
 <node>
   <interface name="org.bluez.GattManager1">
     <method name="RegisterApplication">
+      <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
       <arg name="application" type="o" direction="in" />
       <arg name="options" type="a{sv}" direction="in" />
     </method>
     <method name="UnregisterApplication">
+      <annotation name="org.freedesktop.DBus.Method.Async" value="client" />
       <arg name="application" type="o" direction="in" />
     </method>
   </interface>
