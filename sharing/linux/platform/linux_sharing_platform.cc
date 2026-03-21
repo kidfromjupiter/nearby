@@ -60,7 +60,7 @@
 #include "sharing/internal/public/pref_names.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
-namespace nearby::sharing::linux {
+namespace nearby::sharing {
 namespace {
 
 using Json = nlohmann::json;

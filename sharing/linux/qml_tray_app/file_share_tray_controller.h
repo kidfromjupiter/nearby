@@ -2,18 +2,12 @@
 #define SHARING_LINUX_QML_TRAY_APP_FILE_SHARE_TRAY_CONTROLLER_H_
 
 #include <QObject>
-
-#include <QHash>
-#include <QSet>
-#include <QString>
-#include <QStringList>
-#include <QVariantList>
-
 #include <memory>
 
-#include "sharing/linux/nearby_sharing_api.h"
+#include "file_share_state.h"
+#include <sharing/linux/nearby_sharing_api.h>
 
-using NearbySharingApi = nearby::sharing::linux::NearbySharingApi;
+using NearbySharingApi = nearby::sharing::NearbySharingApi;
 
 class FileShareTrayController : public QObject {
   Q_OBJECT
@@ -35,28 +29,24 @@ class FileShareTrayController : public QObject {
   explicit FileShareTrayController(QObject* parent = nullptr);
   ~FileShareTrayController() override;
 
-  QString mode() const { return mode_; }
+  // Property accessors
+  QString mode() const { return state_.mode(); }
+  QString deviceName() const { return state_.deviceName(); }
+  QString statusMessage() const { return state_.statusMessage(); }
+  bool running() const { return state_.running(); }
+  QString pendingSendFileName() const { return state_.pendingSendFileName(); }
+  QString pendingSendFilePath() const { return state_.pendingSendFilePath(); }
+  QVariantList discoveredTargets() const { return state_.discoveredTargets(); }
+  QVariantList transfers() const { return state_.transfers(); }
+  bool autoAcceptIncoming() const { return state_.autoAcceptIncoming(); }
+  QString qrCodeUrl() const { return state_.qrCodeUrl(); }
+  QStringList qrCodeRows() const { return state_.qrCodeRows(); }
+  int qrCodeSize() const { return state_.qrCodeSize(); }
+  QString logPath() const { return state_.logPath(); }
 
-  QString deviceName() const { return device_name_; }
+  // Public methods
   void setDeviceName(const QString& device_name);
-
-  QString statusMessage() const { return status_message_; }
-  bool running() const { return running_; }
-
-  QString pendingSendFileName() const { return pending_send_file_name_; }
-  QString pendingSendFilePath() const { return pending_send_file_path_; }
-
-  QVariantList discoveredTargets() const { return discovered_targets_; }
-  QVariantList transfers() const { return transfers_; }
-
-  bool autoAcceptIncoming() const { return auto_accept_incoming_; }
   void setAutoAcceptIncoming(bool enabled);
-
-  QString qrCodeUrl() const { return qr_code_url_; }
-  QStringList qrCodeRows() const { return qr_code_rows_; }
-  int qrCodeSize() const { return qr_code_size_; }
-
-  QString logPath() const { return log_path_; }
   void setLogPath(const QString& path);
 
   Q_INVOKABLE void start();
@@ -84,65 +74,31 @@ class FileShareTrayController : public QObject {
 
   void requestTrayMessage(const QString& title, const QString& body);
   void requestCopyLinkTrayMessage(const QString& title, const QString& body,
-                                  const QString& link);
+                                   const QString& link);
 
  private:
-  void CreateService();
-  void AttachServiceListeners();
+  void initializeService();
+  void attachServiceListeners();
+  void loadSettings();
+  void saveSettings() const;
+  void updateQrCodeData();
 
   void startSendMode();
   void startReceiveMode();
-  void LoadSettings();
-  void SaveSettings() const;
-  void UpdateQrCodeData();
-
-  void UpsertTarget(qlonglong share_target_id, const QString& name,
-                    bool is_incoming);
-  void RemoveTarget(qlonglong share_target_id);
-  QString TargetName(qlonglong share_target_id) const;
-  bool HasActiveTransferForTarget(qlonglong share_target_id) const;
-
-  void UpsertTransfer(qlonglong share_target_id, const QString& target_name,
-                      const QString& status, double progress,
-                      qulonglong transferred_bytes, const QString& direction,
-                      const QString& file_name);
-
-  void SetStatus(const QString& status);
-  bool HasActiveTransfers() const;
-
-  static bool IsActiveTransferStatus(const QString& status);
-  static QString StatusToString(NearbySharingApi::StatusCode status);
-  static QString TransferStatusToString(NearbySharingApi::TransferStatus status);
-  static bool IsFinalTransferStatus(NearbySharingApi::TransferStatus status);
+  
+  void updateTargetFromInfo(const NearbySharingApi::ShareTargetInfo& info);
+  void handleTransferUpdate(const NearbySharingApi::TransferUpdateInfo& update);
+  void handleTransferComplete(const NearbySharingApi::TransferUpdateInfo& update);
+  void handleIncomingTransferComplete(const NearbySharingApi::TransferUpdateInfo& update,
+                                      const QString& name, bool success);
+  void handleOutgoingTransferComplete(const NearbySharingApi::TransferUpdateInfo& update,
+                                      const QString& name, bool success);
+  
+  void setStatus(const QString& status);
+  void notifyStateChange(const QString& property);
 
   std::unique_ptr<NearbySharingApi> service_;
-
-  QString mode_ = QStringLiteral("Receive");
-  QString device_name_ = QStringLiteral("NearbyLinux");
-  QString status_message_ = QStringLiteral("Idle");
-  bool running_ = false;
-
-  bool auto_accept_incoming_ = true;
-
- // qr stuff
-  QString qr_code_url_;
-  QStringList qr_code_rows_;
-  int qr_code_size_ = 0;
-  QString log_path_ = QStringLiteral("/tmp/nearby_qml_file_tray.log");
-
- // pending send stuff
-  QString pending_send_file_path_;
-  QString pending_send_file_name_;
-  qlonglong pending_send_target_id_ = 0;
-
- // send targets
-  QVariantList discovered_targets_;
-  QHash<qlonglong, int> discovered_row_by_target_;
-  QSet<qlonglong> pending_target_removals_;
-  QHash<qlonglong, QString> target_names_;
-
-  QVariantList transfers_;
-  QHash<qlonglong, int> transfer_row_by_target_;
+  FileShareState state_;
 };
 
 #endif  // SHARING_LINUX_QML_TRAY_APP_FILE_SHARE_TRAY_CONTROLLER_H_

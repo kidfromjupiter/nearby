@@ -29,7 +29,7 @@
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
 
-namespace nearby::sharing::linux {
+namespace nearby::sharing {
 
 namespace {
 
@@ -662,4 +662,4 @@ std::string NearbySharingApi::TransferStatusToString(TransferStatus status) {
   return "Unknown";
 }
 
-}  // namespace nearby::sharing::linux
+}  // namespace nearby::sharing

@@ -51,18 +51,16 @@ ApplicationWindow {
                 clip: true
 
                 readonly property bool isSendMode: fileShareController.pendingSendFilePath.length > 0
-                readonly property bool isIdle: fileShareController.discoveredTargets.length === 0
-                                               && fileShareController.transfers.length === 0
 
                 // ── Idle: animated blob ───────────────────────────────────
-                AnimatedBlob { visible: mainContent.isIdle }
+                AnimatedBlob { visible: !mainContent.isSendMode }
 
                 // ── Non-idle: scrollable device + transfer cards ──────────
                 Flickable {
                     id: mainFlickable
                     anchors.fill: parent
                     clip: true
-                    visible: !mainContent.isIdle
+                    visible: mainContent.isSendMode
                     contentWidth: width
                     contentHeight: mainCol.implicitHeight + 96
                     ScrollBar.vertical: ScrollBar {}
@@ -77,7 +75,6 @@ ApplicationWindow {
                         SendUrlPanel {
                             Layout.alignment: Qt.AlignHCenter
                             width: Math.max(240, Math.min(mainCol.width, 420))
-                            visible: mainContent.isSendMode
                         }
 
 
