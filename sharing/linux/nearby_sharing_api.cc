@@ -130,6 +130,16 @@ NearbySharingApi::TextAttachmentType ToFacadeTextAttachmentType(
   return FacadeType::kUnknown;
 }
 
+float NormalizeFacadeProgress(float progress) {
+  if (progress <= 0.0f) {
+    return 0.0f;
+  }
+  if (progress >= 100.0f) {
+    return 1.0f;
+  }
+  return progress / 100.0f;
+}
+
 std::string GenerateQrCodeUrl() {
   auto ec_key = nearby::crypto::ECPrivateKey::Create();
   if (!ec_key) {
@@ -271,7 +281,7 @@ class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCall
     info.device_name = share_target.device_name;
     info.is_incoming = share_target.is_incoming;
     info.status = ToFacadeTransferStatus(transfer_metadata.status());
-    info.progress = transfer_metadata.progress();
+    info.progress = NormalizeFacadeProgress(transfer_metadata.progress());
     info.transferred_bytes = transfer_metadata.transferred_bytes();
     info.total_attachments = transfer_metadata.total_attachments_count();
     info.transferred_attachments = transfer_metadata.transferred_attachments_count();
