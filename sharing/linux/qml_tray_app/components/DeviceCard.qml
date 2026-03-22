@@ -185,7 +185,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             text: targetName
             font.pixelSize: 13
-            font.weight: Font.Medium
+            font.weight: Font.Bold
             elide: Text.ElideRight
             maximumLineCount: 2
             wrapMode: Text.Wrap

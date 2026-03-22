@@ -233,6 +233,7 @@ int main(int argc, char* argv[]) {
   tray.show();
 
   controller.start();
+  //controller.
   controller.switchToReceiveMode();
 
   return app.exec();

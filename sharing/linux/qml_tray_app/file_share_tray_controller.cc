@@ -1,13 +1,17 @@
 #include "file_share_tray_controller.h"
 
+#include <iostream>
 #include <QClipboard>
+#include <QDesktopServices>
 #include <QDebug>
+#include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QMetaObject>
 #include <QSettings>
 #include <QSysInfo>
 #include <QTimer>
+#include <QUrl>
 
 #include "string_utils.h"
 #include "status_mapper.h"
@@ -38,6 +42,10 @@ void FileShareTrayController::initializeService() {
   emit qrCodeUrlChanged();
   emit qrCodeChanged();
   attachServiceListeners();
+  // service_ ->StartFastInitiationScanning([](auto a)
+  // {
+  //   std::cout << "Probably fine";
+  // });
 }
 
 void FileShareTrayController::updateQrCodeData() {
@@ -105,7 +113,8 @@ void FileShareTrayController::handleTransferUpdate(
   }
 
   state_.AddOrUpdateTransfer(update.share_target_id, name, status, update.progress,
-                             update.transferred_bytes, direction, file_name);
+                             update.transferred_bytes, direction, file_name,
+                             StringUtils::FromStdString(update.first_file_path));
   emit transfersChanged();
 
   setStatus(QStringLiteral("%1 (%2)").arg(status, name));
@@ -429,7 +438,8 @@ void FileShareTrayController::sendPendingFileToTarget(qlonglong share_target_id)
   state_.SetPendingSendFile(file_path, file_info.fileName(), share_target_id);
 
   state_.AddOrUpdateTransfer(share_target_id, target_name, QStringLiteral("Queued"), 0.0, 0,
-                             QStringLiteral("outgoing"), file_info.fileName());
+                             QStringLiteral("outgoing"), file_info.fileName(),
+                             file_info.absoluteFilePath());
   emit transfersChanged();
 
   service_->SendFile(
@@ -452,7 +462,8 @@ void FileShareTrayController::sendPendingFileToTarget(qlonglong share_target_id)
               state_.AddOrUpdateTransfer(share_target_id, target_name,
                                          QStringLiteral("Failed"), 0.0, 0,
                                          QStringLiteral("outgoing"),
-                                         state_.pendingSendFileName());
+                                         state_.pendingSendFileName(),
+                                         state_.pendingSendFilePath());
               emit transfersChanged();
               state_.SetPendingSendFile("", "", 0);
             },
@@ -477,6 +488,45 @@ void FileShareTrayController::copyTextToClipboard(const QString& text) {
   setStatus(QStringLiteral("Connection URL copied to clipboard"));
   emit requestTrayMessage(QStringLiteral("URL copied"),
                           QStringLiteral("Link copied to clipboard."));
+}
+
+void FileShareTrayController::openFileLocation(const QString& file_path) {
+  const QString trimmed = file_path.trimmed();
+  if (trimmed.isEmpty()) {
+    emit requestTrayMessage(QStringLiteral("Open location failed"),
+                            QStringLiteral("No received file location is available."));
+    return;
+  }
+
+  QFileInfo info(trimmed);
+  QString target_path;
+  if (info.exists() && info.isFile()) {
+    // Open the containing folder so the file is visible in the user's file
+    // manager regardless of the desktop environment.
+    target_path = info.absolutePath();
+  } else if (info.exists() && info.isDir()) {
+    target_path = info.absoluteFilePath();
+  } else {
+    // Some transfer updates can outlive the exact file entry we saw earlier;
+    // fall back to the parent directory when it still exists.
+    const QFileInfo parent_info(info.absolutePath());
+    if (parent_info.exists() && parent_info.isDir()) {
+      target_path = parent_info.absoluteFilePath();
+    }
+  }
+
+  if (target_path.isEmpty()) {
+    emit requestTrayMessage(QStringLiteral("Open location failed"),
+                            QStringLiteral("The file location is no longer available."));
+    return;
+  }
+
+  const bool opened =
+      QDesktopServices::openUrl(QUrl::fromLocalFile(target_path));
+  if (!opened) {
+    emit requestTrayMessage(QStringLiteral("Open location failed"),
+                            QStringLiteral("Could not open the file location."));
+  }
 }
 
 void FileShareTrayController::clearTransfers() {
