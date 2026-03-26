@@ -13,7 +13,8 @@
 # limitations under the License.
 
 licenses(["notice"])
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_cc//cc/private/rules_impl:cc_static_library.bzl", "cc_static_library")
 
 cc_library(
     name = "linux_sharing_platform",
@@ -47,17 +48,6 @@ cc_library(
 )
 
 cc_library(
-    name = "system_clock_shim",
-    srcs = ["platform/system_clock_shim.cc"],
-    alwayslink = True,
-    visibility = ["//visibility:private"],
-    deps = [
-        "//internal/platform:types",
-        "@com_google_absl//absl/time",
-    ],
-)
-
-cc_library(
     name = "nearby_sharing_api",
     srcs = ["nearby_sharing_api.cc"],
     hdrs = ["nearby_sharing_api.h"],
@@ -65,13 +55,32 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":linux_sharing_platform",
-        ":system_clock_shim",
         "//internal/base:file_path",
+        "//internal/platform/implementation/linux:system_clock",
         "//sharing:attachments",
         "//sharing:nearby_sharing_service",
         "//sharing/analytics",
         "//sharing/local_device_data",
     ],
+)
+
+cc_library(
+    name = "nearby_connections_api",
+    srcs = ["nearby_connections_api.cc"],
+    hdrs = ["nearby_connections_api.h"],
+    alwayslink = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":linux_sharing_platform",
+        "//internal/base:file_path",
+        "//sharing/internal/public:nearby_context",
+        "//sharing:nearby_sharing_service",
+    ],
+)
+
+cc_static_library(
+    name = "nearby_sharing_api_static",
+    deps = [":nearby_sharing_api"],
 )
 
 cc_binary(
@@ -87,13 +96,43 @@ cc_binary(
     ],
     deps = [
         ":linux_sharing_platform",
-        ":system_clock_shim",
         "//internal/base:file_path",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation/linux",
+        "//internal/platform/implementation/linux:system_clock",
         "//sharing:attachments",
         "//sharing:nearby_sharing_service",
         "//sharing/analytics",
         "//sharing/local_device_data",
+    ],
+)
+
+cc_binary(
+    name = "nearby_connections_api_shared",
+    linkshared = True,
+    srcs = [
+        "nearby_connections_api.cc",
+        "nearby_connections_api.h",
+    ],
+    visibility = ["//visibility:public"],
+    linkopts = [
+        "-Wl,--exclude-libs,ALL",
+    ],
+    deps = [
+        ":linux_sharing_platform",
+        "//internal/base:file_path",
+        "//internal/platform/implementation:platform",
+        "//internal/platform/implementation/linux",
+        "//sharing/internal/public:nearby_context",
+        "//sharing:nearby_sharing_service",
+    ],
+)
+
+cc_test(
+    name = "nearby_connections_api_test",
+    srcs = ["nearby_connections_api_test.cc"],
+    deps = [
+        ":nearby_connections_api",
+        "@com_google_googletest//:gtest_main",
     ],
 )
