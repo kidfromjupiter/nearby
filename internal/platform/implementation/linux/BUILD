@@ -164,6 +164,22 @@ cc_library(
 )
 
 cc_library(
+    name = "system_clock",
+    srcs = [
+        "system_clock.cc",
+    ],
+    alwayslink = True,
+    visibility = [
+        "//sharing/linux:__pkg__",
+    ],
+    deps = [
+        "//internal/platform:base",
+        "//internal/platform/implementation:types",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_library(
     name = "linux",
     srcs = [
         "avahi.cc",
@@ -200,7 +216,6 @@ cc_library(
         "scheduled_executor.cc",
         "stream.cc",
         "submittable_executor.cc",
-        "system_clock.cc",
         "thread_pool.cc",
         "utils.cc",
         #        "wifi_direct.cc",
@@ -225,6 +240,7 @@ cc_library(
     deps = [
         ":comm",
         ":crypto",  # build_cleaner: keep
+        ":system_clock",
         ":types",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
