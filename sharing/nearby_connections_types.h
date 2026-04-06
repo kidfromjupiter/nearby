@@ -19,6 +19,7 @@
 
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -28,6 +29,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/base/file_path.h"
+#include "internal/platform/input_stream.h"
 #include "internal/interop/authentication_status.h"
 
 namespace nearby {
@@ -362,6 +364,14 @@ struct BytesPayload {
   std::vector<uint8_t> bytes;
 };
 
+// A stream payload backed by an in-memory byte buffer on the sender side.
+struct StreamPayload {
+  // The bytes to expose through the stream.
+  std::vector<uint8_t> bytes;
+  // Optional live stream source for long-lived outgoing stream payloads.
+  std::shared_ptr<nearby::InputStream> input_stream;
+};
+
 // A file payload representing a file.
 struct FilePayload {
   // The file to which this payload points to. When sending this payload, the
@@ -375,6 +385,8 @@ struct FilePayload {
 struct PayloadContent {
   // A Payload consisting of a single byte array.
   BytesPayload bytes_payload;
+  // A Payload exposed to Nearby as a finite stream.
+  StreamPayload stream_payload;
   // A Payload representing a file on the device.
   FilePayload file_payload;
   enum class Type { kUnknown = 0, kBytes = 1, kStream = 2, kFile = 3 };
@@ -400,6 +412,9 @@ struct Payload {
   explicit Payload(std::vector<uint8_t> bytes)
       : Payload(GenerateId(), std::move(bytes)) {}
 
+  explicit Payload(StreamPayload stream_payload)
+      : Payload(GenerateId(), std::move(stream_payload)) {}
+
   explicit Payload(FilePath file_path,
                    absl::string_view parent_folder = absl::string_view())
       : Payload(std::hash<std::string>()(file_path.ToString()), file_path,
@@ -408,6 +423,12 @@ struct Payload {
   Payload(int64_t id, std::vector<uint8_t> bytes) : id(id) {
     content.type = PayloadContent::Type::kBytes;
     content.bytes_payload.bytes = std::move(bytes);
+  }
+
+  Payload(int64_t id, StreamPayload stream_payload) : id(id) {
+    content.type = PayloadContent::Type::kStream;
+    content.stream_payload.bytes = std::move(stream_payload.bytes);
+    content.stream_payload.input_stream = std::move(stream_payload.input_stream);
   }
 
   Payload(int64_t id, FilePath file_path,
