@@ -14,6 +14,8 @@ This repo consists of the entirety of google's open source nearby library. Curre
     - Sharing
     - Connections
     - Presence
+
+    
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
 Nearby presence may or may not build. I haven't tested it.
 
@@ -38,5 +40,6 @@ it accomplishes that goal perfectly. This repo wasn't created out of any altruis
 ## Special thanks
 
 https://github.com/proatgram and https://github.com/vibhavp
+
 *they were the original authors of the linux platform support [PR](https://github.com/google/nearby/pull/2098) that I have based much of this codebase upon. I am standing on the shoulders
 of giants*
