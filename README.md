@@ -11,9 +11,9 @@ https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
 
 ## What
 This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 sections. 
-    - Sharing
-    - Connections
-    - Presence
+- Sharing
+- Connections
+- Presence
 
     
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
