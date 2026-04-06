@@ -1,8 +1,8 @@
 # Google Nearby Sharing & Connections for Linux (Unofficial)
 
-> P2P file sharing, discovery, and connectivity on Linux using Google Nearby protocols.
+<img width="982" height="760" alt="image" src="https://github.com/user-attachments/assets/9533ea09-81d9-4162-b90f-e0bd8b714d1d" />
 
-![](cover.png)
+
 
 ## Demo
 
