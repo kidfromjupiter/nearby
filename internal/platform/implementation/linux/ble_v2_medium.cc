@@ -470,9 +470,9 @@ bool BleV2Medium::StopScanning() {
 
 std::unique_ptr<api::ble::GattServer> BleV2Medium::StartGattServer(
   api::ble::ServerGattConnectionCallback callback) {
-  (void)callback;
-  LOG(INFO) << __func__ << ": GATT is disabled on linux.";
-  return nullptr;
+  LOG(INFO) << __func__ << ": Starting Linux GATT server.";
+  return std::make_unique<GattServer>(*system_bus_, adapter_, devices_,
+                                      std::move(callback));
 }
 
 std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
