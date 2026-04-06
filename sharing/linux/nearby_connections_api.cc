@@ -254,6 +254,10 @@ NearbyConnectionsApi::Payload ToFacadePayload(
       facade_payload.type = NearbyConnectionsApi::PayloadType::kBytes;
       facade_payload.bytes = payload.content.bytes_payload.bytes;
       break;
+    case nearby::sharing::PayloadContent::Type::kStream:
+      facade_payload.type = NearbyConnectionsApi::PayloadType::kStream;
+      facade_payload.stream_bytes = payload.content.stream_payload.bytes;
+      break;
     case nearby::sharing::PayloadContent::Type::kFile:
       facade_payload.type = NearbyConnectionsApi::PayloadType::kFile;
       facade_payload.file_path =
@@ -261,7 +265,6 @@ NearbyConnectionsApi::Payload ToFacadePayload(
       facade_payload.parent_folder = payload.content.file_payload.parent_folder;
       break;
     case nearby::sharing::PayloadContent::Type::kUnknown:
-    case nearby::sharing::PayloadContent::Type::kStream:
       facade_payload.type = NearbyConnectionsApi::PayloadType::kUnknown;
       break;
   }
@@ -277,6 +280,13 @@ std::unique_ptr<nearby::sharing::Payload> ToNativePayload(
     case NearbyConnectionsApi::PayloadType::kFile:
       return std::make_unique<nearby::sharing::Payload>(
           payload.id, FilePath(payload.file_path), payload.parent_folder);
+    case NearbyConnectionsApi::PayloadType::kStream: {
+      nearby::sharing::StreamPayload stream_payload;
+      stream_payload.bytes = std::move(payload.stream_bytes);
+      stream_payload.input_stream = std::move(payload.stream_input);
+      return std::make_unique<nearby::sharing::Payload>(payload.id,
+                                                        std::move(stream_payload));
+    }
     case NearbyConnectionsApi::PayloadType::kUnknown:
       return nullptr;
   }

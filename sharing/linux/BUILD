@@ -71,6 +71,7 @@ cc_library(
     alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/platform:base",
         ":linux_sharing_platform",
         "//internal/base:file_path",
         "//sharing/internal/public:nearby_context",
@@ -95,6 +96,7 @@ cc_binary(
         "-Wl,--exclude-libs,ALL",
     ],
     deps = [
+        "//internal/platform:base",
         ":linux_sharing_platform",
         "//internal/base:file_path",
         "//internal/platform/implementation:platform",

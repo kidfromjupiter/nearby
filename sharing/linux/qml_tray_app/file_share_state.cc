@@ -78,7 +78,6 @@ void FileShareState::AddOrUpdateTransfer(
       {QStringLiteral("filePath"), file_path},
   };
 
-  qInfo() << "qDiscovered targets" << discoveredTargets();
   if (transfer_row_by_target_.contains(target_id)) {
     const int row_index = transfer_row_by_target_.value(target_id);
     if (row_index >= 0 && row_index < transfers_.size()) {

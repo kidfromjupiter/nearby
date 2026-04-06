@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "internal/platform/input_stream.h"
+
 namespace nearby {
 namespace sharing {
 
@@ -77,6 +79,7 @@ class __attribute__((visibility("default"))) NearbyConnectionsApi {
     kUnknown = 0,
     kBytes = 1,
     kFile = 2,
+    kStream = 3,
   };
 
   enum class PayloadStatus {
@@ -156,6 +159,8 @@ class __attribute__((visibility("default"))) NearbyConnectionsApi {
     int64_t id = 0;
     PayloadType type = PayloadType::kUnknown;
     std::vector<uint8_t> bytes;
+    std::vector<uint8_t> stream_bytes;
+    std::shared_ptr<nearby::InputStream> stream_input;
     std::string file_path;
     std::string parent_folder;
 
@@ -174,6 +179,23 @@ class __attribute__((visibility("default"))) NearbyConnectionsApi {
       payload.type = PayloadType::kFile;
       payload.file_path = std::move(file_path);
       payload.parent_folder = std::move(parent_folder);
+      return payload;
+    }
+
+    static Payload FromStream(int64_t id, std::vector<uint8_t> stream_bytes) {
+      Payload payload;
+      payload.id = id;
+      payload.type = PayloadType::kStream;
+      payload.stream_bytes = std::move(stream_bytes);
+      return payload;
+    }
+
+    static Payload FromInputStream(int64_t id,
+                                   std::shared_ptr<nearby::InputStream> stream_input) {
+      Payload payload;
+      payload.id = id;
+      payload.type = PayloadType::kStream;
+      payload.stream_input = std::move(stream_input);
       return payload;
     }
   };
