@@ -31,6 +31,33 @@ it accomplishes that goal perfectly. This repo wasn't created out of any altruis
 ## How
 
 ### How to install
+This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
+although that needs to be tested. I want to support more distros so if you encounter issues installing on your distro, please let me know. 
+
+
+#### Prerequisites
+
+- `sdbus-cpp >= 2.0`
+- `bluez >= 5.85`
+
+To install the prerequisites, run this command
+
+```bash
+sudo dnf install -y \
+  bluez bluez-libs bluez-libs-devel \
+  sdbus-cpp sdbus-cpp-devel
+```
+---
+
+To install the Quick Share application, 
+
+1. Go to [releases](https://github.com/kidfromjupiter/nearby/releases)
+2. Download the latest nearby-file-share-linux-*.tar.gz
+3. `mkdir -p nearby && tar -xf nearby-file-share-linux-*.tar.gz -C nearby`
+4. `cd nearby`
+5. `chmod +x install_nearby_file_share.sh`
+6. `./install_nearby_file_share.sh`
+
 *coming soon*
 ### How to build
 *coming soon*
