@@ -47,7 +47,7 @@ although that needs to be tested. I want to support more distros so if you encou
 - `sdbus-cpp >= 2.0`
 - `bluez >= 5.85`
 
-To install the prerequisites, run this command
+**To install the prerequisites, run this command**
 
 ```bash
 sudo dnf install -y \
@@ -56,20 +56,23 @@ sudo dnf install -y \
 ```
 ---
 
-To install the Quick Share application, 
+**To install the Quick Share application,**
 
 1. Go to [releases](https://github.com/kidfromjupiter/nearby/releases)
-2. Download the latest nearby-file-share-linux-*.tar.gz
+2. Download the latest `nearby-file-share-linux-*.tar.gz`
 3. `mkdir -p nearby && tar -xf nearby-file-share-linux-*.tar.gz -C nearby`
 4. `cd nearby`
 5. `chmod +x install_nearby_file_share.sh`
 6. `./install_nearby_file_share.sh`
 
-*coming soon*
+**To install the actual library and headers,**
+
+Currently there are no prebuilt shared library or headers. You'll have to build them yourself
+
 ### How to build
-*coming soon*
+Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Environment-and-Building)
 ### How to contribute
-*coming soon*
+Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Environment-and-Building)
 
 ## Apologies
 I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
