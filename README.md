@@ -29,6 +29,13 @@ it accomplishes that goal perfectly. This repo wasn't created out of any altruis
 
 
 ## How
+### How to use
+Proper documentation is coming I swear. University's getting pretty hectic so docs is on the backburner. The wiki has some more information but it's nowhere near a proper documentation. It has some good brief
+overviews and where generally everything is located if you're thinking about contributing. 
+
+If you want any clarification on anything, feel free to open an issue. I'll get back to you ASAP.
+
+As a consolation prize, I've indexed this project using [Deepwiki](https://deepwiki.com/kidfromjupiter/nearby). You might have strong feeling about AI use. But I feel like documenting very large codebases is a perfect usecase for such models. (They are called Large Language Models for a reason )
 
 ### How to install
 This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
@@ -63,6 +70,12 @@ To install the Quick Share application,
 *coming soon*
 ### How to contribute
 *coming soon*
+
+## Apologies
+I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
+enormous codebases. 
+
+If you see any such stupidities, feel free to berate me in the most shameless of manners in an issue. I look forward to learning how to do it the proper way and to improve my atrocious code quality.
 
 ## Special thanks
 
