@@ -27,7 +27,7 @@ jobs:
       image: ubuntu:25.04
     steps:
     - name: Install git
-        run: |
+      run: |
           apt-get update
           apt-get install -y git ca-certificates
     - uses: actions/checkout@v6
