@@ -60,17 +60,6 @@ jobs:
             qt6-tools-dev-tools \
             libqrencode-dev
 
-      - name: Build and install sdbus-c++
-        run: |
-          git clone https://github.com/Kistler-Group/sdbus-cpp.git
-          cd sdbus-cpp
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=/usr
-          cmake --build .
-          sudo cmake --build . --target install
-          cd ../../
-
       - name: Restore sdbus-c++ cache
         id: sdbus-cache
         uses: actions/cache/restore@v5
