@@ -33,13 +33,16 @@ jobs:
           # Share repository cache between workflows.
           repository-cache: true
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
+      - name: Restore APT cache
+        id: apt-cache-restore
+        uses: actions/cache/restore@v5
         with:
-          path: /var/cache/apt/archives
-          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/release-nearby-qml-tray.yaml') }}
-          restore-keys: apt-${{ runner.os }}-
-          save-always: true
+          path: |
+            /var/cache/apt/archives
+            /var/lib/apt/lists
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/apt-packages.txt') }}
+
+      
 
       - name: Install Linux build dependencies
         run: |
@@ -67,6 +70,15 @@ jobs:
             qt6-tools-dev \
             qt6-tools-dev-tools \
             libqrencode-dev
+
+      - name: Save APT cache
+        if: always() && steps.apt-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          key: ${{ steps.apt-cache-restore.outputs.cache-primary-key }}
+          path: |
+            /var/cache/apt/archives
+            /var/lib/apt/lists
 
       - name: Build and install sdbus-c++
         run: |
