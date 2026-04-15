@@ -23,27 +23,131 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:25.04
     steps:
-    - name: Install git
-      run: |
-          apt-get update
-          apt-get install -y git ca-certificates
-    - uses: actions/checkout@v6
-    - name: Build Connections
-      run: CC=clang-18 CXX=clang-18++ BAZEL_CXXOPTS="-std=c++20" bazel build --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true --copt='-DGITHUB_BUILD' //connections:core
-    - name: Build Presence
-      run: CC=clang-18 CXX=clang-18++ BAZEL_CXXOPTS="-std=c++20" bazel build --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true --copt='-DGITHUB_BUILD' //presence
-    - name: Build Nearby Sharing Linux shared API
-      run: CC=clang-18 CXX=clang-18++ BAZEL_CXXOPTS="-std=c++20" bazel build --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true --copt='-DGITHUB_BUILD' //sharing/linux:nearby_sharing_api_shared
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up Bazelisk
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          # Avoid downloading Bazel every time.
+          bazelisk-cache: true
+          # Store build cache per workflow.
+          disk-cache: ${{ github.workflow }}
+          # Share repository cache between workflows.
+          repository-cache: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libssl-dev \
+            libsystemd-dev \
+            libcurlpp-dev \
+            libasound2-dev \
+            libunistring-dev \
+            libldap-dev \
+            libkrb5-dev \
+            libgpg-error-dev \
+            libbluetooth-dev \
+            libxkbcommon-dev \
+            patchelf \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-wayland \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            libqrencode-dev
+
+      - name: Restore sdbus-c++ cache
+        id: sdbus-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/sdbus-cpp-install
+            ${{ github.workspace }}/.cache/sdbus-cpp-build
+          key: ${{ runner.os }}-sdbus-cpp-debug-usr-v1
+
+      - name: Build sdbus-c++ if cache missed
+        if: steps.sdbus-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/Kistler-Group/sdbus-cpp.git
+          cmake -S sdbus-cpp -B "${{ github.workspace }}/.cache/sdbus-cpp-build" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build "${{ github.workspace }}/.cache/sdbus-cpp-build"
+          rm -rf "${{ github.workspace }}/.cache/sdbus-cpp-install"
+          mkdir -p "${{ github.workspace }}/.cache/sdbus-cpp-install"
+          DESTDIR="${{ github.workspace }}/.cache/sdbus-cpp-install" \
+            cmake --install "${{ github.workspace }}/.cache/sdbus-cpp-build"
+
+      - name: Install cached/built sdbus-c++ into /usr
+        run: |
+          sudo cp -a "${{ github.workspace }}/.cache/sdbus-cpp-install/usr/." /usr/
+
+      - name: Save sdbus-c++ cache
+        if: always() && steps.sdbus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          key: ${{ steps.sdbus-cache.outputs.cache-primary-key }}
+          path: |
+            ${{ github.workspace }}/.cache/sdbus-cpp-install
+            ${{ github.workspace }}/.cache/sdbus-cpp-build
+
+      - name: Build Connections
+        run: |
+          bazel build \
+            --check_visibility=false \
+            --spawn_strategy=standalone \
+            --cxxopt=-std=c++20 \
+            --host_cxxopt=-std=c++20 \
+            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+            --copt='-DGITHUB_BUILD' \
+            --copt='-fvisibility=hidden' \
+            --cxxopt='-fvisibility-inlines-hidden' \
+            //connections:core
+
+      - name: Build Presence
+        run: |
+          bazel build \
+            --check_visibility=false \
+            --spawn_strategy=standalone \
+            --cxxopt=-std=c++20 \
+            --host_cxxopt=-std=c++20 \
+            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+            --copt='-DGITHUB_BUILD' \
+            --copt='-fvisibility=hidden' \
+            --cxxopt='-fvisibility-inlines-hidden' \
+            //presence
+
+      - name: Build Nearby Sharing Linux shared API
+        run: |
+          bazel build \
+            --check_visibility=false \
+            --spawn_strategy=standalone \
+            --cxxopt=-std=c++20 \
+            --host_cxxopt=-std=c++20 \
+            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+            --copt='-DGITHUB_BUILD' \
+            --copt='-fvisibility=hidden' \
+            --cxxopt='-fvisibility-inlines-hidden' \
+            //sharing/linux:nearby_sharing_api_shared
 
   build-rust-linux:
     name: Build Rust on Linux
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-      with:
-        submodules: recursive
-    - name: Build FPP
-      run:  cargo build --manifest-path presence/fpp/fpp/Cargo.toml
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build FPP
+        run: cargo build --manifest-path presence/fpp/fpp/Cargo.toml
