@@ -18,11 +18,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates
-
       - name: Checkout
         uses: actions/checkout@v6
         with:
