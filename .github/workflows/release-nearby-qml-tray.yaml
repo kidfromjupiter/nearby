@@ -50,7 +50,6 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
-            libsdbus-c++-dev \
             libssl-dev \
             libsystemd-dev \
             libcurlpp-dev \
