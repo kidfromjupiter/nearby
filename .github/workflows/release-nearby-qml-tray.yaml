@@ -33,15 +33,6 @@ jobs:
           # Share repository cache between workflows.
           repository-cache: true
 
-      - name: Restore APT cache
-        id: apt-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: ${{ runner.os }}-apt-debs-${{ hashFiles('.github/workflows/release-nearby-qml-tray.yaml') }}
-
-      
-
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -69,13 +60,6 @@ jobs:
             qt6-tools-dev-tools \
             libqrencode-dev
 
-      - name: Save APT cache
-        if: always() && steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
-          path: /var/cache/apt/archives/*.deb
-
       - name: Build and install sdbus-c++
         run: |
           git clone https://github.com/Kistler-Group/sdbus-cpp.git
@@ -86,6 +70,41 @@ jobs:
           cmake --build .
           sudo cmake --build . --target install
           cd ../../
+
+      - name: Restore sdbus-c++ cache
+        id: sdbus-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/sdbus-cpp-install
+            ${{ github.workspace }}/.cache/sdbus-cpp-build
+          key: ${{ runner.os }}-sdbus-cpp-debug-usr-v1
+      
+      - name: Build sdbus-c++ if cache missed
+        if: steps.sdbus-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/Kistler-Group/sdbus-cpp.git
+          cmake -S sdbus-cpp -B "${{ github.workspace }}/.cache/sdbus-cpp-build" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build "${{ github.workspace }}/.cache/sdbus-cpp-build"
+          rm -rf "${{ github.workspace }}/.cache/sdbus-cpp-install"
+          mkdir -p "${{ github.workspace }}/.cache/sdbus-cpp-install"
+          DESTDIR="${{ github.workspace }}/.cache/sdbus-cpp-install" \
+            cmake --install "${{ github.workspace }}/.cache/sdbus-cpp-build"
+      
+      - name: Install cached/built sdbus-c++ into /usr
+        run: |
+          sudo cp -a "${{ github.workspace }}/.cache/sdbus-cpp-install/usr/." /usr/
+      
+      - name: Save sdbus-c++ cache
+        if: always() && steps.sdbus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          key: ${{ steps.sdbus-cache.outputs.cache-primary-key }}
+          path: |
+            ${{ github.workspace }}/.cache/sdbus-cpp-install
+            ${{ github.workspace }}/.cache/sdbus-cpp-build
 
       - name: Build and install Nearby Sharing API shared library
         id: nearby
