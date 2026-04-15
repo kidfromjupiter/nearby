@@ -15,7 +15,6 @@ permissions:
 jobs:
   build-and-release-linux:
     name: Build and Release Linux Bundle
-    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -50,7 +49,6 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
-            libsdbus-c++-dev \
             libssl-dev \
             libsystemd-dev \
             libcurlpp-dev \
@@ -67,6 +65,17 @@ jobs:
             qt6-wayland \
             qt6-tools-dev \
             qt6-tools-dev-tools 
+
+      - name: Build and install sdbus-c++
+        run: |
+          git clone https://github.com/Kistler-Group/sdbus-cpp.git
+          cd sdbus-cpp
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+          sudo cmake --build . --target install
+          cd ../../
 
       - name: Build and install Nearby Sharing API shared library
         id: nearby
