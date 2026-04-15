@@ -34,13 +34,11 @@ jobs:
           repository-cache: true
 
       - name: Restore APT cache
-        id: apt-cache-restore
+        id: apt-cache
         uses: actions/cache/restore@v5
         with:
-          path: |
-            /var/cache/apt/archives
-            /var/lib/apt/lists
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/apt-packages.txt') }}
+          path: /var/cache/apt/archives/*.deb
+          key: ${{ runner.os }}-apt-debs-${{ hashFiles('.github/workflows/build.yml') }}
 
       
 
@@ -72,13 +70,11 @@ jobs:
             libqrencode-dev
 
       - name: Save APT cache
-        if: always() && steps.apt-cache-restore.outputs.cache-hit != 'true'
+        if: always() && steps.apt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
-          key: ${{ steps.apt-cache-restore.outputs.cache-primary-key }}
-          path: |
-            /var/cache/apt/archives
-            /var/lib/apt/lists
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+          path: /var/cache/apt/archives/*.deb
 
       - name: Build and install sdbus-c++
         run: |
