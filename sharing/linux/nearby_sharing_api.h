@@ -13,15 +13,8 @@
 #include <string>
 #include <vector>
 
-// Some toolchains define `linux` as a macro (e.g. `#define linux 1`), which
-// breaks namespace tokens like `nearby::sharing::linux`.
-#ifdef linux
-#undef linux
-#endif
-
 namespace nearby {
 namespace sharing {
-namespace linux {
 
 class __attribute__((visibility("default"))) NearbySharingApi {
  public:
@@ -131,7 +124,6 @@ class __attribute__((visibility("default"))) NearbySharingApi {
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace linux
 }  // namespace sharing
 }  // namespace nearby
 

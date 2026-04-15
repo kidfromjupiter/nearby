@@ -37,7 +37,7 @@ if(EXISTS "${_output_so}")
         ERROR_QUIET
       )
       if(_nm_result EQUAL 0)
-        string(FIND "${_nm_output}" "nearby::sharing::linux::NearbySharingApi::NearbySharingApi()" _api_ctor_idx)
+        string(FIND "${_nm_output}" "nearby::sharing::NearbySharingApi::NearbySharingApi()" _api_ctor_idx)
         string(FIND "${_nm_output}" " U nearby::api::ImplementationPlatform::CreateScheduledExecutor()" _undef_platform_idx)
         string(FIND "${_nm_output}" " U nearby::SystemClock::ElapsedRealtime()" _undef_clock_idx)
         string(FIND "${_nm_output}" " U nearby::Crypto::Sha256(" _undef_crypto_idx)

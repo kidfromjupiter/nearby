@@ -27,17 +27,14 @@
 
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/ble.h"
-// #include "internal/platform/implementation/linux/ble_gatt_client.h"
-// #include "internal/platform/implementation/linux/ble_gatt_server.h"
 #include "internal/platform/implementation/linux/ble_v2_medium.h"
 
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "absl/types/span.h"
 #include "absl/time/time.h"
-#include "ble_gatt_client.h"
-#include "ble_gatt_server.h"
 #include "ble_l2cap_server_socket.h"
 #include "ble_l2cap_socket.h"
+#include "ble_gatt_server.h"
 #include "internal/base/observer_list.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_device.h"
 #include "internal/platform/implementation/linux/bluetooth_devices.h"
@@ -68,7 +65,6 @@ BleL2capSocket::ProtocolMode GetL2capProtocolMode() {
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   : system_bus_(adapter.GetConnection()),
     adapter_(adapter),
-    gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
@@ -89,16 +85,55 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
         << __func__
         << ": Registering path /com/google/nearby/medium/ble/advertisement/monitor with AdvertisementMonitorManager at "
         << adv_monitor_manager_->getProxy().getObjectPath();
-    try {
-      adv_monitor_manager_->RegisterMonitor(root_object_manager_->getObject().getObjectPath());
-    } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(adv_monitor_manager_, "RegisterMonitor", e);
+    adv_monitor_manager_->SetRegisterMonitorReplyCallback(
+        [this](std::optional<sdbus::Error> error) {
+          OnRegisterMonitorReply(std::move(error));
+        });
+    adv_monitor_manager_->RegisterMonitor(
+        root_object_manager_->getObject().getObjectPath());
+  } else {
+    adv_monitor_manager_ready_notification_.Notify();
+  }
+}
+
+void BleV2Medium::OnRegisterMonitorReply(std::optional<sdbus::Error> error) {
+  {
+    absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+    adv_monitor_manager_ready_ = !error.has_value() || !error->isValid();
+    if (error.has_value() && error->isValid()) {
+      adv_monitor_manager_error_name_ = error->getName();
+      adv_monitor_manager_error_message_ = error->getMessage();
     }
   }
-  // if (gatt_discovery_->InitializeKnownServices()) {
-  //   LOG(ERROR) << __func__
-  //                      << ": Could not initialize known GATT services";
-  // }
+
+  if (error.has_value() && error->isValid()) {
+    LOG(ERROR) << __func__ << ": Got error '" << error->getName()
+               << "' with message '" << error->getMessage()
+               << "' while calling RegisterMonitor on object "
+               << adv_monitor_manager_->getProxy().getObjectPath();
+  }
+
+  adv_monitor_manager_ready_notification_.Notify();
+}
+
+bool BleV2Medium::WaitForAdvertisementMonitorManager() {
+  if (adv_monitor_manager_ == nullptr) {
+    LOG(WARNING) << __func__ << ": Advertising monitor not supported by BlueZ";
+    return false;
+  }
+
+  adv_monitor_manager_ready_notification_.WaitForNotification();
+
+  absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+  if (adv_monitor_manager_ready_) {
+    return true;
+  }
+
+  LOG(WARNING) << __func__
+               << ": AdvertisementMonitorManager registration failed with name '"
+               << adv_monitor_manager_error_name_ << "' and message '"
+               << adv_monitor_manager_error_message_ << "'";
+  return false;
 }
 
   // sync api
@@ -240,9 +275,7 @@ bool BleV2Medium::StartScanning(const Uuid &service_uuid,
     return false;
   }
 
-  if (adv_monitor_manager_ == nullptr) {
-    LOG(WARNING) << __func__
-                         << ": Advertising monitor not supported by BlueZ";
+  if (!WaitForAdvertisementMonitorManager()) {
     // TODO: Implement manual monitoring.
     return false;
   }
@@ -314,7 +347,7 @@ bool BleV2Medium::StopScanning() {
     return false;
   }
 
-  if (adv_monitor_manager_ == nullptr) {
+  if (!WaitForAdvertisementMonitorManager()) {
     // TODO: Implement manual monitoring.
     return false;
   }
@@ -349,7 +382,7 @@ bool BleV2Medium::StopScanning() {
   BleV2Medium::StartScanning(const Uuid &service_uuid,
                              api::ble::TxPowerLevel tx_power_level,
                              ScanningCallback callback) {
-    if (adv_monitor_manager_ == nullptr) {
+    if (!WaitForAdvertisementMonitorManager()) {
       // TODO: Implement manual monitoring.
       return nullptr;
     }
@@ -437,12 +470,9 @@ bool BleV2Medium::StopScanning() {
 
 std::unique_ptr<api::ble::GattServer> BleV2Medium::StartGattServer(
   api::ble::ServerGattConnectionCallback callback) {
-  // (void)callback;
-  // return nullptr;
-
-  return std::make_unique<GattServer>(
-  *system_bus_, adapter_, devices_,std::move(callback)
-  );
+  LOG(INFO) << __func__ << ": Starting Linux GATT server.";
+  return std::make_unique<GattServer>(*system_bus_, adapter_, devices_,
+                                      std::move(callback));
 }
 
 std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
@@ -452,8 +482,7 @@ std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
   (void)peripheral_id;
   (void)tx_power_level;
   (void)callback;
-  LOG(WARNING) << __func__
-               << ": GATT client connection is not supported on Linux yet.";
+  LOG(INFO) << __func__ << ": GATT is disabled on linux.";
   return nullptr;
 }
 

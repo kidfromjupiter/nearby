@@ -26,6 +26,16 @@ qt_add_executable(nearby_qml_file_tray_app
   file_share_tray_main.cpp
   file_share_tray_controller.cc
   file_share_tray_controller.h
+  file_share_state.cc
+  file_share_state.h
+  share_target_model.h
+  transfer_model.h
+  string_utils.cc
+  string_utils.h
+  status_mapper.cc
+  status_mapper.h
+  qr_code_generator.cc
+  qr_code_generator.h
   notification_manager.cpp
   notification_manager.h
   third_party/libqrencode/qrencode_compat.h

@@ -15,9 +15,13 @@
 #ifndef PLATFORM_IMPL_LINUX_BLUEZ_ADVERTISEMENT_MONITOR_MANAGER_H_
 #define PLATFORM_IMPL_LINUX_BLUEZ_ADVERTISEMENT_MONITOR_MANAGER_H_
 
+#include <optional>
+
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/ProxyInterfaces.h>
 
+#include "absl/functional/any_invocable.h"
+#include "absl/synchronization/mutex.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/dbus.h"
@@ -29,6 +33,9 @@ namespace bluez {
 class AdvertisementMonitorManager final
     : public sdbus::ProxyInterfaces<
           org::bluez::AdvertisementMonitorManager1_proxy> {
+ public:
+  using ReplyCallback = absl::AnyInvocable<void(std::optional<sdbus::Error>)>;
+
  private:
   friend std::unique_ptr<AdvertisementMonitorManager>
   std::make_unique<AdvertisementMonitorManager>(
@@ -49,6 +56,16 @@ class AdvertisementMonitorManager final
   AdvertisementMonitorManager &operator=(AdvertisementMonitorManager &&) =
       delete;
   ~AdvertisementMonitorManager() { unregisterProxy(); }
+
+  void SetRegisterMonitorReplyCallback(ReplyCallback callback) {
+    absl::MutexLock lock(&callbacks_mutex_);
+    register_monitor_reply_callback_ = std::move(callback);
+  }
+
+  void SetUnregisterMonitorReplyCallback(ReplyCallback callback) {
+    absl::MutexLock lock(&callbacks_mutex_);
+    unregister_monitor_reply_callback_ = std::move(callback);
+  }
 
   static std::unique_ptr<AdvertisementMonitorManager>
   DiscoverAdvertisementMonitorManager(
@@ -82,6 +99,38 @@ class AdvertisementMonitorManager final
 
     return std::make_unique<AdvertisementMonitorManager>(system_bus, adapter);
   }
+
+ protected:
+  void onRegisterMonitorReply(std::optional<sdbus::Error> error) override {
+    std::optional<ReplyCallback> callback;
+    {
+      absl::MutexLock lock(&callbacks_mutex_);
+      callback = std::move(register_monitor_reply_callback_);
+      register_monitor_reply_callback_.reset();
+    }
+    if (callback.has_value()) {
+      (*callback)(std::move(error));
+    }
+  }
+
+  void onUnregisterMonitorReply(std::optional<sdbus::Error> error) override {
+    std::optional<ReplyCallback> callback;
+    {
+      absl::MutexLock lock(&callbacks_mutex_);
+      callback = std::move(unregister_monitor_reply_callback_);
+      unregister_monitor_reply_callback_.reset();
+    }
+    if (callback.has_value()) {
+      (*callback)(std::move(error));
+    }
+  }
+
+ private:
+  absl::Mutex callbacks_mutex_;
+  std::optional<ReplyCallback> register_monitor_reply_callback_
+      ABSL_GUARDED_BY(callbacks_mutex_);
+  std::optional<ReplyCallback> unregister_monitor_reply_callback_
+      ABSL_GUARDED_BY(callbacks_mutex_);
 };
 }  // namespace bluez
 }  // namespace linux

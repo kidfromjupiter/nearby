@@ -191,7 +191,10 @@ void GattCharacteristicServer::StopNotify() {
   if ((characteristic_.property |
        api::ble::GattCharacteristic::Property::kNotify) ==
       api::ble::GattCharacteristic::Property::kNotify) {
-    if (notify_sessions_.fetch_sub(0) == 1) {
+    if (notify_sessions_.load() == 0) {
+      return;
+    }
+    if (notify_sessions_.fetch_sub(1) == 1) {
       if (server_cb_->characteristic_unsubscription_cb != nullptr) {
         server_cb_->characteristic_unsubscription_cb(characteristic_);
       }

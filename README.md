@@ -1,150 +1,88 @@
 # Google Nearby Sharing & Connections for Linux (Unofficial)
 
-> P2P file sharing, discovery, and connectivity on Linux using Google Nearby protocols.
+<img width="982" height="760" alt="image" src="https://github.com/user-attachments/assets/9533ea09-81d9-4162-b90f-e0bd8b714d1d" />
 
-![](cover.png)
+
 
 ## Demo
 
 
 https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
 
+## What
+This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 sections. 
+- Sharing
+- Connections
+- Presence
+
+    
+Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
+Nearby presence may or may not build. I haven't tested it.
+
+## Why
+This repo could've been a PR on the official repo. All I've done is implement the platform abstraction layer google has provided for a linux specific environment.
+It's not like I haven't made a PR towards the official repo. I got tired of begging the official nearby maintainers for a PR review. So here we are. 
 
 
+Moreover, all I've wanted was seamless file sharing between my android devices and my linux workstation + laptop. With this repo and the example application provided here,
+it accomplishes that goal perfectly. This repo wasn't created out of any altruistic goals or out of the goodness of my heart. I had a problem. I solved it. Simple as that. 
 
-This is an unofficial Linux-focused fork of Nearby.
 
-## Purpose
+## How
+### How to use
+Proper documentation is coming I swear. University's getting pretty hectic so docs is on the backburner. The wiki has some more information but it's nowhere near a proper documentation. It has some good brief
+overviews and where generally everything is located if you're thinking about contributing. 
 
-The primary goal of this repository is to provide reusable Linux libraries/APIs for Nearby.
+If you want any clarification on anything, feel free to open an issue. I'll get back to you ASAP.
 
-Nearby Share sample applications are included and will continue to be supported, but they are examples first and library integration is the main long-term target.
+As a consolation prize, I've indexed this project using [Deepwiki](https://deepwiki.com/kidfromjupiter/nearby). You might have strong feeling about AI use. But I feel like documenting very large codebases is a perfect usecase for such models. (They are called Large Language Models for a reason )
 
-## Documentation
+### How to install
+This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
+although that needs to be tested. I want to support more distros so if you encounter issues installing on your distro, please let me know. 
 
-Technical deep dives are being moved to the project wiki so this README can stay focused on setup and status.
 
-- Wiki: https://github.com/kidfromjupiter/nearby/wiki
+#### Prerequisites
 
-## Requirements
+- `sdbus-cpp >= 2.0`
+- `bluez >= 5.85`
 
-To run this project on Linux, you need:
-- BlueZ `5.86` or higher
-- `NetworkManager`
-- `Avahi`
-- Qt (required for the tray UI app)
-
-## Installation (End Users)
-
-1. Download the latest release archive from the Releases page.
-- https://github.com/kidfromjupiter/nearby/releases
-
-2. Extract it:
-
-```bash
-tar -xzf nearby-file-share-linux-*.tar.gz
-```
-
-3. Install the application, shared library, and launcher:
-   (run this from the extracted bundle directory)
-
-```bash
-./install_nearby_file_share.sh
-```
-
-4. Apply a temporary BlueZ service override (required for now).
-   Create/edit the `bluetooth.service` override:
+**To install the prerequisites, run this command**
 
 ```bash
-sudo systemctl edit bluetooth
+sudo dnf install -y \
+  bluez bluez-libs bluez-libs-devel \
+  sdbus-cpp sdbus-cpp-devel
 ```
+---
 
-Add:
+**To install the Quick Share application,**
 
-```ini
-[Service]
-ExecStart=
-ExecStart=/usr/local/libexec/bluetooth/bluetoothd -E --debug=src/plugin.c --noplugin=bap,bass,mcp,vcp,micp,ccp,csip,tmap,asha,midi
-```
+1. Go to [releases](https://github.com/kidfromjupiter/nearby/releases)
+2. Download the latest `nearby-file-share-linux-*.tar.gz`
+3. `mkdir -p nearby && tar -xf nearby-file-share-linux-*.tar.gz -C nearby`
+4. `cd nearby`
+5. `chmod +x install_nearby_file_share.sh`
+6. `./install_nearby_file_share.sh`
 
-Then reload and restart:
+**To install the actual library and headers,**
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart bluetooth
-```
+Currently there are no prebuilt shared library or headers. You'll have to build them yourself
 
-These plugins are currently disabled due to an ongoing likely upstream BlueZ bug:
-`bap,bass,mcp,vcp,micp,ccp,csip,tmap,asha,midi`.
-This workaround will be removed once the issue is fixed.
+### How to build
+Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Environment-and-Building)
+### How to contribute
+Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Environment-and-Building)
 
-This installs to `~/.local` by default.
+## Apologies
+I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
+enormous codebases. 
 
-For system-wide installation:
+If you see any such stupidities, feel free to berate me in the most shameless of manners in an issue. I look forward to learning how to do it the proper way and to improve my atrocious code quality.
 
-```bash
-./install_nearby_file_share.sh --system
-```
+## Special thanks
 
-The installer also installs:
-- `nearby_qml_file_tray_app`
-- `libnearby_sharing_api_shared.so`
-- `.desktop` launcher entry
-- launcher icon
+https://github.com/proatgram and https://github.com/vibhavp
 
-## Build From Source
-
-Build and install the Linux Nearby Sharing library:
-
-```bash
-./sharing/linux/install_nearby_sharing_service.sh
-```
-
-Build tray sample app:
-
-```bash
-cd sharing/linux/qml_tray_app
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEARBY_PREFIX=/usr/local
-cmake --build build -j
-./build/nearby_qml_file_tray_app
-```
-
-## Current Status and Compatibility
-
-The Linux implementation currently works with the reverse-engineered certificate manager used in this project.
-
-Compatibility can still break if Google changes certificate manager behavior or protocol details. That component is closed source, so upstream regressions may be hard to diagnose immediately.
-
-## Test Scope and Known Limits
-
-- Single-file sharing has been tested.
-- Multi-transfer behavior in one app lifetime has not been fully validated.
-- Current practical testing often restarts the app before a new transfer.
-
-In this project, a "session" means one application lifetime (start to exit).
-
-After one transfer, some endpoints/internal state can reset or change, and this is still being investigated.
-
-## Known Issues
-
-- Linux hotspot startup can be slow.
-- Connecting to another device's hotspot can be slow on Linux.
-- Android-initiated connection formation can be very slow.
-- 5 GHz hotspot discovery and connection support is currently removed due to Intel Wi-Fi driver instability related to LAR behavior on Linux. There is no known fix yet; this may be re-enabled in a later release.
-
-A likely area to investigate is connection negotiation paths that Linux may not handle optimally yet.
-
-## Wi-Fi Direct
-
-Wi-Fi Direct is theoretically possible, but not implemented yet.
-
-Reason: NetworkManager does not natively support the Wi-Fi Direct Group Owner flow required here.
-
-## Contributing
-
-- General: `CONTRIBUTING.md`
-- Linux-specific: `LINUX_CONTRIBUTING.md`
-
-## License
-
-Released under `LICENSE`.
+*they were the original authors of the linux platform support [PR](https://github.com/google/nearby/pull/2098) that I have based much of this codebase upon. I am standing on the shoulders
+of giants*

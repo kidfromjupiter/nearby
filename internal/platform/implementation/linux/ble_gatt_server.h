@@ -16,6 +16,7 @@
 #define PLATFORM_IMPL_LINUX_API_BLE_GATT_SERVER_H_
 
 #include <memory>
+#include <optional>
 #include <regex>
 
 #include <sdbus-c++/IConnection.h>
@@ -69,7 +70,16 @@ class GattServer : public api::ble::GattServer {
                                         sdbus::ObjectPath("/com/google/nearby/medium/ble/gatt"))),
         gatt_manager_(std::make_unique<bluez::GattManager>(system_bus_, adapter_.GetObjectPath())),
         server_cb_(std::make_shared<api::ble::ServerGattConnectionCallback>(
-            std::move(server_cb))) {}
+            std::move(server_cb))) {
+    gatt_manager_->SetRegisterApplicationReplyCallback(
+        [this](std::optional<sdbus::Error> error) {
+          OnRegisterApplicationReply(std::move(error));
+        });
+    gatt_manager_->SetUnregisterApplicationReplyCallback(
+        [this](std::optional<sdbus::Error> error) {
+          OnUnregisterApplicationReply(std::move(error));
+        });
+  }
   ~GattServer() override = default;
 
   absl::optional<api::ble::GattCharacteristic> CreateCharacteristic(
@@ -85,6 +95,9 @@ class GattServer : public api::ble::GattServer {
   void Stop() override;
 
  private:
+  void OnRegisterApplicationReply(std::optional<sdbus::Error> error);
+  void OnUnregisterApplicationReply(std::optional<sdbus::Error> error);
+
   sdbus::IConnection& system_bus_;
   std::shared_ptr<BluetoothDevices> devices_;
   BluetoothAdapter adapter_;
@@ -93,9 +106,20 @@ class GattServer : public api::ble::GattServer {
   std::unique_ptr<RootObjectManager> gatt_service_root_object_manager;
   absl::Mutex profiles_mutex_;
   absl::flat_hash_map<Uuid, std::unique_ptr<bluez::GattProfile>> gatt_profiles_;
-    ABSL_GUARDED_BY(profiles_mutex_)
+      ABSL_GUARDED_BY(profiles_mutex_);
   std::unique_ptr<bluez::GattManager> gatt_manager_;
   std::shared_ptr<api::ble::ServerGattConnectionCallback> server_cb_;
+  absl::Mutex registration_mutex_;
+  bool gatt_application_registered_ ABSL_GUARDED_BY(registration_mutex_) =
+      false;
+  bool gatt_application_register_pending_ ABSL_GUARDED_BY(registration_mutex_) =
+      false;
+  bool gatt_application_unregister_pending_
+      ABSL_GUARDED_BY(registration_mutex_) = false;
+  std::optional<sdbus::PendingAsyncCall> register_application_call_
+      ABSL_GUARDED_BY(registration_mutex_);
+  std::optional<sdbus::PendingAsyncCall> unregister_application_call_
+      ABSL_GUARDED_BY(registration_mutex_);
   absl::Mutex services_mutex_;
   absl::flat_hash_map<Uuid, std::unique_ptr<bluez::GattServiceServer>> services_
       ABSL_GUARDED_BY(services_mutex_);

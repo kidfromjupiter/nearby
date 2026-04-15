@@ -15,7 +15,7 @@
 #include "internal/platform/task_runner.h"
 #include "sharing/internal/api/sharing_platform.h"
 
-namespace nearby::sharing::linux {
+namespace nearby::sharing {
 
 class LinuxSharingPlatform final : public nearby::sharing::api::SharingPlatform {
  public:

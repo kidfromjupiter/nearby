@@ -93,7 +93,7 @@ class BluezGattDiscovery final : public bluez::BluezObjectManager {
   absl::Mutex mutex_;
   absl::flat_hash_map<sdbus::ObjectPath, std::unique_ptr<GattServiceClient>>
       cached_services_ ABSL_GUARDED_BY(mutex_);
-  // Tuple order: service uuid, characteristic uuid, device object path
+  // Tuple order: service uuid, characteristic uuid, device object path.
   absl::flat_hash_map<std::tuple<Uuid, Uuid, sdbus::ObjectPath>,
                       sdbus::ObjectPath>
       discovered_characteristics_ ABSL_GUARDED_BY(mutex_);
@@ -122,7 +122,7 @@ class GattClient : public api::ble::GattClient {
         peripheral_object_path_(peripheral_object_path),
         gatt_discovery_(std::move(gatt_discovery)),
         discovery_cancel_(false) {
-    disconnected_callback_it_ = gatt_discovery->AddPeripheralConnection(
+    disconnected_callback_it_ = gatt_discovery_->AddPeripheralConnection(
         peripheral_object_path_, std::move(disconnected_callback));
   }
   ~GattClient() override {

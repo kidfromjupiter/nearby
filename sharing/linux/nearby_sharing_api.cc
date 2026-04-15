@@ -20,6 +20,7 @@
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
+#include "sharing/flags/generated/nearby_sharing_feature_flags.h"
 #include "sharing/linux/platform/linux_sharing_platform.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/nearby_sharing_service_factory.h"
@@ -28,7 +29,7 @@
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
 
-namespace nearby::sharing::linux {
+namespace nearby::sharing {
 
 namespace {
 
@@ -38,6 +39,10 @@ void EnableBleL2capDefaults() {
   nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
       nearby::connections::config_package_nearby::nearby_connections_feature::
           kEnableBleL2cap,
+      true);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::sharing::config_package_nearby::nearby_sharing_feature::
+          kEnableBleForTransfer,
       true);
   //nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
   //    nearby::connections::config_package_nearby::nearby_connections_feature::
@@ -123,6 +128,16 @@ NearbySharingApi::TextAttachmentType ToFacadeTextAttachmentType(
       return FacadeType::kUnknown;
   }
   return FacadeType::kUnknown;
+}
+
+float NormalizeFacadeProgress(float progress) {
+  if (progress <= 0.0f) {
+    return 0.0f;
+  }
+  if (progress >= 100.0f) {
+    return 1.0f;
+  }
+  return progress / 100.0f;
 }
 
 std::string GenerateQrCodeUrl() {
@@ -266,7 +281,7 @@ class NearbySharingApi::Impl : public nearby::sharing::ShareTargetDiscoveredCall
     info.device_name = share_target.device_name;
     info.is_incoming = share_target.is_incoming;
     info.status = ToFacadeTransferStatus(transfer_metadata.status());
-    info.progress = transfer_metadata.progress();
+    info.progress = NormalizeFacadeProgress(transfer_metadata.progress());
     info.transferred_bytes = transfer_metadata.transferred_bytes();
     info.total_attachments = transfer_metadata.total_attachments_count();
     info.transferred_attachments = transfer_metadata.transferred_attachments_count();
@@ -657,4 +672,4 @@ std::string NearbySharingApi::TransferStatusToString(TransferStatus status) {
   return "Unknown";
 }
 
-}  // namespace nearby::sharing::linux
+}  // namespace nearby::sharing

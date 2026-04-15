@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +42,61 @@ using ::nearby::connections::ResultCallback;
 using NcPayload = ::nearby::connections::Payload;
 using NcStatus = ::nearby::connections::Status;
 using NcStrategy = ::nearby::connections::Strategy;
+
+class VectorInputStream final : public InputStream {
+ public:
+  explicit VectorInputStream(std::vector<uint8_t> bytes)
+      : bytes_(std::move(bytes)) {}
+
+  ExceptionOr<ByteArray> Read(std::int64_t size) override {
+    if (closed_) {
+      return ExceptionOr<ByteArray>(Exception::kIo);
+    }
+    if (offset_ >= bytes_.size() || size <= 0) {
+      return ExceptionOr<ByteArray>(ByteArray());
+    }
+
+    const size_t remaining = bytes_.size() - offset_;
+    const size_t chunk_size = std::min<size_t>(remaining, static_cast<size_t>(size));
+    ByteArray chunk(reinterpret_cast<const char*>(bytes_.data() + offset_),
+                    chunk_size);
+    offset_ += chunk_size;
+    return ExceptionOr<ByteArray>(std::move(chunk));
+  }
+
+  Exception Close() override {
+    closed_ = true;
+    return {Exception::kSuccess};
+  }
+
+ private:
+  std::vector<uint8_t> bytes_;
+  size_t offset_ = 0;
+  bool closed_ = false;
+};
+
+class SharedInputStream final : public InputStream {
+ public:
+  explicit SharedInputStream(std::shared_ptr<InputStream> stream)
+      : stream_(std::move(stream)) {}
+
+  ExceptionOr<ByteArray> Read(std::int64_t size) override {
+    if (stream_ == nullptr) {
+      return ExceptionOr<ByteArray>(Exception::kIo);
+    }
+    return stream_->Read(size);
+  }
+
+  Exception Close() override {
+    if (stream_ == nullptr) {
+      return {Exception::kIo};
+    }
+    return stream_->Close();
+  }
+
+ private:
+  std::shared_ptr<InputStream> stream_;
+};
 
 Status ConvertToStatus(NcStatus status) {
   return static_cast<Status>(status.value);
@@ -85,6 +141,17 @@ NcPayload ConvertToServicePayload(Payload payload) {
       std::vector<uint8_t> bytes = payload.content.bytes_payload.bytes;
       return NcPayload(payload.id,
                        ByteArray(std::string(bytes.begin(), bytes.end())));
+    }
+    case PayloadContent::Type::kStream: {
+      if (payload.content.stream_payload.input_stream != nullptr) {
+        return NcPayload(
+            payload.id,
+            std::make_unique<SharedInputStream>(
+                std::move(payload.content.stream_payload.input_stream)));
+      }
+      auto stream = std::make_unique<VectorInputStream>(
+          std::move(payload.content.stream_payload.bytes));
+      return NcPayload(payload.id, std::move(stream));
     }
     default:
       return NcPayload();

@@ -24,6 +24,7 @@ cc_library(
         "//internal/base:file_path",
         "//internal/base:files",
         "//internal/crypto_cros",  # buildcleaner: keep
+        "//internal/platform:base",
         "//internal/interop:authentication_status",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings:string_view",
