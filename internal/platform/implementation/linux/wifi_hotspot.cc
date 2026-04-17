@@ -164,17 +164,12 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
   api::WifiCapability& capability = wireless_device_->GetCapability();
   std::string selected_band;
   int selected_channel = kPreferred24GhzChannel;
-  if (capability.supports_6_ghz) {
+  if (capability.supports_6_ghz || capability.supports_5_ghz) {
     selected_band = "a";  // 5/6 GHz - NetworkManager uses "a" for both 5 GHz and 6 GHz
     selected_channel = kPreferred5GhzChannel;
     LOG(INFO) << __func__
-              << ": Device supports 6 GHz, using 5/6 GHz band on channel "
+              << ": Device supports 5/6 GHz, using 5/6 GHz band on channel "
               << selected_channel;
-  } else if (capability.supports_5_ghz) {
-    selected_band = "a";  // 5 GHz
-    selected_channel = kPreferred5GhzChannel;
-    LOG(INFO) << __func__ << ": Device supports 5 GHz, using 5 GHz band on "
-              << "channel " << selected_channel;
   } else {
     selected_band = "bg";  // 2.4 GHz
     selected_channel = kPreferred24GhzChannel;
