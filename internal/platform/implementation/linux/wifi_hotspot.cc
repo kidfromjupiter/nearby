@@ -21,6 +21,7 @@
 #include <random>
 
 #include "internal/platform/implementation/linux/dbus.h"
+#include "internal/platform/implementation/linux/linux_flags.h"
 #include "internal/platform/implementation/linux/network_manager.h"
 #include "internal/platform/implementation/linux/network_manager_access_point.h"
 #include "internal/platform/implementation/linux/utils.h"
@@ -164,7 +165,9 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
   api::WifiCapability& capability = wireless_device_->GetCapability();
   std::string selected_band;
   int selected_channel = kPreferred24GhzChannel;
-  if (capability.supports_6_ghz || capability.supports_5_ghz) {
+  const bool enable_5ghz_hotspot = Is5GhzHotspotEnabled();
+  if (enable_5ghz_hotspot &&
+      (capability.supports_6_ghz || capability.supports_5_ghz)) {
     selected_band = "a";  // 5/6 GHz - NetworkManager uses "a" for both 5 GHz and 6 GHz
     selected_channel = kPreferred5GhzChannel;
     LOG(INFO) << __func__
@@ -173,9 +176,16 @@ bool NetworkManagerWifiHotspotMedium::StartWifiHotspot(
   } else {
     selected_band = "bg";  // 2.4 GHz
     selected_channel = kPreferred24GhzChannel;
-    LOG(INFO) << __func__
-              << ": Device supports only 2.4 GHz, using 2.4 GHz band on "
-              << "channel " << selected_channel;
+    if (!enable_5ghz_hotspot &&
+        (capability.supports_6_ghz || capability.supports_5_ghz)) {
+      LOG(INFO) << __func__
+                << ": 5/6 GHz hotspot is disabled by feature flag, using 2.4 "
+                << "GHz band on channel " << selected_channel;
+    } else {
+      LOG(INFO) << __func__
+                << ": Device supports only 2.4 GHz, using 2.4 GHz band on "
+                << "channel " << selected_channel;
+    }
   }
 
   const int32_t fallback_channel_width =

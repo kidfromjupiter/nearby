@@ -14,8 +14,6 @@
 
 #load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
-licenses(["notice"])
-
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 #refresh_compile_commands(
 #    name = "refresh_compile_commands",
@@ -34,12 +32,15 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 #    # And if you're working on a header-only library, specify a test or binary target that compiles it.
 #)
 
+licenses(["notice"])
+
 cc_library(
     name = "types",
     srcs = [
         "device_info.cc",
         #"log_message.cc",
         "timer.cc",
+        "linux_flags.cc",
     ],
     hdrs = [
         "atomic_boolean.h",
@@ -57,6 +58,7 @@ cc_library(
         "submittable_executor.h",
         "timer.h",
         "thread_pool.h",
+        "linux_flags.h",
         #"log_message.h",
         "utils.h",
     ],
@@ -152,10 +154,10 @@ cc_library(
     srcs = [
         "crypto.cc",
     ],
-    visibility = ["//visibility:public"],
-    linkopts= [
+    linkopts = [
         "-lcrypto",
     ],
+    visibility = ["//visibility:public"],
     deps = [
         "//internal/platform:base",
         "//internal/platform/implementation:types",
@@ -168,7 +170,6 @@ cc_library(
     srcs = [
         "system_clock.cc",
     ],
-    alwayslink = True,
     visibility = [
         "//sharing/linux:__pkg__",
     ],
@@ -177,6 +178,7 @@ cc_library(
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/time",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -242,6 +244,7 @@ cc_library(
         ":crypto",  # build_cleaner: keep
         ":system_clock",
         ":types",
+        "//connections/implementation/flags:connections_flags",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
@@ -256,7 +259,6 @@ cc_library(
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/shared:file",
         "//proto/mediums:ble_frames_cc_proto",
-        "//connections/implementation/flags:connections_flags",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
