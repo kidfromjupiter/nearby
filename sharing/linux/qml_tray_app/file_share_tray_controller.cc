@@ -37,6 +37,7 @@ FileShareTrayController::~FileShareTrayController() {
 
 void FileShareTrayController::initializeService() {
   service_ = std::make_unique<NearbySharingApi>(state_.deviceName().toStdString());
+  service_->Set5GhzHotspotEnabled(state_.enable5GhzHotspot());
   state_.SetQrCodeData(QString::fromStdString(service_->GetQrCodeUrl()), {}, 0);
   updateQrCodeData();
   emit qrCodeUrlChanged();
@@ -245,6 +246,10 @@ void FileShareTrayController::loadSettings() {
       settings.value(QStringLiteral("autoAcceptIncoming"), true).toBool();
   state_.SetAutoAcceptIncoming(stored_auto_accept);
 
+  const bool stored_enable_5ghz_hotspot =
+      settings.value(QStringLiteral("enable5GhzHotspot"), true).toBool();
+  state_.SetEnable5GhzHotspot(stored_enable_5ghz_hotspot);
+
   const QString stored_log_path =
       settings.value(QStringLiteral("logPath"), QStringLiteral("/tmp/nearby_qml_file_tray.log"))
           .toString()
@@ -258,6 +263,8 @@ void FileShareTrayController::saveSettings() const {
   QSettings settings(QStringLiteral("Nearby"), QStringLiteral("QmlFileTrayApp"));
   settings.setValue(QStringLiteral("deviceName"), state_.deviceName());
   settings.setValue(QStringLiteral("autoAcceptIncoming"), state_.autoAcceptIncoming());
+  settings.setValue(QStringLiteral("enable5GhzHotspot"),
+                    state_.enable5GhzHotspot());
   settings.setValue(QStringLiteral("logPath"), state_.logPath());
 }
 
@@ -285,6 +292,18 @@ void FileShareTrayController::setAutoAcceptIncoming(bool enabled) {
   state_.SetAutoAcceptIncoming(enabled);
   saveSettings();
   emit autoAcceptIncomingChanged();
+}
+
+void FileShareTrayController::setEnable5GhzHotspot(bool enabled) {
+  if (enabled == state_.enable5GhzHotspot()) {
+    return;
+  }
+  state_.SetEnable5GhzHotspot(enabled);
+  if (service_) {
+    service_->Set5GhzHotspotEnabled(enabled);
+  }
+  saveSettings();
+  emit enable5GhzHotspotChanged();
 }
 
 void FileShareTrayController::setLogPath(const QString& path) {
@@ -558,6 +577,8 @@ void FileShareTrayController::notifyStateChange(const QString& property) {
     emit runningChanged();
   } else if (property == QStringLiteral("autoAcceptIncoming")) {
     emit autoAcceptIncomingChanged();
+  } else if (property == QStringLiteral("enable5GhzHotspot")) {
+    emit enable5GhzHotspotChanged();
   } else if (property == QStringLiteral("discoveredTargets")) {
     emit discoveredTargetsChanged();
   } else if (property == QStringLiteral("transfers")) {

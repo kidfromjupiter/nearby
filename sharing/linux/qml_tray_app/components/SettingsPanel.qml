@@ -146,6 +146,21 @@ Drawer {
                                 onToggled: fileShareController.autoAcceptIncoming = checked
                             }
                         }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Label {
+                                Layout.fillWidth: true
+                                color: root.textPrimary
+                                font.pixelSize: 13
+                                text: "Enable 5 GHz hotspot"
+                            }
+                            ThemedToggle {
+                                checked: fileShareController.enable5GhzHotspot
+                                onToggled: fileShareController.enable5GhzHotspot = checked
+                            }
+                        }
                     }
                 }
 

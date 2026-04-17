@@ -20,6 +20,7 @@ class FileShareTrayController : public QObject {
   Q_PROPERTY(QVariantList discoveredTargets READ discoveredTargets NOTIFY discoveredTargetsChanged)
   Q_PROPERTY(QVariantList transfers READ transfers NOTIFY transfersChanged)
   Q_PROPERTY(bool autoAcceptIncoming READ autoAcceptIncoming WRITE setAutoAcceptIncoming NOTIFY autoAcceptIncomingChanged)
+  Q_PROPERTY(bool enable5GhzHotspot READ enable5GhzHotspot WRITE setEnable5GhzHotspot NOTIFY enable5GhzHotspotChanged)
   Q_PROPERTY(QString qrCodeUrl READ qrCodeUrl NOTIFY qrCodeUrlChanged)
   Q_PROPERTY(QStringList qrCodeRows READ qrCodeRows NOTIFY qrCodeChanged)
   Q_PROPERTY(int qrCodeSize READ qrCodeSize NOTIFY qrCodeChanged)
@@ -39,6 +40,7 @@ class FileShareTrayController : public QObject {
   QVariantList discoveredTargets() const { return state_.discoveredTargets(); }
   QVariantList transfers() const { return state_.transfers(); }
   bool autoAcceptIncoming() const { return state_.autoAcceptIncoming(); }
+  bool enable5GhzHotspot() const { return state_.enable5GhzHotspot(); }
   QString qrCodeUrl() const { return state_.qrCodeUrl(); }
   QStringList qrCodeRows() const { return state_.qrCodeRows(); }
   int qrCodeSize() const { return state_.qrCodeSize(); }
@@ -47,6 +49,7 @@ class FileShareTrayController : public QObject {
   // Public methods
   void setDeviceName(const QString& device_name);
   void setAutoAcceptIncoming(bool enabled);
+  void setEnable5GhzHotspot(bool enabled);
   void setLogPath(const QString& path);
 
   Q_INVOKABLE void start();
@@ -69,6 +72,7 @@ class FileShareTrayController : public QObject {
   void discoveredTargetsChanged();
   void transfersChanged();
   void autoAcceptIncomingChanged();
+  void enable5GhzHotspotChanged();
   void qrCodeUrlChanged();
   void qrCodeChanged();
   void logPathChanged();

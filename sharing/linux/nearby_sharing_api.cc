@@ -17,6 +17,7 @@
 #include "internal/base/files.h"
 #include "internal/crypto_cros/ec_private_key.h"
 #include "internal/flags/nearby_flags.h"
+#include "internal/platform/implementation/linux/linux_flags.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/file_attachment.h"
@@ -575,6 +576,10 @@ void NearbySharingApi::Cancel(int64_t share_target_id,
           cb(ToFacadeStatus(status));
         }
       });
+}
+
+void NearbySharingApi::Set5GhzHotspotEnabled(bool enabled) {
+  nearby::linux::Set5GhzHotspotEnabled(enabled);
 }
 
 void NearbySharingApi::SetDeviceName(const std::string& device_name) {

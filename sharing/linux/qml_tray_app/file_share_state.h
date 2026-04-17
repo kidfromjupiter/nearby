@@ -20,6 +20,7 @@ class FileShareState {
   QString statusMessage() const { return status_message_; }
   bool running() const { return running_; }
   bool autoAcceptIncoming() const { return auto_accept_incoming_; }
+  bool enable5GhzHotspot() const { return enable_5ghz_hotspot_; }
 
   QString pendingSendFileName() const { return pending_send_file_name_; }
   QString pendingSendFilePath() const { return pending_send_file_path_; }
@@ -40,6 +41,7 @@ class FileShareState {
   void SetStatusMessage(const QString& message) { status_message_ = message; }
   void SetRunning(bool running) { running_ = running; }
   void SetAutoAcceptIncoming(bool enabled) { auto_accept_incoming_ = enabled; }
+  void SetEnable5GhzHotspot(bool enabled) { enable_5ghz_hotspot_ = enabled; }
 
   void SetPendingSendFile(const QString& file_path, const QString& file_name,
                           qlonglong target_id) {
@@ -91,6 +93,7 @@ class FileShareState {
   QString status_message_ = QStringLiteral("Idle");
   bool running_ = false;
   bool auto_accept_incoming_ = true;
+  bool enable_5ghz_hotspot_ = true;
 
   // QR Code
   QString qr_code_url_;
