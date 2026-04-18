@@ -27,6 +27,7 @@
 #include "internal/platform/implementation/linux/bluez.h"
 #include "internal/platform/implementation/linux/bluez_gatt_characteristic_client.h"
 #include "internal/platform/implementation/linux/bluez_gatt_service_client.h"
+#include "internal/platform/logging.h"
 
 namespace nearby {
 namespace linux {
@@ -122,10 +123,16 @@ class GattClient : public api::ble::GattClient {
         peripheral_object_path_(peripheral_object_path),
         gatt_discovery_(std::move(gatt_discovery)),
         discovery_cancel_(false) {
+    LOG(INFO) << __func__
+              << ": Creating GATT client for peripheral "
+              << peripheral_object_path_;
     disconnected_callback_it_ = gatt_discovery_->AddPeripheralConnection(
         peripheral_object_path_, std::move(disconnected_callback));
   }
   ~GattClient() override {
+    LOG(INFO) << __func__
+              << ": Destroying GATT client for peripheral "
+              << peripheral_object_path_;
     absl::MutexLock lock(&disconnected_callback_mutex_);
     if (!discovery_cancel_.Cancelled()) {
       discovery_cancel_.Cancel();

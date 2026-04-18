@@ -68,6 +68,7 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
   observers_(std::make_shared<ObserverList<api::BluetoothClassicMedium::Observer>>()),
   devices_(std::make_unique<BluetoothDevices>(
     system_bus_, adapter_.GetObjectPath(), *observers_)),
+    gatt_discovery_(std::make_shared<BluezGattDiscovery>(system_bus_)),
     root_object_manager_(std::make_unique<RootObjectManager>(*system_bus_, sdbus::ObjectPath("/com/google/nearby/medium/ble/advertisement/monitor"))),
     adv_monitor_manager_(
       bluez::AdvertisementMonitorManager::
@@ -75,6 +76,10 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
     adv_manager_(std::make_unique<bluez::LEAdvertisementManager>(*system_bus_,
                                                                  adapter)),
     cur_adv_(nullptr) {
+  if (!gatt_discovery_->InitializeKnownServices()) {
+    LOG(WARNING) << __func__
+                 << ": Failed to initialize known GATT services cache.";
+  }
 
   // generating psm value for l2cap socket
   Prng prng;
@@ -479,11 +484,22 @@ std::unique_ptr<api::ble::GattClient> BleV2Medium::ConnectToGattServer(
   api::ble::BlePeripheral::UniqueId peripheral_id,
   api::ble::TxPowerLevel tx_power_level,
   api::ble::ClientGattConnectionCallback callback) {
-  (void)peripheral_id;
+  auto device = devices_->get_device_by_unique_id(peripheral_id);
+  if (!device) {
+    LOG(ERROR) << __func__ << ": Failed to find device with unique ID "
+               << peripheral_id;
+    return nullptr;
+  }
+
+  // Tx power is not configurable for this Linux GATT path yet.
   (void)tx_power_level;
-  (void)callback;
-  LOG(INFO) << __func__ << ": GATT is disabled on linux.";
-  return nullptr;
+
+  auto peripheral_object_path = device->GetObjectPath();
+  LOG(INFO) << __func__ << ": Creating Linux GATT client for peripheral "
+            << peripheral_object_path;
+  return std::make_unique<GattClient>(system_bus_, peripheral_object_path,
+                                      gatt_discovery_,
+                                      std::move(callback.disconnected_cb));
 }
 
 std::unique_ptr<api::ble::BleServerSocket> BleV2Medium::OpenServerSocket(

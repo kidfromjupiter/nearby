@@ -36,16 +36,34 @@ namespace nearby {
 namespace linux {
 bool GattClient::DiscoverServiceAndCharacteristics(
     const Uuid &service_uuid, const std::vector<Uuid> &characteristic_uuids) {
-  return gatt_discovery_->DiscoverServiceAndCharacteristics(
+  LOG(INFO) << __func__ << ": Discovering service " << std::string(service_uuid)
+            << " with " << characteristic_uuids.size()
+            << " characteristic UUID(s) on peripheral "
+            << peripheral_object_path_;
+  bool success = gatt_discovery_->DiscoverServiceAndCharacteristics(
       peripheral_object_path_, service_uuid, characteristic_uuids,
       discovery_cancel_);
+  LOG(INFO) << __func__ << ": Discovery "
+            << (success ? "succeeded" : "failed") << " for service "
+            << std::string(service_uuid) << " on peripheral "
+            << peripheral_object_path_;
+  return success;
 }
 
 absl::optional<api::ble::GattCharacteristic> GattClient::GetCharacteristic(
     const Uuid &service_uuid, const Uuid &characteristic_uuid) {
+  LOG(INFO) << __func__ << ": Looking up characteristic "
+            << std::string(characteristic_uuid) << " in service "
+            << std::string(service_uuid) << " on peripheral "
+            << peripheral_object_path_;
   auto chr_proxy = gatt_discovery_->GetCharacteristic(
       peripheral_object_path_, service_uuid, characteristic_uuid);
-  if (chr_proxy == nullptr) return std::nullopt;
+  if (chr_proxy == nullptr) {
+    LOG(INFO) << __func__ << ": Characteristic lookup failed for service "
+              << std::string(service_uuid) << ", characteristic "
+              << std::string(characteristic_uuid);
+    return std::nullopt;
+  }
 
   api::ble::GattCharacteristic chr;
   chr.service_uuid = service_uuid;
@@ -78,11 +96,16 @@ absl::optional<api::ble::GattCharacteristic> GattClient::GetCharacteristic(
   absl::MutexLock lock(&characteristics_mutex_);
   characteristics_.emplace(chr, std::move(chr_proxy));
 
+  LOG(INFO) << __func__ << ": Cached characteristic for service "
+            << std::string(service_uuid) << ", characteristic "
+            << std::string(characteristic_uuid);
   return chr;
 }
 
 absl::optional<std::string> GattClient::ReadCharacteristic(
     const api::ble::GattCharacteristic &characteristic) {
+  LOG(INFO) << __func__ << ": Reading characteristic '"
+            << absl::Substitute("$0", characteristic) << "'";
   absl::ReaderMutexLock lock(&characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
@@ -90,7 +113,7 @@ absl::optional<std::string> GattClient::ReadCharacteristic(
     return std::nullopt;
   }
 
-  return std::visit(
+  auto result = std::visit(
       [](auto &&chr) {
         try {
           auto value_bytes = chr->ReadValue({});
@@ -102,11 +125,22 @@ absl::optional<std::string> GattClient::ReadCharacteristic(
         }
       },
       characteristics_[characteristic]);
+  LOG(INFO) << __func__ << ": Read "
+            << (result.has_value() ? "succeeded" : "failed")
+            << " for characteristic '"
+            << absl::Substitute("$0", characteristic) << "'";
+  return result;
 }
 
 bool GattClient::WriteCharacteristic(
     const api::ble::GattCharacteristic &characteristic,
     absl::string_view value, WriteType type) {
+  LOG(INFO) << __func__ << ": Writing " << value.size()
+            << " byte(s) to characteristic '"
+            << absl::Substitute("$0", characteristic) << "' with write type "
+            << (type == api::ble::GattClient::WriteType::kWithResponse
+                    ? "with_response"
+                    : "without_response");
   absl::ReaderMutexLock lock(&characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
@@ -114,7 +148,7 @@ bool GattClient::WriteCharacteristic(
     return false;
   }
 
-  return std::visit(
+  bool success = std::visit(
       [value, type](auto &&chr) {
         std::vector<uint8_t> value_bytes(value.begin(), value.end());
         try {
@@ -131,12 +165,21 @@ bool GattClient::WriteCharacteristic(
         }
       },
       characteristics_[characteristic]);
+  LOG(INFO) << __func__ << ": Write "
+            << (success ? "succeeded" : "failed")
+            << " for characteristic '" << absl::Substitute("$0", characteristic)
+            << "'";
+  return success;
 }
 
 bool GattClient::SetCharacteristicSubscription(
     const api::ble::GattCharacteristic &characteristic, bool enable,
     absl::AnyInvocable<void(absl::string_view value)>
         on_characteristic_changed_cb) {
+  LOG(INFO) << __func__ << ": "
+            << (enable ? "Enabling" : "Disabling")
+            << " subscription for characteristic '"
+            << absl::Substitute("$0", characteristic) << "'";
   absl::MutexLock lock(&characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
@@ -148,7 +191,11 @@ bool GattClient::SetCharacteristicSubscription(
     auto subbed_chr = gatt_discovery_->GetSubscribedCharacteristic(
         peripheral_object_path_, characteristic.service_uuid,
         characteristic.uuid, std::move(on_characteristic_changed_cb));
-    if (subbed_chr == nullptr) return false;
+    if (subbed_chr == nullptr) {
+      LOG(INFO) << __func__
+                << ": Failed to get subscribed characteristic client.";
+      return false;
+    }
     try {
       subbed_chr->StartNotify();
     } catch (const sdbus::Error &e) {
@@ -162,7 +209,11 @@ bool GattClient::SetCharacteristicSubscription(
     auto chr = gatt_discovery_->GetCharacteristic(peripheral_object_path_,
                                                   characteristic.service_uuid,
                                                   characteristic.uuid);
-    if (chr == nullptr) return false;
+    if (chr == nullptr) {
+      LOG(INFO) << __func__
+                << ": Failed to get characteristic client for unsubscribe.";
+      return false;
+    }
     try {
       chr->StopNotify();
     } catch (const sdbus::Error &e) {
@@ -172,17 +223,29 @@ bool GattClient::SetCharacteristicSubscription(
 
     characteristics_[characteristic] = std::move(chr);
   }
+  LOG(INFO) << __func__ << ": Subscription update succeeded for characteristic '"
+            << absl::Substitute("$0", characteristic) << "'";
   return true;
 }
 
 void GattClient::Disconnect() {
+  LOG(INFO) << __func__
+            << ": Disconnecting GATT client for peripheral "
+            << peripheral_object_path_;
   absl::MutexLock lock(&disconnected_callback_mutex_);
   if (!discovery_cancel_.Cancelled()) {
     discovery_cancel_.Cancel();
     if (*disconnected_callback_it_ != nullptr) (*disconnected_callback_it_)();
     gatt_discovery_->RemovePeripheralConnection(peripheral_object_path_,
                                                 disconnected_callback_it_);
+    LOG(INFO) << __func__
+              << ": Disconnected GATT client for peripheral "
+              << peripheral_object_path_;
+    return;
   }
+  LOG(INFO) << __func__
+            << ": GATT client already disconnected for peripheral "
+            << peripheral_object_path_;
 }
 
 void BluezGattDiscovery::Shutdown() {
