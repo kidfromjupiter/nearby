@@ -114,18 +114,18 @@ jobs:
             --cxxopt='-fvisibility-inlines-hidden' \
             //connections:core
 
-      - name: Build Presence
-        run: |
-          bazel build \
-            --check_visibility=false \
-            --spawn_strategy=standalone \
-            --cxxopt=-std=c++20 \
-            --host_cxxopt=-std=c++20 \
-            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
-            --copt='-DGITHUB_BUILD' \
-            --copt='-fvisibility=hidden' \
-            --cxxopt='-fvisibility-inlines-hidden' \
-            //presence
+      # - name: Build Presence
+      #   run: |
+      #     bazel build \
+      #       --check_visibility=false \
+      #       --spawn_strategy=standalone \
+      #       --cxxopt=-std=c++20 \
+      #       --host_cxxopt=-std=c++20 \
+      #       --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+      #       --copt='-DGITHUB_BUILD' \
+      #       --copt='-fvisibility=hidden' \
+      #       --cxxopt='-fvisibility-inlines-hidden' \
+      #       //presence
 
       - name: Build Nearby Sharing Linux shared API
         run: |
