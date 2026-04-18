@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
 This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 sections. 
 - Sharing
 - Connections
-- Presence
+- ~Presence~ ( Build fails for some reason. Haven't had time to investigate. Maybe something minor. Check the validate.yaml for build steps and see why its faiing )
 
     
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
