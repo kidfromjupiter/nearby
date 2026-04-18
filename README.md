@@ -80,6 +80,13 @@ enormous codebases.
 
 If you see any such stupidities, feel free to berate me in the most shameless of manners in an issue. I look forward to learning how to do it the proper way and to improve my atrocious code quality.
 
+## Note to self in case i forget
+GATT client is used to bridge the BLE advertisement size gap in discovery, then inform how connection is made.
+
+During discovery, scanners often only get a small header/fast payload from BLE scan data. The stack then uses ConnectToGattServer(...) to open a short-lived GATT client session,
+discover/read Copresence characteristics, pull the full Nearby advertisement bytes, and disconnect. That recovered payload is what drives endpoint discovery callbacks (including fields
+like PSM).
+
 ## Special thanks
 
 https://github.com/proatgram and https://github.com/vibhavp
