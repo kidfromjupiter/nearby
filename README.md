@@ -74,18 +74,21 @@ Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Envir
 ### How to contribute
 Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Environment-and-Building)
 
+
+## TODO
+- Investigate why bluetooth connection requests pairing ( both l2cap socket and bluetooth profile should be unauthenticated )
+- When transferring (android to linux) over bluetooth classic, android shows 100% transferred ( but still `Sending...` ) while linux lags behind. Some kind of bottleneck or android bug?
+- Tests for basically everything.
+- Cleanup of `implementation/linux`. Currently all the linux specific implementation files are in the same directory. Even though thats how the other platforms have their stuff structured, I personally hate the visual bloat.
+- Documentation basically everything ( honestly this would be a massive project in itself )
+- Resolving random crashes of quick share application
+- Support for fast initiation
+
 ## Apologies
 I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
 enormous codebases. 
 
 If you see any such stupidities, feel free to berate me in the most shameless of manners in an issue. I look forward to learning how to do it the proper way and to improve my atrocious code quality.
-
-## Note to self in case i forget
-GATT client is used to bridge the BLE advertisement size gap in discovery, then inform how connection is made.
-
-During discovery, scanners often only get a small header/fast payload from BLE scan data. The stack then uses ConnectToGattServer(...) to open a short-lived GATT client session,
-discover/read Copresence characteristics, pull the full Nearby advertisement bytes, and disconnect. That recovered payload is what drives endpoint discovery callbacks (including fields
-like PSM).
 
 ## Special thanks
 
