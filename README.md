@@ -83,6 +83,7 @@ Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Envir
 - Documentation basically everything ( honestly this would be a massive project in itself )
 - Resolving random crashes of quick share application
 - Support for fast initiation
+- When receiving, if file already exists, does not overwrite currently. Decide what to do then
 
 ## Apologies
 I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
