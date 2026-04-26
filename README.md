@@ -76,6 +76,7 @@ Check the [wiki](https://github.com/kidfromjupiter/nearby/wiki/Development-Envir
 
 
 ## TODO
+- ship a prebuilt sdbus 2
 - Investigate why bluetooth connection requests pairing ( both l2cap socket and bluetooth profile should be unauthenticated )
 - When transferring (android to linux) over bluetooth classic, android shows 100% transferred ( but still `Sending...` ) while linux lags behind. Some kind of bottleneck or android bug?
 - Tests for basically everything.
