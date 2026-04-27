@@ -128,9 +128,9 @@ int main(int argc, char* argv[]) {
   }
 
   const auto resolve_tray_icon = [&app]() {
-    const QColor symbolic_color = app.palette().color(QPalette::WindowText);
+    const QColor white = "white";
     QIcon tray_icon = BuildTintedSymbolicIcon(
-        QStringLiteral(":/icons/tray_icon-symbolic.svg"), symbolic_color);
+        QStringLiteral(":/icons/tray_icon-symbolic.svg"), white);
     if (tray_icon.isNull()) {
       tray_icon = QIcon::fromTheme(QStringLiteral("network-wireless-symbolic"));
     }
