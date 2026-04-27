@@ -41,6 +41,9 @@ As a consolation prize, I've indexed this project using [Deepwiki](https://deepw
 This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
 although that needs to be tested. I want to support more distros so if you encounter issues installing on your distro, please let me know. 
 
+**Note**
+Any distros not shipping support for `sdbus-c++` v2 will NOT be compatible as of right now. The project depends on it as a shared library as of right now. I'm working on bundling it with the compiled binary
+
 
 #### Prerequisites
 
