@@ -41,14 +41,12 @@ As a consolation prize, I've indexed this project using [Deepwiki](https://deepw
 This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
 although that needs to be tested. I want to support more distros so if you encounter issues installing on your distro, please let me know. 
 
-**Note**
-
-Any distros not shipping support for `sdbus-c++` v2 will NOT be compatible as of right now. The project depends on it as a shared library as of right now. I'm working on bundling it with the compiled binary
-
+>**NOTE: Previosly, the quickshare binary required the `sdbus-cpp` v2 library installed on the system. This is no longer the case and it is bundled with the shared library. Hopefully this expands compatibility**
 
 #### Prerequisites
 
-- `sdbus-cpp >= 2.0`
+- `systemd`
+- `NetworkManager`
 - `bluez >= 5.85`
 
 **To install the prerequisites, run this command**
@@ -102,7 +100,6 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 > Problems that are not fully blocking, but noticeably affect usability.
 
-- **Ship a prebuilt `sdbus 2`.**
 - **Investigate why Bluetooth connection requests pairing.**  
   Both the L2CAP socket and Bluetooth profile should be unauthenticated.
 - **Handle existing files when receiving.**  
