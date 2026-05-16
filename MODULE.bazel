@@ -9,6 +9,8 @@ bazel_dep(name = "abseil-cpp", version = "20260107.0", repo_name = "com_google_a
 bazel_dep(name = "protobuf", version = "33.4", repo_name = "com_google_protobuf")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_google_googletest")
 bazel_dep(name = "boringssl", version = "0.20251124.0")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
@@ -132,22 +134,54 @@ new_local_repository = use_repo_rule(
 )
 
 new_local_repository(
-    name = "sdbus_cpp",
+    name = "libsystemd",
     path = "/usr",
     build_file_content = """
 package(default_visibility = ["//visibility:public"])
-
 load("@rules_cc//cc:defs.bzl", "cc_library")
-cc_library(
-    name = "sdbus_cpp",
-    hdrs = glob(["include/sdbus-c++/**/*.h*"]),
-    includes = ["include"],
-    linkopts = ["-lsdbus-c++"],
-)
 
 cc_library(
     name = "libsystemd",
+    hdrs = glob(["include/systemd/*.h"]),
+    includes = ["include"],
     linkopts = ["-lsystemd"],
 )
 """,
+)
+
+http_archive(
+    name = "sdbus_cpp",
+    urls = ["https://github.com/Kistler-Group/sdbus-cpp/archive/refs/tags/v2.2.0.tar.gz"],
+    strip_prefix = "sdbus-cpp-2.2.0",
+#    sha256 = "c180bdf44bb6ccba652019b8f2fc0a7f1a30222a76fbd1b6b55ebbc7a0166cb3", 
+    build_file_content = """\
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
+cmake(
+    name = "sdbus_cpp",
+    lib_source = ":all_srcs",
+    out_static_libs = ["libsdbus-c++.a"], 
+    cache_entries = {
+        "SDBUSCPP_BUILD_CODEGEN": "OFF",
+        "SDBUSCPP_BUILD_TESTS": "OFF",
+        "SDBUSCPP_BUILD_EXAMPLES": "OFF",
+        "SDBUSCPP_BUILD_DOCS": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "SDBUSCPP_SDBUS_LIB": "systemd",
+    },
+    env = {
+        # CMake still needs pkg-config to pass its internal configuration checks for systemd
+        "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+    },
+    # Link the systemd dependency you defined in your WORKSPACE
+    deps = ["@libsystemd//:libsystemd"],
+    visibility = ["//visibility:public"],
+)
+"""
 )
