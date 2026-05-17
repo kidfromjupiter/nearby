@@ -1,6 +1,12 @@
-# Google Nearby Sharing & Connections for Linux (Unofficial)
+# Google Nearby for Linux
+> ## 🚧 **Under Construction** 🚧  
+> This repo is actively being worked on. Things are buggy, builds may fail, documentation is non-existent, and we test in prod.
+>
+> **You have been warned**
 
-<img width="982" height="760" alt="image" src="https://github.com/user-attachments/assets/9533ea09-81d9-4162-b90f-e0bd8b714d1d" />
+---
+
+<img width="600" height="464" alt="image" src="https://github.com/user-attachments/assets/9533ea09-81d9-4162-b90f-e0bd8b714d1d" />
 
 
 
@@ -17,7 +23,7 @@ This repo consists of the entirety of google's open source nearby library. Curre
 
     
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
-Nearby presence may or may not build. I haven't tested it.
+Nearby presence may or may not build.
 
 ## Why
 This repo could've been a PR on the official repo. All I've done is implement the platform abstraction layer google has provided for a linux specific environment.
