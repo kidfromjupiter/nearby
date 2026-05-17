@@ -90,7 +90,10 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 > Issues that break core functionality. These should be addressed immediately.
 
 - **~Linux → Android~ file sharing is unreliable** after the newest Android Quick Share updates.  
-  Investigate why and fix it. ~Possibly related to proprietary certificate changes~. Should probably add unit tests and integration tests for each medium. Everything is so fucking buggy it makes me wanna rip my fucking eyes out. Might be related to recent upstream changes.
+  Investigate why and fix it. ~Possibly related to proprietary certificate changes~. Should probably add unit tests and integration tests for each medium. Everything is so fucking buggy it makes me wanna rip my fucking eyes out. Might be related to recent upstream changes. I could probably properly test linux -> linux bidirectional sharing. Will need to simulate a lot of hardware stuff though. Dunno how useful it may be since there's no stable reference platform to write automatic tests against. Linux to linux could be clown to clown communication
+  
+  <img width="200" height="143" alt="image" src="https://github.com/user-attachments/assets/c6ea80a0-6187-4842-ae20-5086abd99f41" />
+
 - **QR code scanning does not work.**  
   Likely related to the Linux → Android sharing issue above. I did get it working once in a very old build. So it shouldn't impossible. Unless google changed something 
 
