@@ -89,8 +89,8 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 > Issues that break core functionality. These should be addressed immediately.
 
-- **Linux → Android file sharing is unreliable** after the newest Android Quick Share updates.  
-  Investigate why and fix it. Possibly related to proprietary certificate changes.
+- **~Linux → Android~ file sharing is unreliable** after the newest Android Quick Share updates.  
+  Investigate why and fix it. ~Possibly related to proprietary certificate changes~. Should probably add unit tests and integration tests for each medium. Everything is so fucking buggy it makes me wanna rip my fucking eyes out. Might be related to recent upstream changes.
 - **QR code scanning does not work.**  
   Likely related to the Linux → Android sharing issue above. I did get it working once in a very old build. So it shouldn't impossible. Unless google changed something 
 
