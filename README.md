@@ -138,6 +138,7 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 > Non-essential features and future improvements.
 
 - **Support fast initiation.**
+- Upstream has been slowly adding webrtc support. Should we support it?
 
 
 ## Apologies
