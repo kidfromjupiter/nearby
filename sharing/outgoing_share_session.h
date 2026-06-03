@@ -34,7 +34,6 @@
 #include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/paired_key_verification_runner.h"
 #include "sharing/proto/enums.pb.h"
 #include "sharing/share_session.h"
 #include "sharing/share_target.h"
@@ -81,14 +80,16 @@ class OutgoingShareSession : public ShareSession {
   // ConnectionResponseFrame.
   bool AcceptTransfer(
       std::function<
-          void(std::optional<
-               nearby::sharing::service::proto::ConnectionResponseFrame>)>
+          void(bool is_timeout,
+               std::optional<
+                   nearby::sharing::service::proto::ConnectionResponseFrame>)>
           response_callback);
 
   // Process the ConnectionResponseFrame.
   // On success, returns std::nullopt.
   // On failure, returns the status if the connection should be aborted.
   std::optional<TransferMetadata::Status> HandleConnectionResponse(
+      bool is_timeout,
       std::optional<nearby::sharing::service::proto::ConnectionResponseFrame>
           response);
 
@@ -159,6 +160,21 @@ class OutgoingShareSession : public ShareSession {
 
   const std::vector<Payload>& file_payloads() const { return file_payloads_; }
 
+  // Returns true if the session is a transfer session.
+  // Otherwise, it is a pairing session.
+  bool is_transfer_session() const { return is_transfer_session_; }
+
+  // Initiates the peer binding message exchange with the remote device.
+  // `binding_id` is the result of a successful call to InitiateBinding rpc.
+  // `callback` is called when either a BindingResponse frame is received or a
+  // timeout occurs.
+  void StartPeerBinding(
+      std::string binding_id,
+      nearby::sharing::service::proto::BindingRequest::Type binding_type,
+      absl::AnyInvocable<
+          void(nearby::sharing::service::proto::BindingResponse::Status)>
+          callback);
+
  protected:
   void InvokeTransferUpdateCallback(const TransferMetadata& metadata) override;
   void OnConnectionDisconnected() override;
@@ -196,6 +212,8 @@ class OutgoingShareSession : public ShareSession {
   bool advanced_protection_enabled_ = false;
   bool advanced_protection_mismatch_ = false;
   bool is_connecting_ = false;
+  // Session can be for transfer or pairing.
+  bool is_transfer_session_ = false;
 };
 
 }  // namespace nearby::sharing

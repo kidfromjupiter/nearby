@@ -20,10 +20,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#if !defined(NC_OSS_BUILD)
+#include "location/nearby/analytics/cpp/logging/event_logger.h"
+#include "location/nearby/analytics/cpp/proto/connections_log.pb.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.pb.h"
+#endif  // !defined(NC_OSS_BUILD)
 #include "absl/base/no_destructor.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
@@ -34,6 +40,9 @@
 #include "connections/connection_options.h"
 #include "connections/core.h"
 #include "connections/discovery_options.h"
+#if !defined(NC_OSS_BUILD)
+#include "connections/implementation/analytics/analytics_recorder_impl.h"
+#endif  // !defined(NC_OSS_BUILD)
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/out_of_band_connection_metadata.h"
@@ -41,7 +50,6 @@
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
-#include "internal/analytics/event_logger.h"
 #include "internal/flags/flag.h"
 #include "internal/flags/flag_reader.h"
 #include "internal/flags/nearby_flags.h"
@@ -49,8 +57,6 @@
 #include "internal/platform/file.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
-#include "internal/proto/analytics/connections_log.pb.h"
-#include "sharing/proto/analytics/nearby_sharing_log.pb.h"
 #if TARGET_OS_IOS
 #include "internal/platform/implementation/apple/nearby_logger.h"
 #endif  // TARGET_OS_IOS
@@ -118,6 +124,7 @@ class FlagReaderWrapper : public nearby::flags::FlagReader {
   NC_PHENOTYPE_FLAG_READER phenotype_flag_reader_;
 };
 
+#if !defined(NC_OSS_BUILD)
 // This is a bridging class between the C API and the C++ EventLogger interface.
 class NcEventLogger : public ::nearby::analytics::EventLogger {
  public:
@@ -145,6 +152,10 @@ class NcEventLogger : public ::nearby::analytics::EventLogger {
  private:
   const NC_EVENT_LOGGER* event_logger_;
 };
+#else  // !defined(NC_OSS_BUILD)
+class NcEventLogger;
+#endif  // !defined(NC_OSS_BUILD)
+
 }  // namespace
 
 typedef struct NcContext {
@@ -244,6 +255,7 @@ NcContext* GetContext(NC_INSTANCE instance) {
   return cpp_connection_request_info;
 }
 
+#if !defined(NC_OSS_BUILD)
 NC_INSTANCE NcCreateService() {
   return NcCreateServiceWithEventLogger(nullptr);
 }
@@ -259,12 +271,24 @@ NcCreateServiceWithEventLogger(const NC_EVENT_LOGGER* event_logger) {
   nc_context.router = new ::nearby::connections::ServiceControllerRouter();
   nc_context.event_logger =
       event_logger == nullptr ? nullptr : new NcEventLogger(event_logger);
-  nc_context.core = new ::nearby::connections::Core(nc_context.event_logger,
-                                                    nc_context.router);
+  nc_context.core = new ::nearby::connections::Core(
+      std::make_unique<::nearby::analytics::AnalyticsRecorderImpl>(
+          nc_context.event_logger),
+      nc_context.router);
 
   kNcContextMap->insert({nc_context.core, nc_context});
   return nc_context.core;
 }
+#else  // !defined(NC_OSS_BUILD)
+NC_INSTANCE NcCreateService() {
+  NcContext nc_context;
+  nc_context.router = new ::nearby::connections::ServiceControllerRouter();
+  nc_context.core = new ::nearby::connections::Core(nc_context.router);
+
+  kNcContextMap->insert({nc_context.core, nc_context});
+  return nc_context.core;
+}
+#endif  // !defined(NC_OSS_BUILD)
 
 void NcCloseService(NC_INSTANCE instance) {
   NcContext* nc_context = GetContext(instance);

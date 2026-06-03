@@ -74,9 +74,7 @@ cc_library(
     ],
     defines = ["_SILENCE_CLANG_COROUTINE_MESSAGE"],
     tags = ["windows"],
-    visibility = [
-        "//sharing/internal/impl/windows:__pkg__",
-    ],
+    visibility = ["//visibility:private"],
     deps = [
         ":device_paths",
         ":string_utils",
@@ -151,10 +149,7 @@ cc_library(
         "WINVER=_WIN32_WINNT_WIN10",
     ],
     tags = ["windows"],
-    visibility = [
-        "//:__subpackages__",
-        "//location/nearby:__subpackages__",
-    ],
+    visibility = ["//:__subpackages__"],
     deps = [
         ":socket_address",
         ":string_utils",
@@ -175,10 +170,7 @@ cc_library(
     ],
     compatible_with = ["//buildenv/target:non_prod"],
     tags = ["windows"],
-    visibility = [
-        "//:__subpackages__",
-        "//location/nearby:__subpackages__",
-    ],
+    visibility = ["//location/nearby:__subpackages__"],
 )
 
 cc_library(
@@ -191,10 +183,7 @@ cc_library(
     ],
     compatible_with = ["//buildenv/target:non_prod"],
     tags = ["windows"],
-    visibility = [
-        "//:__subpackages__",
-        "//location/nearby:__subpackages__",
-    ],
+    visibility = ["//location/nearby:__subpackages__"],
     deps = [
         ":scoped_wlan_memory",
         "//internal/platform:logging",
@@ -244,6 +233,18 @@ cc_library(
 )
 
 cc_library(
+    name = "webrtc_platform",
+    srcs = ["webrtc_platform.cc"],
+    tags = ["windows"],
+    deps = [
+        "//connections/implementation/mediums/webrtc:webrtc_medium_impl",
+        "//internal/platform:logging",
+        "//internal/platform/implementation:webrtc_platform",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
     name = "windows",
     srcs = [
         "ble.cc",
@@ -268,7 +269,6 @@ cc_library(
         "preferences_manager.cc",
         "preferences_repository.cc",
         "system_clock.cc",
-        "webrtc.cc",
         "wifi_direct_medium.cc",
         "wifi_direct_server_socket.cc",
         "wifi_direct_socket.cc",
@@ -301,7 +301,6 @@ cc_library(
         "nearby_server_socket.h",
         "preferences_manager.h",
         "preferences_repository.h",
-        "webrtc.h",
         "wifi.h",
         "wifi_direct.h",
         "wifi_hotspot.h",
@@ -316,6 +315,9 @@ cc_library(
         "-DNO_INTEL_PIE",
         "-D_WIN32_WINNT=_WIN32_WINNT_WIN10 -DWINVER=_WIN32_WINNT_WIN10",
     ],
+    linkopts = [
+        "iphlpapi.lib",
+    ],
     tags = ["windows"],
     visibility = [
         "//chrome/chromeos/assistant/data_migration/lib:__pkg__",
@@ -323,8 +325,8 @@ cc_library(
         "//connections:partners",
         "//internal/platform:__subpackages__",
         "//location/nearby:__subpackages__",
-        "//presence:__subpackages__",
         "//sharing:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":crypto",  # build_cleaner: keep
@@ -358,11 +360,6 @@ cc_library(
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/windows/generated:types",
         "//third_party/intel/pie",
-        "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
-        "//third_party/webrtc/files/stable/webrtc/api:libjingle_peerconnection_api",
-        "//third_party/webrtc/files/stable/webrtc/api:rtc_error",
-        "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
-        "//third_party/webrtc/files/stable/webrtc/rtc_base:threading",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -374,7 +371,6 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//json",
@@ -396,9 +392,7 @@ cc_library(
         "WINVER=_WIN32_WINNT_WIN10",
     ],
     tags = ["windows"],
-    visibility = [
-        "//:__subpackages__",
-    ],
+    visibility = ["//visibility:private"],
     deps = [
         "//internal/platform:base",
         "//internal/platform:logging",
@@ -460,7 +454,6 @@ cc_test(
         "thread_pool_test.cc",
         "timer_test.cc",
         "utils_test.cc",
-        "webrtc_test.cc",
         "wifi_direct_test.cc",
         "wifi_hotspot_test.cc",
         "wifi_medium_test.cc",

@@ -196,7 +196,7 @@ message V1Frame {
     CANCEL = 6;
     // No longer used.
     PROGRESS_UPDATE = 7;
-    FILE_SYNC = 8;
+    BINDINGS = 8;
   }
 
   optional FrameType type = 1;
@@ -208,7 +208,7 @@ message V1Frame {
   optional PairedKeyResultFrame paired_key_result = 5;
   optional CertificateInfoFrame certificate_info = 6 [deprecated = true];
   optional ProgressUpdateFrame progress_update = 7 [deprecated = true];
-  optional SyncFrame file_sync = 8;
+  optional BindingFrame bindings = 8;
 }
 
 // An introduction packet sent by the sending side. Contains a list of files
@@ -219,6 +219,7 @@ message IntroductionFrame {
     UNKNOWN = 0;
     NEARBY_SHARE = 1;
     REMOTE_COPY = 2;
+    TAP_TO_SHARE = 9;
   }
 
   repeated FileMetadata file_metadata = 1;
@@ -243,41 +244,35 @@ message ProgressUpdateFrame {
   optional bool start_transfer = 2;
 }
 
-// A packet for file sync messages.
-// NEXT_ID=3
-message SyncFrame {
+// Messages used to create pair bindings between devices.
+// An initiator device requests a new bindingId from the BE using the
+// InitiateBinding rpc.  This new bindingId is passed to the peer device using
+// a BindingRequest frame.  The peer device will use this bindingId to call
+// JoinBinding rpc.  If successful, the peer device is response with a
+// BindingResponse frame with status of SUCCESS.
+message BindingFrame {
   oneof content {
-    SyncHandshake handshake = 1;
-    SyncConfig config = 2;
+    BindingRequest binding_request = 1;
+    BindingResponse binding_response = 2;
   }
 }
 
-// A packet for file sync handshake messages.
-// NEXT_ID=1
-message SyncHandshake {}
-
-// A packet for file sync config messages.
-// NEXT_ID=2
-message SyncConfig {
-  repeated SyncFolder folders = 1;
+message BindingRequest {
+  enum Type {
+    UNKNOWN = 0;
+    FILESYNC = 1;
+  }
+  optional string binding_id = 1;
+  optional Type type = 2;
 }
 
-// A packet for file sync folder messages.
-// NEXT_ID=5
-message SyncFolder {
-  // An identifier of the folder for the pair of source and target devices to
-  // uniquely identify it among all folders that are being synced.
-  optional string id = 1;
-  // Human readable name of the folder.
-  optional string label = 2;
-  // A randomly generated id when the index is created. Regenerate when the
-  // index is reset.
-  optional int32 index_id = 3;
-  // The maximum sequence number of the folder. Each number represents an update
-  // to a file in the folder. Sequence numbers are only valid within the scope
-  // of a valid index_id. If an index is reset, all sequence numbers need to be
-  // regenerated, including max_sequence.
-  optional int64 max_sequence = 4;
+message BindingResponse {
+  enum Status {
+    UNKNOWN = 0;
+    SUCCESS = 1;
+    FAILURE = 2;  // TODO: b/485307320 - Add more specific error codes.
+  }
+  optional Status status = 1;
 }
 
 // A response packet sent by the receiving side. Accepts or rejects the list of

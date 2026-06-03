@@ -21,6 +21,7 @@
 
 #import <Foundation/Foundation.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -50,6 +51,10 @@ class BleMedium : public api::ble::BleMedium {
   friend class BleMediumPeer;
 
  public:
+  // Define factory types for managers.
+  using PeripheralManagerFactory = std::function<GNSPeripheralManager *()>;
+  using CentralManagerFactory = std::function<GNSCentralManager *(CBUUID *)>;
+
   BleMedium();
   // For testing only.
   explicit BleMedium(GNCBLEMedium *medium);
@@ -207,8 +212,19 @@ class BleMedium : public api::ble::BleMedium {
                                   NSDictionary<CBUUID *, NSData *> *service_data);
   NSDate *GetLastTimestampToCleanExpiredAdvertisementPackets();
 
+  // Opens a BLE server socket based on service ID with deadlock safety.
+  std::unique_ptr<api::ble::BleServerSocket> OpenServerSocketWithDeadlockSafety(
+      const std::string &service_id);
+
+  // Opens a BLE server socket based on service ID using the legacy implementation.
+  std::unique_ptr<api::ble::BleServerSocket> OpenServerSocketLegacy(const std::string &service_id);
+
   // The executor for handling callbacks.
   apple::SingleThreadExecutor callback_executor_;
+
+  // Factories for lazy initialization
+  PeripheralManagerFactory peripheral_manager_factory_ = nullptr;
+  CentralManagerFactory central_manager_factory_ = nullptr;
 
   GNCBLEMedium *medium_;
 
@@ -229,14 +245,22 @@ class BleMedium : public api::ble::BleMedium {
 
   GNSPeripheralServiceManager *socketPeripheralServiceManager_;
   GNSPeripheralManager *socketPeripheralManager_;
-  GNSCentralManager *socketCentralManager_;
+
+  absl::Mutex scanning_mutex_;
+  GNSCentralManager *socketCentralManager_ ABSL_GUARDED_BY(scanning_mutex_);
 
   // Used for the blocking version of StartAdvertising and only has an advertisement found callback.
-  api::ble::BleMedium::ScanCallback scan_cb_;
+  std::shared_ptr<api::ble::BleMedium::ScanCallback> scan_cb_ ABSL_GUARDED_BY(scanning_mutex_);
   // Used for the async version of StartAdvertising and has both an advertisement found and result
   // callback.
-  api::ble::BleMedium::ScanningCallback scanning_cb_;
+  std::shared_ptr<api::ble::BleMedium::ScanningCallback> scanning_cb_
+      ABSL_GUARDED_BY(scanning_mutex_);
 
+  // Used for the BleServerSocket.
+  absl::Mutex server_socket_mutex_;
+  BleServerSocket *server_socket_ptr_ ABSL_GUARDED_BY(server_socket_mutex_) = nullptr;
+
+  // Used for the L2CAP server socket.
   absl::Mutex l2cap_server_socket_mutex_;
   BleL2capServerSocket *l2cap_server_socket_ptr_ = nullptr;
 

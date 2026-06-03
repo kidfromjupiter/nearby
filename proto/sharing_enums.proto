@@ -321,6 +321,7 @@ enum EventType {
       /*[ device_role = DEVICE_ROLE_INITIATOR ]*/;
   CLOUD_REGISTER_RECEIVER = 75
       /*[ device_role = DEVICE_ROLE_REMOTE ]*/;
+  // Cloud upload events (routing updated in nearby_event_codes.proto).
   CLOUD_UPLOAD_START = 76
       /*[ device_role = DEVICE_ROLE_INITIATOR ]*/;
   CLOUD_UPLOAD_END = 77 /*[ device_role = DEVICE_ROLE_INITIATOR ]*/;
@@ -845,6 +846,15 @@ enum SharingUseCase {
   USE_CASE_NEARBY_SHARE_WITH_QR_CODE = 7 [deprecated = true];
   // The user was redirected from Bluetooth sharing UI to Nearby Share
   USE_CASE_REDIRECTED_FROM_BLUETOOTH_SHARE = 8;
+  USE_CASE_TAP_TO_SHARE = 9;
+}
+
+enum SharingSurface {
+  SURFACE_UNKNOWN = 0;
+
+  SURFACE_QUICK_SHARE = 1;
+  SURFACE_APP = 2;
+  SURFACE_SYSTEM_SHARE_SHEET = 3;
 }
 
 // Used only for Windows App now.

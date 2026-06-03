@@ -28,6 +28,7 @@
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
 #include "internal/platform/task_runner.h"
 #include "internal/test/fake_clock.h"
@@ -123,7 +124,6 @@ GenerateVisibilityHistory() {
       DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
       DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE,
       DeviceVisibility::DEVICE_VISIBILITY_EVERYONE,
-      DeviceVisibility::DEVICE_VISIBILITY_HIDDEN,
   };
   std::list<PairedKeyVerificationRunner::VisibilityHistory> result;
   for (DeviceVisibility visibility : kValidVisibilities) {
@@ -142,18 +142,18 @@ class MockIncomingFramesReader : public IncomingFramesReader {
                            NearbyConnection* connection)
       : IncomingFramesReader(service_thread, connection) {}
 
-  MOCK_METHOD(
-      void, ReadFrame,
-      (std::function<void(bool is_timeout, std::optional<V1Frame>)> callback,
-       absl::Duration timeout),
-      (override));
+  MOCK_METHOD(void, ReadFrame,
+              (absl::AnyInvocable<void(bool is_timeout, std::optional<V1Frame>)>
+                   callback,
+               absl::Duration timeout),
+              (override));
 
-  MOCK_METHOD(
-      void, ReadFrame,
-      (service::proto::V1Frame_FrameType frame_type,
-       std::function<void(bool is_timeout, std::optional<V1Frame>)> callback,
-       absl::Duration timeout),
-      (override));
+  MOCK_METHOD(void, ReadFrame,
+              (service::proto::V1Frame_FrameType frame_type,
+               absl::AnyInvocable<void(bool is_timeout, std::optional<V1Frame>)>
+                   callback,
+               absl::Duration timeout),
+              (override));
 };
 
 PairedKeyVerificationRunner::PairedKeyVerificationResult Merge(
@@ -240,9 +240,9 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
                 ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_ENCRYPTION),
                           testing::_, testing::Eq(kTimeout)))
         .WillOnce(testing::WithArg<1>(
-            [frame_type](
-                std::function<void(bool is_timeout, std::optional<V1Frame>)>
-                    callback) {
+            [frame_type](absl::AnyInvocable<void(bool is_timeout,
+                                                 std::optional<V1Frame>)>
+                             callback) {
               if (frame_type == ReturnFrameType::kNull) {
                 std::move(callback)(/*is_timeout=*/false, std::nullopt);
                 return;
@@ -302,7 +302,8 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
                 ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_RESULT), testing::_,
                           testing::Eq(kTimeout)))
         .WillOnce(testing::WithArg<1>(
-            [=](std::function<void(bool is_timeout, std::optional<V1Frame>)>
+            [=](absl::AnyInvocable<void(bool is_timeout,
+                                        std::optional<V1Frame>)>
                     callback) {
               if (frame_type == ReturnFrameType::kNull) {
                 std::move(callback)(/*is_timeout=*/false, std::nullopt);
@@ -353,13 +354,32 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
 };
 
 TEST_F(PairedKeyVerificationRunnerTest,
-       NullCertificate_InvalidPairedKeyEncryptionFrame) {
+       Incoming_NullCertificate_InvalidPairedKeyEncryptionFrame) {
   // Empty key encryption frame fails the certificate verification.
   SetUpPairedKeyEncryptionFrame(ReturnFrameType::kEmpty);
   SetUpPairedKeyResultFrame(ReturnFrameType::kValid);
 
   RunVerification(
-      true,
+      /*is_incoming=*/true,
+      /*use_valid_public_certificate=*/false,
+      {.visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
+       .last_visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
+       .last_visibility_time = GetFakeClock()->Now()},
+      /*expected_result=*/
+      PairedKeyVerificationResult::kFail);
+
+  ExpectPairedKeyEncryptionFrameSent();
+  ExpectPairedKeyResultFrameSent(PairedKeyResultFrame::UNABLE);
+}
+
+TEST_F(PairedKeyVerificationRunnerTest,
+       Outgoing_NullCertificate_InvalidPairedKeyEncryptionFrame) {
+  // Empty key encryption frame fails the certificate verification.
+  SetUpPairedKeyEncryptionFrame(ReturnFrameType::kEmpty);
+  SetUpPairedKeyResultFrame(ReturnFrameType::kValid);
+
+  RunVerification(
+      /*is_incoming=*/false,
       /*use_valid_public_certificate=*/false,
       {.visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
        .last_visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
@@ -369,6 +389,25 @@ TEST_F(PairedKeyVerificationRunnerTest,
 
   ExpectPairedKeyEncryptionFrameSent();
   ExpectPairedKeyResultFrameSent(PairedKeyResultFrame::UNABLE);
+}
+
+TEST_F(PairedKeyVerificationRunnerTest,
+       Incoming_HiddenDevice_FailsConnection) {
+  // Empty key encryption frame fails the certificate verification.
+  SetUpPairedKeyEncryptionFrame(ReturnFrameType::kEmpty);
+  SetUpPairedKeyResultFrame(ReturnFrameType::kValid);
+
+  RunVerification(
+      /*is_incoming=*/true,
+      /*use_valid_public_certificate=*/false,
+      {.visibility = DeviceVisibility::DEVICE_VISIBILITY_HIDDEN,
+       .last_visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
+       .last_visibility_time = GetFakeClock()->Now()},
+      /*expected_result=*/
+      PairedKeyVerificationResult::kFail);
+
+  ExpectPairedKeyEncryptionFrameSent();
+  ExpectPairedKeyResultFrameSent(PairedKeyResultFrame::FAIL);
 }
 
 TEST_F(PairedKeyVerificationRunnerTest,
@@ -435,14 +474,40 @@ TEST_P(ParameterisedPairedKeyVerificationRunnerTest,
   PairedKeyResultFrame result_frame = std::get<1>(GetParam());
   PairedKeyVerificationRunner::VisibilityHistory visibility_history =
       std::get<2>(GetParam());
+  PairedKeyVerificationRunner::PairedKeyVerificationResult result =
+      params.result;
+  // If our visibility has no certificates, then downgrade expected result to
+  // kUnable if it is not expected to fail.
+  if ((visibility_history.visibility ==
+       DeviceVisibility::DEVICE_VISIBILITY_EVERYONE) &&
+      !(visibility_history.last_visibility !=
+            DeviceVisibility::DEVICE_VISIBILITY_EVERYONE &&
+        (params.encryption_frame_type ==
+             PairedKeyVerificationRunnerTest::ReturnFrameType::kOptionalValid ||
+         params.encryption_frame_type ==
+             PairedKeyVerificationRunnerTest::ReturnFrameType::kValid))) {
+    if (result ==
+        PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess) {
+      result =
+          PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnable;
+    }
+  }
+  if (params.is_incoming &&
+      params.encryption_frame_type ==
+          PairedKeyVerificationRunnerTest::ReturnFrameType::kEmpty &&
+      visibility_history.visibility !=
+          DeviceVisibility::DEVICE_VISIBILITY_EVERYONE) {
+    result =
+        PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail;
+  }
   PairedKeyVerificationRunner::PairedKeyVerificationResult expected_result =
-      Merge(params.result, result_frame.status());
+      Merge(result, result_frame.status());
 
   LOG(ERROR) << "ValidEncryptionFrame_ValidResultFrame: " << "is_incoming="
              << params.is_incoming
              << ", has_valid_cert=" << params.has_valid_certificate
              << ", encryption_frame_type=" << (int)params.encryption_frame_type
-             << ", result=" << (int)params.result
+             << ", result=" << (int)result
              << ", expected_result=" << (int)expected_result
              << ", result_frame=" << (int)result_frame.status()
              << ", visibility=" << (int)visibility_history.visibility
@@ -461,22 +526,6 @@ TEST_P(ParameterisedPairedKeyVerificationRunnerTest,
                                    : OSType::UNKNOWN_OS_TYPE);
   }
 
-  // If our visibility has no certificates, then downgrade expected result to
-  // kUnable if it is not expected to fail.
-  if ((visibility_history.visibility ==
-           DeviceVisibility::DEVICE_VISIBILITY_EVERYONE ||
-       visibility_history.visibility ==
-           DeviceVisibility::DEVICE_VISIBILITY_HIDDEN) &&
-      (visibility_history.last_visibility ==
-           DeviceVisibility::DEVICE_VISIBILITY_EVERYONE ||
-       visibility_history.last_visibility ==
-           DeviceVisibility::DEVICE_VISIBILITY_HIDDEN)) {
-    if (expected_result ==
-        PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess) {
-      expected_result =
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnable;
-    }
-  }
   visibility_history.last_visibility_time = GetFakeClock()->Now();
   RunVerification(
       /*is_incoming=*/params.is_incoming,

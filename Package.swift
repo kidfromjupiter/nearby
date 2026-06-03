@@ -92,7 +92,7 @@ let package = Package(
     .target(
       name: "protobuf-utf8",
       dependencies: [
-        .product(name: "abseil", package: "abseil-cpp-SwiftPM"),
+        .product(name: "abseil", package: "abseil-cpp-SwiftPM")
       ],
       path: "third_party/protobuf/third_party/utf8_range",
       sources: [
@@ -102,13 +102,13 @@ let package = Package(
       ],
       publicHeadersPath: ".",
       cSettings: [
-        .headerSearchPath("./"),
+        .headerSearchPath("./")
       ],
     ),
     .target(
       name: "protobuf",
       dependencies: [
-        "protobuf-utf8",
+        "protobuf-utf8"
       ],
       path: "third_party/protobuf/src",
       exclude: [
@@ -282,11 +282,11 @@ let package = Package(
         "google/protobuf/io/zero_copy_sink_test.cc",
       ],
       sources: [
-        "google/protobuf",
+        "google/protobuf"
       ],
       publicHeadersPath: ".",
       cSettings: [
-        .headerSearchPath("./"),
+        .headerSearchPath("./")
       ]
     ),
     .target(
@@ -321,7 +321,6 @@ let package = Package(
         "connections/implementation/flags/BUILD",
         "connections/implementation/mediums/advertisements/BUILD",
         "connections/implementation/mediums/ble/BUILD",
-        "connections/implementation/mediums/multiplex/BUILD",
         "connections/implementation/mediums/BUILD",
         "connections/implementation/BUILD",
         "connections/implementation/fuzzers",
@@ -346,7 +345,6 @@ let package = Package(
         "internal/platform/implementation/apple/Mediums/WiFiCommon/BUILD",
         "internal/platform/implementation/BUILD",
         "internal/platform/BUILD",
-        "internal/analytics/BUILD",
         "internal/flags/BUILD",
         "internal/network/BUILD",
         "internal/rpc/BUILD",
@@ -369,16 +367,12 @@ let package = Package(
         "connections/implementation/payload_manager_test.cc",
         "connections/implementation/offline_frames_validator_test.cc",
         "connections/implementation/service_controller_router_test.cc",
-        "connections/implementation/bluetooth_bwu_test.cc",
-        "connections/implementation/wifi_direct_bwu_test.cc",
-        "connections/implementation/wifi_hotspot_bwu_test.cc",
-        "connections/implementation/wifi_lan_bwu_handler_test.cc",
-        "connections/implementation/analytics/analytics_recorder_test.cc",
-        "connections/implementation/analytics/throughput_recorder_test.cc",
+        "connections/implementation/analytics/analytics_recorder_impl_test.cc",
         "connections/implementation/mediums/advertisements/data_element_test.cc",
         "connections/implementation/mediums/advertisements/dct_advertisement_test.cc",
         "connections/implementation/mediums/advertisements/advertisement_util_test.cc",
         "connections/implementation/mediums/awdl_test.cc",
+        "connections/implementation/mediums/awdl_bwu_handler_test.cc",
         "connections/implementation/mediums/ble_test.cc",
         "connections/implementation/mediums/ble/bloom_filter_test.cc",
         "connections/implementation/mediums/ble/ble_l2cap_packet_test.cc",
@@ -391,18 +385,19 @@ let package = Package(
         "connections/implementation/mediums/ble/discovered_peripheral_tracker_test.cc",
         "connections/implementation/mediums/ble/instant_on_lost_advertisement_test.cc",
         "connections/implementation/mediums/ble/instant_on_lost_manager_test.cc",
-        "connections/implementation/mediums/multiplex/multiplex_frames_test.cc",
-        "connections/implementation/mediums/multiplex/multiplex_socket_test.cc",
-        "connections/implementation/mediums/multiplex/multiplex_output_stream_test.cc",
-        "connections/implementation/mediums/webrtc_peer_id_test.cc",
-        "connections/implementation/mediums/wifi_lan_test.cc",
-        "connections/implementation/mediums/bluetooth_classic_test.cc",
         "connections/implementation/mediums/ble_test.cc",
-        "connections/implementation/mediums/webrtc_test.cc",
-        "connections/implementation/mediums/lost_entity_tracker_test.cc",
+        "connections/implementation/mediums/bluetooth_bwu_handler_test.cc",
+        "connections/implementation/mediums/bluetooth_classic_test.cc",
         "connections/implementation/mediums/bluetooth_radio_test.cc",
+        "connections/implementation/mediums/lost_entity_tracker_test.cc",
+        "connections/implementation/mediums/webrtc_peer_id_test.cc",
+        "connections/implementation/mediums/webrtc_test.cc",
+        "connections/implementation/mediums/wifi_direct_bwu_handler_test.cc",
         "connections/implementation/mediums/wifi_direct_test.cc",
+        "connections/implementation/mediums/wifi_hotspot_bwu_handler_test.cc",
         "connections/implementation/mediums/wifi_hotspot_test.cc",
+        "connections/implementation/mediums/wifi_lan_bwu_handler_test.cc",
+        "connections/implementation/mediums/wifi_lan_test.cc",
         "connections/implementation/mediums/wifi_test.cc",
         "connections/implementation/endpoint_channel_manager_test.cc",
         "connections/implementation/bwu_manager_test.cc",
@@ -437,13 +432,13 @@ let package = Package(
         "internal/encoding/base85_test.cc",
         "internal/data/leveldb_data_set_test.cc",
         "internal/flags/nearby_flags_test.cc",
-        "internal/proto/analytics/connections_log_test.cc",
         "internal/platform/feature_flags_test.cc",
         "internal/platform/file_test.cc",
         "internal/platform/cancelable_alarm_test.cc",
         "internal/platform/crypto_test.cc",
         "internal/platform/byte_array_test.cc",
         "internal/platform/credential_storage_impl_test.cc",
+        "internal/platform/implementation/device_info_test.cc",
         "internal/platform/implementation/g3/awdl_test.cc",
         "internal/platform/implementation/g3/ble_test.cc",
         "internal/platform/input_stream_test.cc",
@@ -478,6 +473,7 @@ let package = Package(
         "internal/platform/implementation/apple/mutex_test.cc",
         "internal/platform/implementation/apple/atomic_boolean_test.cc",
         "internal/platform/implementation/apple/atomic_uint32_test.cc",
+        "internal/platform/implementation/apple/webrtc_platform.mm",
         "internal/platform/implementation/shared/file_test.cc",
         "internal/platform/implementation/wifi_utils_test.cc",
         "internal/platform/atomic_boolean_test.cc",
@@ -500,7 +496,6 @@ let package = Package(
         "internal/network/http_client_impl_test.cc",
         "internal/network/http_status_code_test.cc",
         "internal/test/fake_clock_test.cc",
-        "internal/test/fake_webrtc.cc",
         "internal/test/fake_timer_test.cc",
         "internal/test/fake_device_info_test.cc",
         "internal/test/fake_task_runner_test.cc",
@@ -522,16 +517,9 @@ let package = Package(
         "proto",
         "internal/data/leveldb_data_set_test.proto",
         // webrtc
-        "connections/implementation/webrtc_bwu_handler.cc",
-        "connections/implementation/webrtc_endpoint_channel.cc",
-        "connections/implementation/mediums/webrtc.cc",
-        "connections/implementation/mediums/webrtc_peer_id.cc",
-        "connections/implementation/mediums/webrtc",
-        "internal/platform/tachyon_express_signaling_messenger.cc",
-        "internal/platform/tachyon_express_signaling_messenger.h",
         "internal/platform/implementation/apple/webrtc.h",
         "internal/platform/implementation/apple/webrtc.mm",
-        // This breaks the build, but seems to work fine without it?
+        // Only used in tests
         "internal/platform/medium_environment.cc",
       ],
       sources: [
@@ -564,6 +552,7 @@ let package = Package(
         .headerSearchPath("./"),
         .headerSearchPath("compiled_proto/"),
         .define("NO_WEBRTC"),
+        .define("NC_OSS_BUILD"),
       ]
     ),
     .target(

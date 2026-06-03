@@ -164,7 +164,7 @@ cc_library(
     visibility = [
         "//connections/implementation:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
-        "//presence:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":base",
@@ -191,7 +191,7 @@ cc_library(
         "//connections/implementation:__pkg__",
         "//connections/v3:__pkg__",
         "//internal/interop:__pkg__",
-        "//presence:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":logging",
@@ -210,7 +210,6 @@ cc_library(
     srcs = [
         "blocking_queue_stream.cc",
         "clock_impl.cc",
-        "device_info_impl.cc",
         "monitored_runnable.cc",
         "pending_job_registry.cc",
         "pipe.cc",
@@ -231,10 +230,7 @@ cc_library(
         "condition_variable.h",
         "count_down_latch.h",
         "crypto.h",
-        "device_info.h",
-        "device_info_impl.h",
         "direct_executor.h",
-        "file.h",
         "future.h",
         "lockable.h",
         "monitored_runnable.h",
@@ -306,21 +302,18 @@ cc_library(
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
         "credential_storage_impl.h",
-        "webrtc.h",
+        "file.h",
         "wifi.h",
         "wifi_direct.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
     ],
-    copts = [
-        "-DCORE_ADAPTER_DLL",
-        "-DNO_WEBRTC",
-    ],
+    copts = ["-DCORE_ADAPTER_DLL"],
     visibility = [
         "//connections:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/test:__subpackages__",
-        "//presence:__subpackages__",
+        "//sharing:__subpackages__",
     ],
     deps = [
         ":base",
@@ -332,11 +325,10 @@ cc_library(
         "//connections/implementation/flags:connections_flags",
         "//internal/base",
         "//internal/flags:nearby_flags",
-        "//internal/platform/implementation:account_manager",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation:wifi_utils",
-        # TODO: Support WebRTC
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -344,9 +336,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -376,7 +366,7 @@ cc_library(
     visibility = [
         "//connections:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
-        "//presence:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":base",
@@ -386,6 +376,7 @@ cc_library(
         ":uuid",
         "//internal/base",
         "//internal/platform/implementation:comm",
+        "//internal/platform/implementation:webrtc_platform",
         "//internal/platform/implementation:wifi_utils",
         "//internal/test",
         "@com_google_absl//absl/base:core_headers",
@@ -581,6 +572,7 @@ cc_test(
     shard_count = 16,
     deps = [
         ":base",
+        ":comm",
         ":connection_info",
         ":logging",
         ":mac_address",
@@ -592,7 +584,6 @@ cc_test(
         "//internal/crypto_cros",
         "//internal/platform/implementation:platform_impl",
         "//internal/platform/implementation:types",
-        "//internal/test",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",

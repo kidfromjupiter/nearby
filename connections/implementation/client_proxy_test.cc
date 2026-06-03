@@ -14,6 +14,7 @@
 
 #include "connections/implementation/client_proxy.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -32,17 +33,18 @@
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
+#include "connections/implementation/analytics/mock_analytics_recorder.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
+#include "connections/v3/bandwidth_info.h"
 #include "connections/v3/connection_listening_options.h"
 #include "connections/v3/connection_result.h"
 #include "connections/v3/connections_device_provider.h"
 #include "connections/v3/listeners.h"
-#include "internal/analytics/mock_event_logger.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/interop/device.h"
 #include "internal/interop/device_provider.h"
@@ -51,19 +53,18 @@
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/medium_environment.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
+#include "internal/platform/single_thread_executor.h"
 #include "proto/connections_enums.pb.h"
 
 namespace nearby {
 namespace connections {
 namespace {
 
-using ::location::nearby::analytics::proto::ConnectionsLog;
 using ::location::nearby::connections::OsInfo;
 using ::location::nearby::proto::connections::CLIENT_SESSION;
 using ::location::nearby::proto::connections::START_CLIENT_SESSION;
 using ::location::nearby::proto::connections::STOP_CLIENT_SESSION;
+using ::testing::_;
 using ::testing::IsEmpty;
 using ::testing::MockFunction;
 using ::testing::StrictMock;
@@ -75,46 +76,6 @@ constexpr FeatureFlags::Flags kTestCases[] = {
     FeatureFlags::Flags{
         .enable_cancellation_flag = false,
     },
-};
-
-class FakeEventLogger : public ::nearby::analytics::MockEventLogger {
- public:
-  explicit FakeEventLogger() = default;
-
-  void Log(const ConnectionsLog& message) override {
-    MutexLock lock(&mutex_);
-    logs_.push_back(message);
-  }
-
-  int GetCompleteClientSessionCount() {
-    MutexLock lock(&mutex_);
-    bool has_start_client_session = false;
-    bool has_client_session = false;
-    int session_count = 0;
-    // We expect series of START_CLIENT_SESSION, CLIENT_SESSION and
-    // STOP_CLIENT_SESSION events, possibly interleaved with other events.
-    for (const auto& log : logs_) {
-      if (log.event_type() == START_CLIENT_SESSION) {
-        EXPECT_FALSE(has_start_client_session);
-        EXPECT_FALSE(has_client_session);
-        has_start_client_session = true;
-      } else if (log.event_type() == CLIENT_SESSION) {
-        EXPECT_TRUE(has_start_client_session);
-        EXPECT_FALSE(has_client_session);
-        has_client_session = true;
-      } else if (log.event_type() == STOP_CLIENT_SESSION) {
-        EXPECT_TRUE(has_start_client_session);
-        EXPECT_TRUE(has_client_session);
-        has_start_client_session = false;
-        has_client_session = false;
-        ++session_count;
-      }
-    }
-    return session_count;
-  }
-
-  Mutex mutex_;
-  std::vector<ConnectionsLog> logs_;
 };
 
 class MockDeviceProvider : public nearby::NearbyDeviceProvider {
@@ -165,8 +126,14 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
                              /*use_simulated_clock=*/true,
                              /*use_temporary_directory_for_app_path=*/true};
     env_.Start(config);
-    client1_ = std::make_unique<ClientProxy>(&event_logger1_);
-    client2_ = std::make_unique<ClientProxy>(&event_logger2_);
+    auto analytics_recorder1 =
+        std::make_unique<analytics::MockAnalyticsRecorder>();
+    mock_analytics_recorder1_ptr_ = analytics_recorder1.get();
+    client1_ = std::make_unique<ClientProxy>(std::move(analytics_recorder1));
+    auto analytics_recorder2 =
+        std::make_unique<analytics::MockAnalyticsRecorder>();
+    mock_analytics_recorder2_ptr_ = analytics_recorder2.get();
+    client2_ = std::make_unique<ClientProxy>(std::move(analytics_recorder2));
   }
 
   void TearDown() override {
@@ -360,10 +327,7 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
   ClientProxy* client2() { return client2_.get(); }
 
   void FastForward(absl::Duration duration) {
-    (*env_.GetSimulatedClock())
-        ->FastForward(
-            ClientProxy::kHighPowerAdvertisementEndpointIdCacheTimeout +
-            absl::Milliseconds(100));
+    env_.FastForward(duration);
     // make sure the timer based callback is executed.
     absl::SleepFor(absl::Milliseconds(100));
   }
@@ -383,8 +347,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
   MediumEnvironment& env_ = MediumEnvironment::Instance();
   Strategy strategy_{Strategy::kP2pPointToPoint};
   const std::string service_id_{"service"};
-  FakeEventLogger event_logger1_;
-  FakeEventLogger event_logger2_;
+  analytics::MockAnalyticsRecorder* mock_analytics_recorder1_ptr_;
+  analytics::MockAnalyticsRecorder* mock_analytics_recorder2_ptr_;
   std::unique_ptr<ClientProxy> client1_;
   std::unique_ptr<ClientProxy> client2_;
   std::string auth_token_ = "auth_token";
@@ -437,7 +401,7 @@ TEST_P(ClientProxyTest, CanCancelEndpoint) {
   // `CancellationFlag` pointers are passed to other classes in Nearby
   // Connections, and by using the pointers directly, we test their
   // consumption of `CancellationFlag` pointers.
-  CancellationFlag* cancellation_flag =
+  std::shared_ptr<CancellationFlag> cancellation_flag =
       client2()->GetCancellationFlag(advertising_endpoint.id);
 
   EXPECT_FALSE(
@@ -473,7 +437,7 @@ TEST_P(ClientProxyTest, CanCancelAllEndpoints) {
   // `CancellationFlag` pointers are passed to other classes in Nearby
   // Connections, and by using the pointers directly, we test their
   // consumption of `CancellationFlag` pointers.
-  CancellationFlag* cancellation_flag =
+  std::shared_ptr<CancellationFlag> cancellation_flag =
       client2()->GetCancellationFlag(advertising_endpoint.id);
 
   EXPECT_FALSE(
@@ -538,6 +502,26 @@ TEST_P(ClientProxyTest, CanCancelAllEndpointsWithDifferentEndpoint) {
     EXPECT_TRUE(
         client1()->GetCancellationFlag(advertising_endpoint_3.id)->Cancelled());
   }
+}
+
+TEST_P(ClientProxyTest, GetCancellationFlagRace) {
+  std::string endpoint_id = "test_endpoint";
+  client1()->AddCancellationFlag(endpoint_id);
+
+  std::atomic<bool> run{true};
+  SingleThreadExecutor executor;
+  executor.Execute([&]() {
+    while (run) {
+      client1()->GetCancellationFlag(endpoint_id);
+    }
+  });
+
+  for (int i = 0; i < 10000; ++i) {
+    client1()->Reset();
+    client1()->AddCancellationFlag(endpoint_id);
+  }
+
+  run = false;
 }
 
 INSTANTIATE_TEST_SUITE_P(ParametrisedClientProxyTest, ClientProxyTest,
@@ -1161,11 +1145,13 @@ TEST_F(ClientProxyTest, NotLogSessionForStoppedAdvertisingWithConnection) {
 
   // After
   StopAdvertising(client1());  // No Advertising
-  EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_, LogSession()).Times(1);
 }
 
 TEST_F(ClientProxyTest,
        LogSessionForStoppedAdvertisingWhenNoConnectionsAndNoDiscovering) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
 
@@ -1174,36 +1160,47 @@ TEST_F(ClientProxyTest,
       advertising_endpoint.id));             // No Connections
   EXPECT_FALSE(client1()->IsDiscovering());  // No Discovery
   EXPECT_TRUE(client1()->IsAdvertising());   // Advertising
-  EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
 
   // After
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_, OnStopAdvertising());
   StopAdvertising(client1());
-  EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest, NotLogSessionForStoppedDiscoveryWithConnection) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
 
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartDiscovery(strategy_, mediums_, _));
   StartDiscovery(client2(), GetDiscoveryListener());
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnEndpointFound(Medium::BLUETOOTH));
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
 
   // Before
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnConnectionRequestReceived(advertising_endpoint.id));
   OnDiscoveryConnectionInitiated(
       client2(), advertising_endpoint);      // Connections are available
   EXPECT_FALSE(client2()->IsAdvertising());  // No Advertising
   EXPECT_TRUE(client2()->IsDiscovering());   // Discovering
 
   // After
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_, OnStopDiscovery());
   StopDiscovery(client2());
-  EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest,
        NotLogSessionForStoppedDiscoveryWithoutConnectionsAndAdvertising) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
 
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartDiscovery(strategy_, mediums_, _));
   StartDiscovery(client2(), GetDiscoveryListener());
 
   // Before
@@ -1213,30 +1210,40 @@ TEST_F(ClientProxyTest,
       advertising_endpoint.id));  // No Connections
 
   // After
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_, OnStopDiscovery());
   StopDiscovery(client2());
-  EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest, LogSessionOnDisconnectedWithOneConnection) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartDiscovery(strategy_, mediums_, _));
   StartDiscovery(client2(), GetDiscoveryListener());
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnEndpointFound(Medium::BLUETOOTH));
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnConnectionRequestReceived(advertising_endpoint.id));
   OnDiscoveryConnectionInitiated(client2(), advertising_endpoint);
 
   // Before
   EXPECT_FALSE(client2()->IsAdvertising());  // No Advertising
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_, OnStopDiscovery());
   StopDiscovery(client2());                  // No Discovery
   EXPECT_TRUE(client2()->HasPendingConnectionToEndpoint(
       advertising_endpoint.id));  // One Connection
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest,
        NotLogSessionOnDisconnectedWithoutConnectionsDiscoveringAdvertising) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
 
@@ -1248,13 +1255,16 @@ TEST_F(ClientProxyTest,
 
   // After
   client2()->OnDisconnected(advertising_endpoint.id, /*notify=*/false);
-  EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest, NotLogSessionOnDisconnectedWhenMoreThanOneConnection) {
   ClientProxy client3;
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint_1 =
       StartAdvertising(client1(), advertising_connection_listener_);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint_2 =
       StartAdvertising(client2(), advertising_connection_listener_);
   StartDiscovery(&client3, GetDiscoveryListener());
@@ -1275,15 +1285,22 @@ TEST_F(ClientProxyTest, NotLogSessionOnDisconnectedWhenMoreThanOneConnection) {
 
   // After
   client2()->OnDisconnected(advertising_endpoint_1.id, /*notify=*/false);
-  EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest,
        NotLogSessionOnDisconnectedForDiscoveringWithOnlyOneConnection) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartDiscovery(strategy_, mediums_, _));
   StartDiscovery(client2(), GetDiscoveryListener());
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnEndpointFound(Medium::BLUETOOTH));
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnConnectionRequestReceived(advertising_endpoint.id));
   OnDiscoveryConnectionInitiated(client2(), advertising_endpoint);
 
   // Before
@@ -1294,26 +1311,27 @@ TEST_F(ClientProxyTest,
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  // Since we are no longer checking IsDiscovering(), we complete sessions now
-  // solely based on advertising.
-  EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 1);
 }
 
 TEST_F(ClientProxyTest, LogSessionForResetClientProxy) {
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_,
+              OnStartAdvertising(strategy_, mediums_, _));
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnStartDiscovery(strategy_, mediums_, _));
   StartDiscovery(client2(), GetDiscoveryListener());
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnEndpointFound(Medium::BLUETOOTH));
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_,
+              OnConnectionRequestReceived(advertising_endpoint.id));
   OnDiscoveryConnectionInitiated(client2(), advertising_endpoint);
 
-  EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
+  EXPECT_CALL(*mock_analytics_recorder1_ptr_, OnStopAdvertising());
   client1()->Reset();
-  // TODO(b/290936886): Why are there more than one complete sessions?
-  EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
-
-  EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
+  EXPECT_CALL(*mock_analytics_recorder2_ptr_, OnStopDiscovery());
   client2()->Reset();
-  EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
 TEST_F(ClientProxyTest, GetLocalInfoCorrect) {
@@ -1484,51 +1502,10 @@ TEST_F(ClientProxyTest, TestAutoBwuWhenListeningWithAutoBwu) {
 }
 
 TEST_F(ClientProxyTest, TestMultiplexSocketBitmask) {
-  if (!NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableMultiplex)) {
-    EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
-  }
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      true);
   EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      true);
-  EXPECT_EQ(
-      client1()->GetLocalMultiplexSocketBitmask(),
-      ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      false);
 }
 
 TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      true);
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
   OnAdvertisingConnectionInitiated(client1(), advertising_endpoint);
@@ -1543,23 +1520,12 @@ TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
           ->GetRemoteMultiplexSocketBitmask(advertising_endpoint.id)
           .value(),
       ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
-  EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-                                                    Medium::BLUETOOTH));
-  EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-                                                    Medium::WIFI_LAN));
+  EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
+                                                     Medium::BLUETOOTH));
+  EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
+                                                     Medium::WIFI_LAN));
   EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
                                                      Medium::WIFI_AWARE));
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      false);
 }
 
 TEST_F(ClientProxyTest, SaveClientInfoFromPreferences) {
@@ -1567,7 +1533,7 @@ TEST_F(ClientProxyTest, SaveClientInfoFromPreferences) {
       config_package_nearby::nearby_connections_feature::
           kEnableNearbyConnectionsPreferences,
       true);
-  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  client1_ = std::make_unique<ClientProxy>();
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
   std::string endpoint_id = advertising_endpoint.id;
@@ -1575,7 +1541,7 @@ TEST_F(ClientProxyTest, SaveClientInfoFromPreferences) {
 
   // Destroy the client and create a new one.
   client1_.reset();
-  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  client1_ = std::make_unique<ClientProxy>();
 
   // The new client should load the same endpoint ID.
   EXPECT_EQ(client1()->GetLocalEndpointId(), endpoint_id);
@@ -1590,7 +1556,7 @@ TEST_F(ClientProxyTest, NotLoadClientInfoFromPreferencesOnExpired) {
       config_package_nearby::nearby_connections_feature::
           kEnableNearbyConnectionsPreferences,
       true);
-  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  client1_ = std::make_unique<ClientProxy>();
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
   std::string endpoint_id = advertising_endpoint.id;
@@ -1600,7 +1566,7 @@ TEST_F(ClientProxyTest, NotLoadClientInfoFromPreferencesOnExpired) {
   client1_.reset();
   FastForward(absl::Hours(25));
 
-  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  client1_ = std::make_unique<ClientProxy>();
 
   // The new client should load the same endpoint ID.
   EXPECT_NE(client1()->GetLocalEndpointId(), endpoint_id);
