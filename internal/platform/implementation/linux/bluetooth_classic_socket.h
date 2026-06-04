@@ -32,56 +32,23 @@
 
 namespace nearby {
 namespace linux {
-// BlueZ's NewConnection gives us a non-blocking FD, so we need to poll
-// it to be able to write/read bytes.
-class Poller final {
- public:
-  static Poller CreateInputPoller(const sdbus::UnixFd &fd) {
-    return Poller(fd, POLLIN);
-  }
-
-  static Poller CreateOutputPoller(const sdbus::UnixFd &fd) {
-    return Poller(fd, POLLOUT);
-  }
-
-  static Poller CreateInputPoller(int fd) { return Poller(fd, POLLIN); }
-
-  static Poller CreateOutputPoller(int fd) { return Poller(fd, POLLOUT); }
-
-  Exception Ready();
-
- private:
-  Poller(const sdbus::UnixFd &fd, short event) : poll_event_(event) {
-    fds_[0].fd = fd.get();
-    fds_[0].events = event;
-  }
-
-  Poller(int fd, short event) : poll_event_(event) {
-    fds_[0].fd = fd;
-    fds_[0].events = event;
-  }
-
-  short poll_event_;
-  struct pollfd fds_[1];
-};
 
 class BluetoothInputStream final : public nearby::InputStream {
  public:
-  explicit BluetoothInputStream(sdbus::UnixFd fd)
-      : fd_(std::move(fd)), fd_raw_(fd_.get()) {}
+  explicit BluetoothInputStream(std::shared_ptr<sdbus::UnixFd> fd)
+      : fd_raw_(std::move(fd)){}
 
   ExceptionOr<ByteArray> Read(std::int64_t size) override;
   Exception Close() override;
 
  private:
-  sdbus::UnixFd fd_;
-  std::atomic<int> fd_raw_{-1};
+  std::shared_ptr<sdbus::UnixFd> fd_raw_;
 };
 
 class BluetoothOutputStream : public nearby::OutputStream {
  public:
-  explicit BluetoothOutputStream(sdbus::UnixFd fd)
-      : fd_(std::move(fd)), fd_raw_(fd_.get()) {}
+  explicit BluetoothOutputStream(std::shared_ptr<sdbus::UnixFd> fd)
+      : fd_raw_(std::move(fd)) {}
 
   Exception Write(absl::string_view data) override;
   Exception Flush() override { return {Exception::kSuccess}; }
@@ -89,19 +56,14 @@ class BluetoothOutputStream : public nearby::OutputStream {
 
  private:
   mutable absl::Mutex fd_mutex_;
-  sdbus::UnixFd fd_;
-  std::atomic<int> fd_raw_{-1};
-
-  // For packet sockets, discovered max payload per send/write.
-  // 0 means "unknown", we’ll initialize on first packet write.
-  size_t max_chunk_ ABSL_GUARDED_BY(fd_mutex_) = 0;
+  std::shared_ptr<sdbus::UnixFd> fd_raw_;
 };
 
 class BluetoothSocket final : public api::BluetoothSocket {
  public:
   BluetoothSocket(std::shared_ptr<BluetoothDevice> device,
-                  const sdbus::UnixFd &fd)
-      : device_(std::move(device)), output_stream_(fd), input_stream_(fd) {}
+                  sdbus::UnixFd fd)
+      :fd_(std::make_shared<sdbus::UnixFd>(fd)), device_(std::move(device)), output_stream_(fd_), input_stream_(fd_) {}
 
   nearby::InputStream &GetInputStream() override { return input_stream_; }
   nearby::OutputStream &GetOutputStream() override { return output_stream_; }
@@ -114,6 +76,7 @@ class BluetoothSocket final : public api::BluetoothSocket {
   api::BluetoothDevice *GetRemoteDevice() override { return device_.get(); };
 
  private:
+  std::shared_ptr<sdbus::UnixFd> fd_;
   std::shared_ptr<BluetoothDevice> device_;
   BluetoothOutputStream output_stream_;
   BluetoothInputStream input_stream_;

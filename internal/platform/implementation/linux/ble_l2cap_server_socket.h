@@ -44,21 +44,14 @@ class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
       ABSL_LOCKS_EXCLUDED(mutex_);
   Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
 
-  void SetCloseNotifier(absl::AnyInvocable<void()> notifier)
-      ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
-  bool InitializeServerSocketLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  void AcceptPoll(int server_fd, int stop_fd, int& client_fd,
-                  sockaddr_l2& client_addr, socklen_t& client_len);
 
   absl::Mutex mutex_;
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
-  absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
   int psm_ = 0;
   std::string service_id_ ABSL_GUARDED_BY(mutex_);
   int server_fd_ ABSL_GUARDED_BY(mutex_) = -1;
-  int stop_pipe_[2] ABSL_GUARDED_BY(mutex_) = {-1, -1};  // read [0], write [1]
 };
 
 }  // namespace linux

@@ -76,9 +76,6 @@ BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
                  << ": Failed to initialize known GATT services cache.";
   }
 
-  // generating psm value for l2cap socket
-  Prng prng;
-  psm_ = 0x80 + (prng.NextUint32() % 0x80);
 
   if (adv_monitor_manager_) {
     LOG(INFO)
@@ -634,8 +631,7 @@ std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
 
   LOG(INFO) << __func__ << ": Successfully connected to L2CAP socket";
   auto socket = std::make_unique<BleL2capSocket>(
-      fd, peripheral_id, service_id,
-      /*incoming_connection=*/false);
+      fd, peripheral_id, service_id);
   return socket;
 }
 

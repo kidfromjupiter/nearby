@@ -15,6 +15,9 @@
 #ifndef PLATFORM_IMPL_LINUX_BLE_L2CAP_SOCKET_H_
 #define PLATFORM_IMPL_LINUX_BLE_L2CAP_SOCKET_H_
 
+#include "dbus.h"
+
+
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -36,34 +39,35 @@ class BleL2capSocket;
 
 class BleL2capInputStream final : public InputStream {
  public:
-  explicit BleL2capInputStream(BleL2capSocket* owner);
+  explicit BleL2capInputStream(std::shared_ptr<sdbus::UnixFd> fd_raw_): fd_raw_(std::move(fd_raw_)) {};
   ~BleL2capInputStream() override;
 
   ExceptionOr<ByteArray> Read(std::int64_t size) override;
   Exception Close() override;
 
- private:
-  BleL2capSocket* owner_ = nullptr;
+private:
+  std::shared_ptr<sdbus::UnixFd> fd_raw_;
 };
 
 class BleL2capOutputStream final : public OutputStream {
- public:
-  explicit BleL2capOutputStream(BleL2capSocket* owner);
+public:
+  explicit BleL2capOutputStream(std::shared_ptr<sdbus::UnixFd> fd_raw_): fd_raw_(std::move(fd_raw_)) {};
   ~BleL2capOutputStream() override;
 
   Exception Write(absl::string_view data) override;
   Exception Flush() override { return {Exception::kSuccess}; }
   Exception Close() override;
 
- private:
-  BleL2capSocket* owner_ = nullptr;
+private:
+  std::shared_ptr<sdbus::UnixFd> fd_raw_;
+
 };
 
 class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
 
   BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
-                 std::string service_id = "", bool incoming_connection = false);
+                 std::string service_id = "");
   ~BleL2capSocket() override;
 
   InputStream& GetInputStream() override { return *input_stream_; }
@@ -81,35 +85,13 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   friend class BleL2capInputStream;
   friend class BleL2capOutputStream;
 
-
-  ExceptionOr<ByteArray> ReadFromSocket(std::int64_t size)
-      ABSL_LOCKS_EXCLUDED(io_mutex_);
-  Exception WriteToSocket(absl::string_view data) ABSL_LOCKS_EXCLUDED(io_mutex_);
-  Exception CloseIo() ABSL_LOCKS_EXCLUDED(io_mutex_);
-
-  bool ReadNextFrame(std::string& payload, std::optional<absl::Duration> timeout)
-      ABSL_LOCKS_EXCLUDED(io_mutex_);
-  bool SendFrame(absl::string_view payload) ABSL_LOCKS_EXCLUDED(io_mutex_);
-
-  bool PollReady(short events, std::optional<absl::Duration> timeout) const;
-  void DoClose() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
   mutable absl::Mutex mutex_;
   mutable absl::Mutex io_mutex_;
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
+  std::shared_ptr<sdbus::UnixFd > fd_ ;
   std::unique_ptr<BleL2capInputStream> input_stream_;
   std::unique_ptr<BleL2capOutputStream> output_stream_;
   api::ble::BlePeripheral::UniqueId peripheral_id_;
-  absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
-  std::atomic<int> fd_{-1};
-
-  const bool incoming_connection_;
-  ByteArray service_id_hash_;
-
-  bool intro_packet_validated_ = false;
-  bool request_data_connection_handled_ = false;
-  std::string wire_buffer_;
-  std::string read_buffer_;
 };
 
 }  // namespace linux
