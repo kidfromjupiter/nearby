@@ -34,7 +34,6 @@ class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
   BleL2capServerSocket();
   explicit BleL2capServerSocket(
       int psm,
-      BleL2capSocket::ProtocolMode protocol_mode = BleL2capSocket::ProtocolMode::kRefactored,
       std::string service_id = "");
   ~BleL2capServerSocket() override;
 
@@ -57,7 +56,6 @@ class BleL2capServerSocket final : public api::ble::BleL2capServerSocket {
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
   absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
   int psm_ = 0;
-  BleL2capSocket::ProtocolMode protocol_mode_ = BleL2capSocket::ProtocolMode::kRefactored;
   std::string service_id_ ABSL_GUARDED_BY(mutex_);
   int server_fd_ ABSL_GUARDED_BY(mutex_) = -1;
   int stop_pipe_[2] ABSL_GUARDED_BY(mutex_) = {-1, -1};  // read [0], write [1]
