@@ -54,9 +54,8 @@ void DrainFd(int fd) {
 BleL2capServerSocket::BleL2capServerSocket() = default;
 
 BleL2capServerSocket::BleL2capServerSocket(
-    int psm, BleL2capSocket::ProtocolMode protocol_mode, std::string service_id)
+    int psm,  std::string service_id)
     : psm_(psm),
-      protocol_mode_(protocol_mode),
       service_id_(std::move(service_id)) {}
 
 BleL2capServerSocket::~BleL2capServerSocket() { Close(); }
@@ -254,15 +253,13 @@ std::unique_ptr<api::ble::BleL2capSocket> BleL2capServerSocket::Accept() {
         static_cast<uint8_t>(client_addr.l2_bdaddr.b[i]);
   }
 
-  BleL2capSocket::ProtocolMode protocol_mode;
   std::string service_id;
   {
     absl::MutexLock lock(&mutex_);
-    protocol_mode = protocol_mode_;
     service_id = service_id_;
   }
   return std::make_unique<BleL2capSocket>(
-      client_fd, peripheral_id, protocol_mode, service_id,
+      client_fd, peripheral_id,  service_id,
       /*incoming_connection=*/true);
 }
 
