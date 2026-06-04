@@ -55,11 +55,6 @@ namespace linux {
 namespace {
 using nearby::connections::config_package_nearby::nearby_connections_feature::kRefactorBleL2cap;
 
-BleL2capSocket::ProtocolMode GetL2capProtocolMode() {
-  const bool refactor_enabled = NearbyFlags::GetInstance().GetBoolFlag(kRefactorBleL2cap);
-  return refactor_enabled ? BleL2capSocket::ProtocolMode::kRefactored
-                          : BleL2capSocket::ProtocolMode::kLegacy;
-}
 }  // namespace
 
 BleV2Medium::BleV2Medium(BluetoothAdapter &adapter)
@@ -516,7 +511,7 @@ BleV2Medium::OpenL2capServerSocket(const std::string &service_id) {
             << service_id;
 
   auto server_socket = std::make_unique<linux::BleL2capServerSocket>(
-      psm_, GetL2capProtocolMode(), service_id);
+      psm_, service_id);
 
   return server_socket;
 }
@@ -638,16 +633,9 @@ std::unique_ptr<api::ble::BleL2capSocket> BleV2Medium::ConnectOverL2cap(
   }
 
   LOG(INFO) << __func__ << ": Successfully connected to L2CAP socket";
-  auto protocol_mode = GetL2capProtocolMode();
   auto socket = std::make_unique<BleL2capSocket>(
-      fd, peripheral_id, protocol_mode, service_id,
+      fd, peripheral_id, service_id,
       /*incoming_connection=*/false);
-  if (protocol_mode == BleL2capSocket::ProtocolMode::kLegacy &&
-      !socket->PerformLegacyOutgoingHandshake(absl::Seconds(5))) {
-    LOG(ERROR) << __func__ << ": Legacy L2CAP handshake failed.";
-    socket->Close();
-    return nullptr;
-  }
   return socket;
 }
 

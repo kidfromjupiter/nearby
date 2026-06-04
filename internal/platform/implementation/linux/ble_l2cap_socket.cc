@@ -159,121 +159,20 @@ Exception BleL2capOutputStream::Close() {
 
 BleL2capSocket::BleL2capSocket(int fd,
                                api::ble::BlePeripheral::UniqueId peripheral_id,
-                               ProtocolMode protocol_mode,
                                std::string service_id,
                                bool incoming_connection)
     : input_stream_(std::make_unique<BleL2capInputStream>(this)),
       output_stream_(std::make_unique<BleL2capOutputStream>(this)),
       peripheral_id_(peripheral_id),
       fd_(fd),
-      protocol_mode_(protocol_mode),
       incoming_connection_(incoming_connection),
       intro_packet_validated_(!incoming_connection) {
-  if (protocol_mode_ == ProtocolMode::kLegacy) {
-    ByteArray hash = Crypto::Sha256(service_id);
-    if (hash.size() < kServiceIdHashLength) {
-      LOG(ERROR) << "Failed to derive service hash for legacy L2CAP mode.";
-    } else {
-      service_id_hash_ = ByteArray(hash.data(), kServiceIdHashLength);
-    }
-  }
+  ByteArray hash = Crypto::Sha256(service_id);
+  service_id_hash_ = ByteArray(hash.data(), kServiceIdHashLength);
 }
 
 BleL2capSocket::~BleL2capSocket() { Close(); }
 
-bool BleL2capSocket::IsSupportedLegacyControlCommand(uint8_t command) {
-  switch (command) {
-    case static_cast<uint8_t>(LegacyControlCommand::kRequestAdvertisement):
-    case static_cast<uint8_t>(LegacyControlCommand::kRequestAdvertisementFinish):
-    case static_cast<uint8_t>(LegacyControlCommand::kRequestDataConnection):
-    case static_cast<uint8_t>(LegacyControlCommand::kResponseAdvertisement):
-    case static_cast<uint8_t>(LegacyControlCommand::kResponseServiceIdNotFound):
-    case static_cast<uint8_t>(LegacyControlCommand::kResponseDataConnectionReady):
-    case static_cast<uint8_t>(LegacyControlCommand::kResponseDataConnectionFailure):
-      return true;
-    default:
-      return false;
-  }
-}
-
-const char* BleL2capSocket::LegacyControlCommandToString(
-    LegacyControlCommand command) {
-  switch (command) {
-    case LegacyControlCommand::kRequestAdvertisement:
-      return "RequestAdvertisement(1)";
-    case LegacyControlCommand::kRequestAdvertisementFinish:
-      return "RequestAdvertisementFinish(2)";
-    case LegacyControlCommand::kRequestDataConnection:
-      return "RequestDataConnection(3)";
-    case LegacyControlCommand::kResponseAdvertisement:
-      return "ResponseAdvertisement(21)";
-    case LegacyControlCommand::kResponseServiceIdNotFound:
-      return "ResponseServiceIdNotFound(22)";
-    case LegacyControlCommand::kResponseDataConnectionReady:
-      return "ResponseDataConnectionReady(23)";
-    case LegacyControlCommand::kResponseDataConnectionFailure:
-      return "ResponseDataConnectionFailure(24)";
-  }
-  return "UnknownCommand";
-}
-
-ByteArray BleL2capSocket::BuildLegacyControlPacket(LegacyControlCommand command,
-                                                   const ByteArray& data) {
-  std::string packet;
-  packet.push_back(static_cast<char>(command));
-  if (!data.Empty()) {
-    if (data.size() > 0xFFFF) return ByteArray();
-    packet.push_back(static_cast<char>((data.size() >> 8) & 0xFF));
-    packet.push_back(static_cast<char>(data.size() & 0xFF));
-    packet.append(data.data(), data.size());
-  }
-  return ByteArray(std::move(packet));
-}
-
-std::optional<BleL2capSocket::ParsedLegacyControlPacket>
-BleL2capSocket::ParseLegacyControlPacket(absl::string_view payload) const {
-  if (payload.empty()) {
-    return std::nullopt;
-  }
-
-  const uint8_t command = static_cast<uint8_t>(payload[0]);
-  if (!IsSupportedLegacyControlCommand(command)) {
-    return std::nullopt;
-  }
-
-  ParsedLegacyControlPacket packet{
-      .command = static_cast<LegacyControlCommand>(command),
-      .data = ByteArray(),
-  };
-
-  if (payload.size() == 1) {
-    return packet;
-  }
-
-  if (payload.size() < 3) {
-    return std::nullopt;
-  }
-
-  const auto* bytes = reinterpret_cast<const uint8_t*>(payload.data());
-  const int length = (static_cast<int>(bytes[1]) << 8) | static_cast<int>(bytes[2]);
-  if (length != static_cast<int>(payload.size()) - 3) {
-    return std::nullopt;
-  }
-
-  if (length > 0) {
-    packet.data = ByteArray(payload.data() + 3, static_cast<size_t>(length));
-  }
-  return packet;
-}
-
-std::optional<ByteArray> BleL2capSocket::ParseLegacyIntroductionPacket(
-    absl::string_view payload) const {
-  auto parsed = ParseSocketControlFramePayload(payload);
-  if (!parsed.has_value() || parsed->type != SocketControlFrame::INTRODUCTION) {
-    return std::nullopt;
-  }
-  return parsed->service_id_hash;
-}
 
 bool BleL2capSocket::PollReady(short events, std::optional<absl::Duration> timeout) const {
   int fd = fd_.load();
@@ -385,111 +284,6 @@ bool BleL2capSocket::ReadNextFrame(std::string& payload,
   }
 }
 
-bool BleL2capSocket::SendLegacyControlPacket(LegacyControlCommand command,
-                                             const ByteArray& data) {
-  ByteArray packet = BuildLegacyControlPacket(command, data);
-  if (packet.Empty()) return false;
-  return SendFrame(packet.AsStringView());
-}
-
-bool BleL2capSocket::SendLegacyIntroductionPacket() {
-  if (service_id_hash_.size() != kServiceIdHashLength) {
-    return false;
-  }
-
-  SocketControlFrame frame;
-  frame.set_type(SocketControlFrame::INTRODUCTION);
-  auto* intro = frame.mutable_introduction();
-  intro->set_socket_version(SocketVersion::V2);
-  intro->set_service_id_hash(service_id_hash_.AsStringView());
-
-  ByteArray frame_bytes(frame.ByteSizeLong());
-  if (!frame.SerializeToArray(frame_bytes.data(), frame_bytes.size())) return false;
-
-  std::string packet(reinterpret_cast<const char*>(kControlPacketPrefix),
-                     kServiceIdHashLength);
-  packet.append(frame_bytes.data(), frame_bytes.size());
-  return SendFrame(packet);
-}
-
-bool BleL2capSocket::SendLegacyPacketAckPacket(int received_size) {
-  if (service_id_hash_.size() != kServiceIdHashLength) {
-    return false;
-  }
-
-  SocketControlFrame frame;
-  frame.set_type(SocketControlFrame::PACKET_ACKNOWLEDGEMENT);
-  auto* ack = frame.mutable_packet_acknowledgement();
-  ack->set_service_id_hash(service_id_hash_.AsStringView());
-  ack->set_received_size(received_size);
-
-  ByteArray frame_bytes(frame.ByteSizeLong());
-  if (!frame.SerializeToArray(frame_bytes.data(), frame_bytes.size())) return false;
-
-  std::string packet(reinterpret_cast<const char*>(kControlPacketPrefix),
-                     kServiceIdHashLength);
-  packet.append(frame_bytes.data(), frame_bytes.size());
-  return SendFrame(packet);
-}
-
-bool BleL2capSocket::HandleLegacyIncomingPayload(absl::string_view payload,
-                                                 bool& produced_payload) {
-  produced_payload = false;
-
-  if (auto control_packet = ParseLegacyControlPacket(payload);
-      control_packet.has_value()) {
-    switch (control_packet->command) {
-      case LegacyControlCommand::kRequestDataConnection:
-        if (!incoming_connection_ || request_data_connection_handled_) return false;
-        request_data_connection_handled_ = true;
-        return SendLegacyControlPacket(
-            LegacyControlCommand::kResponseDataConnectionReady, ByteArray());
-      case LegacyControlCommand::kRequestAdvertisement:
-        // Mirror Apple behavior: return an empty advertisement response.
-        return SendLegacyControlPacket(
-            LegacyControlCommand::kResponseAdvertisement, ByteArray());
-      default:
-        return false;
-    }
-  }
-
-  if (auto control_frame = ParseSocketControlFramePayload(payload);
-      control_frame.has_value()) {
-    if (control_frame->service_id_hash != service_id_hash_) return false;
-
-    switch (control_frame->type) {
-      case SocketControlFrame::INTRODUCTION:
-        intro_packet_validated_ = true;
-        return true;
-      case SocketControlFrame::PACKET_ACKNOWLEDGEMENT:
-        // ACK frames are control-plane signals and should not be surfaced as
-        // payload bytes to upper layers.
-        return true;
-      case SocketControlFrame::DISCONNECTION:
-        return false;
-      case SocketControlFrame::UNKNOWN_CONTROL_FRAME_TYPE:
-        return false;
-    }
-  }
-
-  if (service_id_hash_.size() != kServiceIdHashLength ||
-      payload.size() < service_id_hash_.size()) {
-    return false;
-  }
-
-  if (!std::equal(service_id_hash_.data(),
-                  service_id_hash_.data() + service_id_hash_.size(),
-                  payload.data())) {
-    return false;
-  }
-
-  if (incoming_connection_ && !intro_packet_validated_) return false;
-
-  read_buffer_.append(payload.data() + service_id_hash_.size(),
-                      payload.size() - service_id_hash_.size());
-  produced_payload = true;
-  return SendLegacyPacketAckPacket(static_cast<int>(payload.size()));
-}
 
 ExceptionOr<ByteArray> BleL2capSocket::ReadFromSocket(std::int64_t size) {
   if (size <= 0) return ExceptionOr<ByteArray>(ByteArray());
@@ -499,20 +293,7 @@ ExceptionOr<ByteArray> BleL2capSocket::ReadFromSocket(std::int64_t size) {
     if (!ReadNextFrame(payload, std::nullopt))
       return ExceptionOr<ByteArray>(Exception::kIo);
 
-    if (protocol_mode_ == ProtocolMode::kRefactored) {
       read_buffer_.append(payload);
-      continue;
-    }
-
-    bool produced_payload = false;
-    if (!HandleLegacyIncomingPayload(payload, produced_payload)) {
-      CloseIo();
-      return ExceptionOr<ByteArray>(Exception::kIo);
-    }
-
-    if (!produced_payload) {
-      continue;
-    }
   }
 
   const size_t read_size =
@@ -523,20 +304,16 @@ ExceptionOr<ByteArray> BleL2capSocket::ReadFromSocket(std::int64_t size) {
 }
 
 Exception BleL2capSocket::WriteToSocket(absl::string_view data) {
-  if (protocol_mode_ == ProtocolMode::kLegacy) {
-    if (service_id_hash_.size() != kServiceIdHashLength) return {Exception::kIo};
 
-    std::string payload;
-    payload.reserve(service_id_hash_.size() + data.size());
-    payload.append(service_id_hash_.AsStringView());
-    payload.append(data.data(), data.size());
+  if (service_id_hash_.size() != kServiceIdHashLength) return {Exception::kIo};
 
-    return SendFrame(payload) ? Exception{Exception::kSuccess}
-                              : Exception{Exception::kIo};
-  }
+  std::string payload;
+  payload.reserve(service_id_hash_.size() + data.size());
+  payload.append(service_id_hash_.AsStringView());
+  payload.append(data.data(), data.size());
 
-  return SendFrame(data) ? Exception{Exception::kSuccess}
-                         : Exception{Exception::kIo};
+  return SendFrame(payload) ? Exception{Exception::kSuccess}
+  : Exception{Exception::kIo};
 }
 
 Exception BleL2capSocket::CloseIo() {
@@ -547,38 +324,6 @@ Exception BleL2capSocket::CloseIo() {
   return {Exception::kSuccess};
 }
 
-bool BleL2capSocket::PerformLegacyOutgoingHandshake(absl::Duration timeout) {
-  if (protocol_mode_ != ProtocolMode::kLegacy) return true;
-
-  if (service_id_hash_.size() != kServiceIdHashLength) {
-    LOG(ERROR) << "Legacy L2CAP handshake requires valid service id hash.";
-    return false;
-  }
-
-  if (!SendLegacyControlPacket(LegacyControlCommand::kRequestDataConnection,
-                               ByteArray())) {
-    return false;
-  }
-
-  const absl::Time deadline = absl::Now() + timeout;
-  while (absl::Now() < deadline) {
-    std::string payload;
-    if (!ReadNextFrame(payload, deadline - absl::Now())) return false;
-
-    auto control_packet = ParseLegacyControlPacket(payload);
-    if (!control_packet.has_value()) return false;
-
-    if (control_packet->command ==
-        LegacyControlCommand::kResponseDataConnectionReady) {
-      return SendLegacyIntroductionPacket();
-    }
-
-    // Strict fail-fast for unexpected commands in handshake phase.
-    return false;
-  }
-
-  return false;
-}
 
 Exception BleL2capSocket::Close() {
   absl::MutexLock lock(&mutex_);

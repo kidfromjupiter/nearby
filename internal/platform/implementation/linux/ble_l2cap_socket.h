@@ -61,13 +61,8 @@ class BleL2capOutputStream final : public OutputStream {
 
 class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
-  enum class ProtocolMode {
-    kRefactored,
-    kLegacy,
-  };
 
   BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
-                 ProtocolMode protocol_mode = ProtocolMode::kRefactored,
                  std::string service_id = "", bool incoming_connection = false);
   ~BleL2capSocket() override;
 
@@ -81,26 +76,11 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   }
 
   bool IsClosed() const ABSL_LOCKS_EXCLUDED(mutex_);
-  bool PerformLegacyOutgoingHandshake(absl::Duration timeout);
 
  private:
   friend class BleL2capInputStream;
   friend class BleL2capOutputStream;
 
-  enum class LegacyControlCommand : uint8_t {
-    kRequestAdvertisement = 1,
-    kRequestAdvertisementFinish = 2,
-    kRequestDataConnection = 3,
-    kResponseAdvertisement = 21,
-    kResponseServiceIdNotFound = 22,
-    kResponseDataConnectionReady = 23,
-    kResponseDataConnectionFailure = 24,
-  };
-
-  struct ParsedLegacyControlPacket {
-    LegacyControlCommand command;
-    ByteArray data;
-  };
 
   ExceptionOr<ByteArray> ReadFromSocket(std::int64_t size)
       ABSL_LOCKS_EXCLUDED(io_mutex_);
@@ -110,21 +90,6 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   bool ReadNextFrame(std::string& payload, std::optional<absl::Duration> timeout)
       ABSL_LOCKS_EXCLUDED(io_mutex_);
   bool SendFrame(absl::string_view payload) ABSL_LOCKS_EXCLUDED(io_mutex_);
-  bool SendLegacyControlPacket(LegacyControlCommand command,
-                               const ByteArray& data) ABSL_LOCKS_EXCLUDED(io_mutex_);
-  bool SendLegacyIntroductionPacket() ABSL_LOCKS_EXCLUDED(io_mutex_);
-  bool SendLegacyPacketAckPacket(int received_size) ABSL_LOCKS_EXCLUDED(io_mutex_);
-  std::optional<ParsedLegacyControlPacket> ParseLegacyControlPacket(
-      absl::string_view payload) const;
-  std::optional<ByteArray> ParseLegacyIntroductionPacket(
-      absl::string_view payload) const;
-  bool HandleLegacyIncomingPayload(absl::string_view payload, bool& produced_payload)
-      ABSL_LOCKS_EXCLUDED(io_mutex_);
-
-  static bool IsSupportedLegacyControlCommand(uint8_t command);
-  static const char* LegacyControlCommandToString(LegacyControlCommand command);
-  static ByteArray BuildLegacyControlPacket(LegacyControlCommand command,
-                                            const ByteArray& data);
 
   bool PollReady(short events, std::optional<absl::Duration> timeout) const;
   void DoClose() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -138,7 +103,6 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   absl::AnyInvocable<void()> close_notifier_ ABSL_GUARDED_BY(mutex_);
   std::atomic<int> fd_{-1};
 
-  const ProtocolMode protocol_mode_;
   const bool incoming_connection_;
   ByteArray service_id_hash_;
 
