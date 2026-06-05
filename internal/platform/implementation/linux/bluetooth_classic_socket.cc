@@ -58,9 +58,19 @@ ExceptionOr<ByteArray> BluetoothInputStream::Read(std::int64_t size) {
       return Exception{Exception::kIo};
     }
     if (pfds[0].revents & POLLIN) {
-        auto r = recv(fd_raw_->get(), buffer.data() + rcvd, size - rcvd, 0);
-        if (r < 0){ return Exception{Exception::kIo};}
-        rcvd += r;
+        while (rcvd < size) {
+
+          auto r = recv(fd_raw_->get(), buffer.data() + rcvd, size - rcvd, 0);
+          if (r > 0) {
+            rcvd += r;
+            continue;
+          }
+          if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {continue;}
+
+          LOG(ERROR) << __func__
+                     << ": error reading from fd: " << std::strerror(errno);
+          return {Exception::kIo};
+        }
     }
   }
 
@@ -89,9 +99,18 @@ Exception BluetoothOutputStream::Write(absl::string_view data) {
       return Exception{Exception::kIo};
     }
     if (pfds[0].revents & POLLOUT) {
-      auto r = send(fd_raw_->get(), data.data() + sent, data.size(), 0);
-      if (r < 0){ return Exception{Exception::kIo};}
-      sent += r;
+      while (sent < data.size()) {
+        auto r = send(fd_raw_->get(), data.data() + sent, data.size(), 0);
+        if (r > 0) {
+          sent += r;
+          continue;
+        }
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {continue;}
+
+        LOG(ERROR) << __func__
+                   << ": error reading from fd: " << std::strerror(errno);
+        return {Exception::kIo};
+      }
     }
   }
   return {Exception::kSuccess};
