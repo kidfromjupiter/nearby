@@ -167,6 +167,7 @@ cc_library(
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/strings",
     ],
+    alwayslink = True,
 )
 
 cc_library(
