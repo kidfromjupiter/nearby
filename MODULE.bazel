@@ -175,6 +175,9 @@ cmake(
         "BUILD_SHARED_LIBS": "OFF",
         "SDBUSCPP_SDBUS_LIB": "systemd",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+        "CMAKE_C_STANDARD": "17",
+        "CMAKE_C_STANDARD_REQUIRED": "ON",
+        "CMAKE_C_EXTENSIONS": "ON",
     },
     env = {
         # CMake still needs pkg-config to pass its internal configuration checks for systemd
