@@ -1,5 +1,5 @@
 BasedOnStyle: Google
-Standard: Cpp17
+Standard: c++17
 ColumnLimit: 80
 IndentWidth: 2
 ContinuationIndentWidth: 4
