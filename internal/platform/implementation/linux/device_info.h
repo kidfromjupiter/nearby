@@ -129,14 +129,14 @@ class DeviceInfo final : public api::DeviceInfo {
     return api::DeviceInfo::OsType::kWindows;  // Or ChromeOS?
   }
 
-  std::optional<FilePath> GetDownloadPath() const override;
-  std::optional<FilePath> GetLocalAppDataPath() const override;
-  std::optional<FilePath> GetCommonAppDataPath() const override {
+  std::optional<nearby::FilePath> GetDownloadPath() const override;
+  std::optional<nearby::FilePath> GetLocalAppDataPath() const override;
+  std::optional<nearby::FilePath> GetCommonAppDataPath() const override {
     return std::nullopt;
   };
-  std::optional<FilePath> GetTemporaryPath() const override;
-  std::optional<FilePath> GetLogPath() const override;
-  std::optional<FilePath> GetCrashDumpPath() const override;
+  std::optional<nearby::FilePath> GetTemporaryPath() const override;
+  std::optional<nearby::FilePath> GetLogPath() const override;
+  std::optional<nearby::FilePath> GetCrashDumpPath() const override;
 
   bool IsScreenLocked() const override;
   void RegisterScreenLockedListener(

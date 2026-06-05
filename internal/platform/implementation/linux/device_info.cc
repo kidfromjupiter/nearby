@@ -95,6 +95,9 @@ api::DeviceInfo::DeviceType DeviceInfo::GetDeviceType() const {
 
 std::optional<FilePath> DeviceInfo::GetDownloadPath() const {
   char *dir = getenv("XDG_DOWNLOAD_DIR");
+  if (dir == nullptr) {
+    return FilePath("/tmp");
+  }
   return  FilePath(std::string(dir));
 }
 
