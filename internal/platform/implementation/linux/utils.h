@@ -32,6 +32,9 @@ std::optional<std::string> NewUuidStr();
 std::string RandSSID();
 std::string RandWPAPassphrase();
 
+std::string wstring_to_string(const std::wstring& str);
+std::wstring string_to_wstring(const std::string& str);
+
 }  // namespace linux
 }  // namespace nearby
 

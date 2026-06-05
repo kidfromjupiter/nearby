@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <codecvt>
+#include <locale>
 #include <random>
 
 #include <systemd/sd-id128.h>
@@ -97,6 +99,22 @@ std::string RandWPAPassphrase() {
       "!\"#$%&'()*+,-./[\\]^_`~{|}";
 
   return RandString(allowed_chars, 63);
+}
+
+std::string wstring_to_string(const std::wstring& str) {
+  if (str.empty()) {
+    return {};
+  }
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+  return converter.to_bytes(str);
+}
+
+std::wstring string_to_wstring(const std::string& str) {
+  if (str.empty()) {
+    return {};
+  }
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+  return converter.from_bytes(str);
 }
 }  // namespace linux
 }  // namespace nearby

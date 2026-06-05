@@ -53,19 +53,29 @@ std::wstring FilePath::GetDownloadPathInternal(std::wstring parent_folder,
                                                std::wstring file_name) {
   DeviceInfo info = DeviceInfo(linux::getSystemBusConnection());
 
-  std::optional<std::filesystem::path> download_path = info.GetDownloadPath();
+  auto nearby_path = info.GetDownloadPath();
+
+  std::optional<std::filesystem::path> download_path =
+      nearby_path ? std::optional<std::filesystem::path>(
+                        std::filesystem::path(nearby_path->ToString()))
+                  : std::nullopt;
 
   std::string base_path;
 
-  std::wstring wide_path(string_to_wstring(base_path));
-
   if (!download_path) {
-    // If grabbing the download path fails then we make a custom one
-    base_path = getenv("HOME");
-    base_path.append("/Downloads");
+    const char* home = std::getenv("HOME");
+
+    if (home == nullptr) {
+      base_path = "/tmp/Downloads";  // fallback for test environments
+    } else {
+      base_path = home;
+      base_path.append("/Downloads");
+    }
   } else {
-    base_path = download_path.value();
+    base_path = download_path->string();
   }
+
+  std::wstring wide_path = string_to_wstring(base_path);
 
   // If parent_folder starts with a \\ or /, then strip it
   while (!parent_folder.empty() && (*parent_folder.begin() == kBackSlash ||
@@ -119,9 +129,18 @@ std::wstring FilePath::CreateOutputFileWithRename(std::wstring path) {
   // Remove any /..'s
   SanitizePath(sanitized_path);
 
-  auto last_delimiter = sanitized_path.find_last_of(kPathDelimiter);
-  std::wstring folder(sanitized_path.substr(0, last_delimiter));
-  std::wstring file_name(sanitized_path.substr(last_delimiter));
+auto last_delimiter = sanitized_path.find_last_of(kPathDelimiter);
+
+std::wstring folder;
+std::wstring file_name;
+
+if (last_delimiter == std::wstring::npos) {
+  folder = L"";
+  file_name = sanitized_path;
+} else {
+  folder = sanitized_path.substr(0, last_delimiter);
+  file_name = sanitized_path.substr(last_delimiter + 1);
+}
 
   // Locate the last dot
   auto first = file_name.find_last_of('.');
@@ -157,7 +176,7 @@ std::wstring FilePath::CreateOutputFileWithRename(std::wstring path) {
 
   if (count > 0) {
     LOG(INFO) << "Renamed " << wstring_to_string(path) << " to "
-                      << wstring_to_string(target);
+              << wstring_to_string(target);
   }
 
   // The above leaves the file open, so close it.
@@ -189,16 +208,16 @@ void FilePath::ReplaceInvalidCharacters(std::wstring& path) {
   for (auto& character : path) {
     // If 0 < character < 32, it's illegal, replace it
     if (character > 0 && character < 32) {
-      LOG(INFO) << "In path " << wstring_to_string(path)
-                        << " replaced \'" << std::string(1, character)
-                        << "\' with \'" << std::string(1, kReplacementChar);
+      LOG(INFO) << "In path " << wstring_to_string(path) << " replaced \'"
+                << std::string(1, character) << "\' with \'"
+                << std::string(1, kReplacementChar);
       character = kReplacementChar;
     }
     for (auto illegal_character : kIllegalFileCharacters) {
       if (character == illegal_character) {
-        LOG(INFO) << "In path " << wstring_to_string(path)
-                          << " replaced \'" << std::string(1, character)
-                          << "\' with \'" << std::string(1, kReplacementChar);
+        LOG(INFO) << "In path " << wstring_to_string(path) << " replaced \'"
+                  << std::string(1, character) << "\' with \'"
+                  << std::string(1, kReplacementChar);
         character = kReplacementChar;
       }
     }
