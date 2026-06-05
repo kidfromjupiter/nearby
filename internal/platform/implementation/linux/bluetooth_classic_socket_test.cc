@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "internal/platform/implementation/linux/ble_l2cap_socket.h"
+#include "internal/platform/implementation/linux/bluetooth_classic_socket.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,7 +31,7 @@
 namespace nearby {
 namespace linux {
 namespace {
-class BleL2capSocketTest : public ::testing::Test {
+class BluetoothClassicSocketTest : public ::testing::Test {
 protected:
 void SetUp() override {
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds_), 0);
@@ -39,7 +39,8 @@ void SetUp() override {
     socket_fd_ = fds_[0];
     peer_fd_ = fds_[1];
 
-    socket_ = std::make_unique<BleL2capSocket>(socket_fd_, 1);
+
+    socket_ = std::make_unique<BluetoothSocket>(nullptr,sdbus::UnixFd(socket_fd_));
   }
 
   void TearDown() override {
@@ -54,16 +55,16 @@ void SetUp() override {
   int fds_[2]{-1, -1};
   int socket_fd_{-1};
   int peer_fd_{-1};
-  std::unique_ptr<BleL2capSocket> socket_;
+  std::unique_ptr<BluetoothSocket> socket_;
 };
-TEST_F(BleL2capSocketTest, ReturnsInputAndOutputStreams) {
+TEST_F(BluetoothClassicSocketTest, ReturnsInputAndOutputStreams) {
   InputStream& input = socket_->GetInputStream();
   OutputStream& output = socket_->GetOutputStream();
 
   EXPECT_NE(&input, nullptr);
   EXPECT_NE(&output, nullptr);
 }
-TEST_F(BleL2capSocketTest, ReturnsSameStreamInstancesAcrossCalls) {
+TEST_F(BluetoothClassicSocketTest, ReturnsSameStreamInstancesAcrossCalls) {
   InputStream& input1 = socket_->GetInputStream();
   InputStream& input2 = socket_->GetInputStream();
 
@@ -73,7 +74,7 @@ TEST_F(BleL2capSocketTest, ReturnsSameStreamInstancesAcrossCalls) {
   EXPECT_EQ(&input1, &input2);
   EXPECT_EQ(&output1, &output2);
 }
-TEST_F(BleL2capSocketTest, ReadReceivesExactBytesFromPeer) {
+TEST_F(BluetoothClassicSocketTest, ReadReceivesExactBytesFromPeer) {
   std::string message = "hello into l2cap socket";
 
   ASSERT_EQ(
@@ -96,7 +97,7 @@ TEST_F(BleL2capSocketTest, ReadReceivesExactBytesFromPeer) {
       message
   );
 }
-TEST_F(BleL2capSocketTest, WriteSendsExactBytesToPeer) {
+TEST_F(BluetoothClassicSocketTest, WriteSendsExactBytesToPeer) {
   std::string message = "hello from l2cap socket";
 
   OutputStream& output = socket_->GetOutputStream();
@@ -114,7 +115,7 @@ TEST_F(BleL2capSocketTest, WriteSendsExactBytesToPeer) {
       message
   );
 }
-TEST_F(BleL2capSocketTest, SkipSkipsBytesFromPeer) {
+TEST_F(BluetoothClassicSocketTest, SkipSkipsBytesFromPeer) {
   std::string message = "hello there";
 
   ASSERT_EQ(
@@ -129,7 +130,7 @@ TEST_F(BleL2capSocketTest, SkipSkipsBytesFromPeer) {
   auto out = input.Read(5).GetResult();
   EXPECT_EQ(out, ByteArray("there"));
 }
-TEST_F(BleL2capSocketTest, CloseReturnsSuccess) {
+TEST_F(BluetoothClassicSocketTest, CloseReturnsSuccess) {
   EXPECT_EQ(socket_->Close().value, Exception::kSuccess);
 }
 }  // namespace

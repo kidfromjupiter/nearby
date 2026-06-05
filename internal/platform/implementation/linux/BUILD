@@ -305,6 +305,7 @@ cc_test(
         "mutex_test.cc",
         "utils_test.cc",
         "ble_l2cap_socket_test.cc",
+        "bluetooth_classic_socket_test.cc",
         # "bluetooth_adapter_test.cc",
         # "crypto_test.cc",
         # "device_info_test.cc",
