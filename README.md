@@ -95,9 +95,13 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 > Issues that break core functionality. These should be addressed immediately.
 
+- **Create a cmake build system**
+
+    I am soo *fucking* tired of waiting for clion to load. Having cmake would fix syntax highlighting and clangd
+
 - **Bluetooth classic bandwidth**
   
-    File transfer on bluetooth classic is painfully slow. Bandwidth close to 20KB/s. ~May be a regression issue after bluetooth socket refactor~. May be an issue with sending back acknowledgements. Issue is present on pre-refactor versions. Look into Multiplexing maybe?
+    File transfer on bluetooth classic is painfully slow. Bandwidth close to 20KB/s. ~May be a regression issue after bluetooth socket refactor~. May be an issue with sending back acknowledgements. Issue is present on pre-refactor versions. ~Look into Multiplexing maybe~ Multiplexing did not fix it : (?
 - **~Linux → Android~ file sharing is unreliable** after the newest Android Quick Share updates.  
   Investigate why and fix it. ~Possibly related to proprietary certificate changes~. Should probably add unit tests and integration tests for each medium. Everything is so fucking buggy it makes me wanna rip my fucking eyes out. Might be related to recent upstream changes. I could probably properly test linux -> linux bidirectional sharing. Will need to simulate a lot of hardware stuff though. Since there's no stable reference platform to write automatic tests against writing linux to linux tests could be like clown to clown communication
   
