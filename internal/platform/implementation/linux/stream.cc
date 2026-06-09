@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sys/poll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <unistd.h>
 #include <array>
 #include <cerrno>
@@ -27,52 +29,149 @@ namespace nearby {
 namespace linux {
 
 ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
-  if (!fd_.isValid()) return {Exception::kIo};
+  if (size <= 0) {
+    return ExceptionOr<ByteArray>(ByteArray(std::string()));
+  }
+
+  if (!fd_ || !fd_->isValid()) {
+    return {Exception::kIo};
+  }
 
   std::string buffer;
   buffer.resize(size);
-  ssize_t ret = recv(fd_.get(), buffer.data(), buffer.size(), MSG_WAITALL);
-  if (ret == 0) {
-    return ExceptionOr(ByteArray());
-  }
-  if (ret < 0) {
-    LOG(ERROR) << __func__
-                       << ": error reading from fd: " << std::strerror(errno);
-    return {Exception::kIo};
-  }
-  buffer.resize(ret);
 
-  return ExceptionOr(ByteArray(std::move(buffer)));
+  while (true) {
+    pollfd pfd{};
+    pfd.fd = fd_->get();
+    pfd.events = POLLIN;
+
+    int poll_result = poll(&pfd, 1, -1);
+
+    if (poll_result < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+
+      LOG(ERROR) << __func__ << ": poll failed: " << std::strerror(errno);
+      return {Exception::kIo};
+    }
+
+    if (pfd.revents & POLLNVAL || pfd.revents & POLLERR) {
+      LOG(ERROR) << __func__ << ": Error reading from BluetoothSocket: "
+                 << std::strerror(errno);
+      return {Exception::kIo};
+    }
+
+    if (pfd.revents & (POLLIN | POLLHUP)) {
+      ssize_t bytes_read =
+          recv(fd_->get(), buffer.data(), buffer.size(), 0);
+
+      if (bytes_read > 0) {
+        buffer.resize(static_cast<std::size_t>(bytes_read));
+        return ExceptionOr<ByteArray>(ByteArray(std::move(buffer)));
+      }
+
+      if (bytes_read == 0) {
+        // EOF / peer closed.
+        return ExceptionOr<ByteArray>(ByteArray(std::string()));
+      }
+
+      if (errno == EINTR) {
+        continue;
+      }
+
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // Non-blocking fd had no data by the time recv() ran.
+        // Go back to poll.
+        continue;
+      }
+
+      LOG(ERROR) << __func__ << ": recv failed: " << std::strerror(errno);
+      return {Exception::kIo};
+    }
+  }
 }
 
 Exception InputStream::Close() {
-  if (!fd_.isValid()) return Exception{Exception::kIo};
+  if (!fd_->isValid()) return Exception{Exception::kIo};
   fd_.reset();
   return {};
 }
 
 Exception OutputStream::Write(absl::string_view data) {
-  if (!fd_.isValid()) return Exception{Exception::kIo};
-
-  size_t written = 0;
-  while (written < data.size()) {
-    ssize_t ret = write(fd_.get(), data.data(), data.size());
-    if (ret < 0) {
-      LOG(ERROR) << __func__
-                         << ": error writing to fd: " << std::strerror(errno);
-      return Exception{Exception::kIo};
-    }
-    written += ret;
+  if (!fd_ || !fd_->isValid()) {
+    return {Exception::kIo};
   }
-  return Exception{Exception::kSuccess};
+
+  const int fd = fd_->get();
+  size_t sent = 0;
+
+  while (sent < data.size()) {
+    pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+
+    int poll_result;
+    do {
+      poll_result = poll(&pfd, 1, -1);
+    } while (poll_result < 0 && errno == EINTR);
+
+    if (poll_result < 0) {
+      LOG(ERROR) << __func__
+                 << ": poll failed: " << std::strerror(errno);
+      return {Exception::kIo};
+    }
+
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      LOG(ERROR) << __func__
+                 << ": fd error/hangup during write, revents=" << pfd.revents;
+      return {Exception::kIo};
+    }
+
+    if (!(pfd.revents & POLLOUT)) {
+      continue;
+    }
+
+    ssize_t n = send(
+        fd,
+        data.data() + sent,
+        data.size() - sent,
+        MSG_NOSIGNAL);
+
+    if (n > 0) {
+      sent += static_cast<size_t>(n);
+      continue;
+    }
+
+    if (n == 0) {
+      LOG(ERROR) << __func__ << ": send returned 0";
+      return {Exception::kIo};
+    }
+
+    if (errno == EINTR) {
+      continue;
+    }
+
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // Socket became not writable after poll said it was writable.
+      // Normal for non-blocking FDs. Go back to poll().
+      continue;
+    }
+
+    LOG(ERROR) << __func__
+               << ": error writing to fd: " << std::strerror(errno);
+    return {Exception::kIo};
+  }
+
+  return {Exception::kSuccess};
 }
 
 Exception OutputStream::Flush() { return Exception{Exception::kSuccess}; }
 
 Exception OutputStream::Close() {
-  if (!fd_.isValid()) return Exception{Exception::kIo};
+  if (!fd_->isValid()) return Exception{Exception::kIo};
 
-  auto ret = close(fd_.get()) < 0 ? Exception{Exception::kIo}
+  auto ret = close(fd_->get()) < 0 ? Exception{Exception::kIo}
                                   : Exception{Exception::kSuccess};
   fd_.reset();
   return ret;

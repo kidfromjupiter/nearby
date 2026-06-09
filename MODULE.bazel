@@ -122,6 +122,18 @@ filegroup(
     ],
 )
 
+# Bazel Compile Commands Extractor (helly25 fork; see FORK.md for context)
+# https://github.com/helly25/bazel-compile-commands-extractor
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)  # Bazel module name kept for backwards compat with existing consumers.
+git_override(
+    module_name = "hedron_compile_commands",
+    remote = "https://github.com/helly25/bazel-compile-commands-extractor.git",
+    commit = "75ba4c31d3b74fa5fb57c7508220571d4e52f828",
+    # Replace the commit hash with the latest from
+    # https://github.com/helly25/bazel-compile-commands-extractor/commits/main
+    # (or set up Renovate; see below).
+)
+
 # Create a repo that exposes system-installed sdbus-c++ and libsystemd to Bazel.
 #
 # Important portability note:

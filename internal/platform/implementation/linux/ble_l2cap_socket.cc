@@ -34,7 +34,9 @@
 namespace nearby {
 namespace linux {
 
-BleL2capInputStream::~BleL2capInputStream() { Close(); }
+BleL2capInputStream::~BleL2capInputStream() {
+  Close();
+}
 
 ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   std::vector<char> buffer(size);
@@ -54,22 +56,24 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
     }
     if (pfds[0].revents & POLLIN) {
       auto r = recv(fd_raw_->get(), buffer.data() + rcvd, size - rcvd, 0);
-      if (r < 0){ return Exception{Exception::kIo};}
+      if (r < 0) {
+        return Exception{Exception::kIo};
+      }
       rcvd += r;
     }
   }
-
 
   return ExceptionOr{ByteArray(std::string(buffer.begin(), buffer.end()))};
 }
 
 Exception BleL2capInputStream::Close() {
   if (!fd_raw_->isValid()) return {Exception::kSuccess};
-  fd_raw_ -> reset();
-    return {Exception::kSuccess};
-
+  fd_raw_->reset();
+  return {Exception::kSuccess};
 }
-BleL2capOutputStream::~BleL2capOutputStream() { Close(); }
+BleL2capOutputStream::~BleL2capOutputStream() {
+  Close();
+}
 
 Exception BleL2capOutputStream::Write(absl::string_view data) {
   pollfd pfds[1];
@@ -87,7 +91,9 @@ Exception BleL2capOutputStream::Write(absl::string_view data) {
     }
     if (pfds[0].revents & POLLOUT) {
       auto r = send(fd_raw_->get(), data.data() + sent, data.size(), 0);
-      if (r < 0){ return Exception{Exception::kIo};}
+      if (r < 0) {
+        return Exception{Exception::kIo};
+      }
       sent += r;
     }
   }
@@ -96,32 +102,29 @@ Exception BleL2capOutputStream::Write(absl::string_view data) {
 
 Exception BleL2capOutputStream::Close() {
   if (!fd_raw_->isValid()) return {Exception::kSuccess};
-  fd_raw_ -> reset();
-    return {Exception::kSuccess};
+  fd_raw_->reset();
+  return {Exception::kSuccess};
 }
 
 BleL2capSocket::BleL2capSocket(int fd,
                                api::ble::BlePeripheral::UniqueId peripheral_id,
-                               std::string service_id
-                               )
-    : fd_(std::make_shared<sdbus::UnixFd>(fd)), input_stream_(std::make_unique<BleL2capInputStream>(fd_)),
+                               std::string service_id)
+    : fd_(std::make_shared<sdbus::UnixFd>(fd)),
+      input_stream_(std::make_unique<BleL2capInputStream>(fd_)),
       output_stream_(std::make_unique<BleL2capOutputStream>(fd_)),
-      peripheral_id_(peripheral_id)
-      {}
+      peripheral_id_(peripheral_id) {}
 
-BleL2capSocket::~BleL2capSocket() { Close(); }
-
-
+BleL2capSocket::~BleL2capSocket() {
+  Close();
+}
 
 Exception BleL2capSocket::Close() {
   if (!fd_->isValid()) return {Exception::kIo};
-  fd_ -> reset();
-    return {Exception::kSuccess};
+  fd_->reset();
+  return {Exception::kSuccess};
 }
 
-
-void BleL2capSocket::SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
-}
+void BleL2capSocket::SetCloseNotifier(absl::AnyInvocable<void()> notifier) {}
 
 bool BleL2capSocket::IsClosed() const {
   return closed_;
