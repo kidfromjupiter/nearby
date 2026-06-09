@@ -95,9 +95,8 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 > Issues that break core functionality. These should be addressed immediately.
 
-- **Create a cmake build system**
-
-    I am soo *fucking* tired of waiting for clion to load. Having cmake would fix syntax highlighting and clangd
+- **Merge latest upstream changes**
+  
 
 - **Bluetooth classic bandwidth**
   
