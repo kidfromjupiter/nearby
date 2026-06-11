@@ -12,24 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+#load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-
-refresh_compile_commands(
-    name = "refresh_compile_commands_linux",
-
-    # Specify the targets of interest.
-    # For example, specify a dict of targets and any flags required to build.
-    targets = {
-        ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --cxxopt=-std=c++20 --host_cxxopt=-std=c++20  --cxxopt='-fvisibility-inlines-hidden'",
-    },
-    # No need to add flags already in .bazelrc. They're automatically picked up.
-    # If you don't need flags, a list of targets is also okay, as is a single target string.
-    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
-    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
-    # And if you're working on a header-only library, specify a test or binary target that compiles it.
-)
-
+#refresh_compile_commands(
+#    name = "refresh_compile_commands",
+#
+#    # Specify the targets of interest.
+#    # For example, specify a dict of targets and any flags required to build.
+#    targets = {
+#        ":linux": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#        "//connections:core": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#        "//connections/file_share:file_share": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --strip=never --copt=-O0 --copt=-g --copt=-fno-omit-frame-pointer",
+#    },
+#    # No need to add flags already in .bazelrc. They're automatically picked up.
+#    # If you don't need flags, a list of targets is also okay, as is a single target string.
+#    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
+#    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
+#    # And if you're working on a header-only library, specify a test or binary target that compiles it.
+#)
 
 licenses(["notice"])
 
@@ -199,6 +200,7 @@ cc_library(
         "ble_l2cap_socket.cc",
         "bluetooth_adapter.cc",
         "bluetooth_bluez_profile.cc",
+        "bluetooth_classic_socket.cc",
         "bluetooth_classic_device.cc",
         "bluetooth_classic_medium.cc",
         "bluetooth_classic_server_socket.cc",
@@ -312,7 +314,7 @@ cc_test(
         # "bluetooth_adapter_test.cc",
         "crypto_test.cc",
         # "executor_test.cc",
-        #        "file_path_test.cc",
+        "file_path_test.cc",
         #        "http_loader_test.cc",
         # "preferences_manager_test.cc",
         # "preferences_repository_test.cc",

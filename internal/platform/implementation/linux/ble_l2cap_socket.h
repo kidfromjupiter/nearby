@@ -35,8 +35,6 @@
 namespace nearby {
 namespace linux {
 
-// TODO: use linux stream instead of bespoke l2cap input/output stream
-
 class BleL2capSocket;
 
 class BleL2capInputStream final : public InputStream {

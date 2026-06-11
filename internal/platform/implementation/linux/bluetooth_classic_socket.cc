@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,32 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "internal/platform/implementation/linux/ble_l2cap_socket.h"
-
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include <algorithm>
+#include <array>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <optional>
-#include <string>
-#include <utility>
 
-#include "absl/strings/string_view.h"
-#include "absl/time/time.h"
-#include "internal/platform/implementation/crypto.h"
+#include "internal/platform/byte_array.h"
+#include "internal/platform/exception.h"
+#include "internal/platform/implementation/linux/bluetooth_classic_socket.h"
 #include "internal/platform/logging.h"
-#include "proto/mediums/ble_frames.pb.h"
+
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstddef>
+#include <algorithm>
 
 namespace nearby {
 namespace linux {
 
-BleL2capInputStream::~BleL2capInputStream() { Close(); }
+// This method blocks until input data is available, end of file is detected, or an exception is thrown.
+ExceptionOr<ByteArray> BluetoothInputStream::Read(std::int64_t size) {
+  // Sanity: avoid negative / zero sizes
+  if (size <= 0) return ExceptionOr{ByteArray(std::string())};
 
-ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
+
   std::vector<char> buffer(size);
+
+  // fd returned from bluez assumed to be stream type always
 
   pollfd pfds[1];
   pfds[0].fd = fd_raw_->get();
@@ -53,9 +58,19 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
       return Exception{Exception::kIo};
     }
     if (pfds[0].revents & POLLIN) {
-      auto r = recv(fd_raw_->get(), buffer.data() + rcvd, size - rcvd, 0);
-      if (r < 0){ return Exception{Exception::kIo};}
-      rcvd += r;
+        while (rcvd < size) {
+
+          auto r = recv(fd_raw_->get(), buffer.data() + rcvd, size - rcvd, 0);
+          if (r > 0) {
+            rcvd += r;
+            continue;
+          }
+          if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {continue;}
+
+          LOG(ERROR) << __func__
+                     << ": error reading from fd: " << std::strerror(errno);
+          return {Exception::kIo};
+        }
     }
   }
 
@@ -63,15 +78,13 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   return ExceptionOr{ByteArray(std::string(buffer.begin(), buffer.end()))};
 }
 
-Exception BleL2capInputStream::Close() {
+Exception BluetoothInputStream::Close() {
   if (!fd_raw_->isValid()) return {Exception::kSuccess};
   fd_raw_ -> reset();
     return {Exception::kSuccess};
-
 }
-BleL2capOutputStream::~BleL2capOutputStream() { Close(); }
 
-Exception BleL2capOutputStream::Write(absl::string_view data) {
+Exception BluetoothOutputStream::Write(absl::string_view data) {
   pollfd pfds[1];
   pfds[0].fd = fd_raw_->get();
   pfds[0].events = POLLOUT;
@@ -86,45 +99,27 @@ Exception BleL2capOutputStream::Write(absl::string_view data) {
       return Exception{Exception::kIo};
     }
     if (pfds[0].revents & POLLOUT) {
-      auto r = send(fd_raw_->get(), data.data() + sent, data.size(), 0);
-      if (r < 0){ return Exception{Exception::kIo};}
-      sent += r;
+      while (sent < data.size()) {
+        auto r = send(fd_raw_->get(), data.data() + sent, data.size(), 0);
+        if (r > 0) {
+          sent += r;
+          continue;
+        }
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {continue;}
+
+        LOG(ERROR) << __func__
+                   << ": error reading from fd: " << std::strerror(errno);
+        return {Exception::kIo};
+      }
     }
   }
   return {Exception::kSuccess};
 }
 
-Exception BleL2capOutputStream::Close() {
+Exception BluetoothOutputStream::Close() {
   if (!fd_raw_->isValid()) return {Exception::kSuccess};
   fd_raw_ -> reset();
-    return {Exception::kSuccess};
-}
-
-BleL2capSocket::BleL2capSocket(int fd,
-                               api::ble::BlePeripheral::UniqueId peripheral_id,
-                               std::string service_id
-                               )
-    : fd_(std::make_shared<sdbus::UnixFd>(fd)), input_stream_(std::make_unique<BleL2capInputStream>(fd_)),
-      output_stream_(std::make_unique<BleL2capOutputStream>(fd_)),
-      peripheral_id_(peripheral_id)
-      {}
-
-BleL2capSocket::~BleL2capSocket() { Close(); }
-
-
-
-Exception BleL2capSocket::Close() {
-  if (!fd_->isValid()) return {Exception::kIo};
-  fd_ -> reset();
-    return {Exception::kSuccess};
-}
-
-
-void BleL2capSocket::SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
-}
-
-bool BleL2capSocket::IsClosed() const {
-  return closed_;
+  return {Exception::kSuccess};
 }
 
 }  // namespace linux

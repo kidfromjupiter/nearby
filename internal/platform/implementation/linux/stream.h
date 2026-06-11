@@ -26,26 +26,26 @@ namespace nearby {
 namespace linux {
 class InputStream : public nearby::InputStream {
  public:
-  explicit InputStream(sdbus::UnixFd fd) : fd_(std::make_shared<sdbus::UnixFd>(fd)){};
+  explicit InputStream(sdbus::UnixFd fd) : fd_(std::move(fd)){};
 
   ExceptionOr<ByteArray> Read(std::int64_t size) override;
 
   Exception Close() override;
 
  private:
-  std::shared_ptr<sdbus::UnixFd> fd_;
+  sdbus::UnixFd fd_;
 };
 
 class OutputStream : public nearby::OutputStream {
  public:
-  explicit OutputStream(sdbus::UnixFd fd) : fd_(std::make_shared<sdbus::UnixFd>(fd)){};
+  explicit OutputStream(sdbus::UnixFd fd) : fd_(std::move(fd)){};
 
   Exception Write(absl::string_view data) override;
   Exception Flush() override;
   Exception Close() override;
 
  private:
-  std::shared_ptr<sdbus::UnixFd> fd_;
+  sdbus::UnixFd fd_;
 };
 
 }  // namespace linux
