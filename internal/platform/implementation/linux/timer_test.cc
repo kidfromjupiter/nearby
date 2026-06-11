@@ -14,12 +14,11 @@
 
 #include "internal/platform/implementation/timer.h"
 
-#include <chrono>  // NOLINT
-// NOLINT
 #include <memory>
-#include <thread>  // NOLINT
 
 #include "gtest/gtest.h"
+#include "absl/time/time.h"
+#include "internal/platform/count_down_latch.h"
 #include "internal/platform/implementation/platform.h"
 
 namespace nearby {
@@ -38,29 +37,21 @@ TEST(Timer, TestCreateTimer) {
 }
 
 // This test case cannot run on Google3
-TEST(Timer, DISABLED_TestRepeatTimer) {
+TEST(Timer, TestRepeatTimer) {
+  CountDownLatch latch(3);
   int count = 0;
-
   std::unique_ptr<nearby::api::Timer> timer =
       nearby::api::ImplementationPlatform::CreateTimer();
 
   ASSERT_TRUE(timer != nullptr);
-  EXPECT_TRUE(timer->Create(300, 300, [&]() { ++count; }));
-  std::this_thread::sleep_for(std::chrono::seconds(1));
-  EXPECT_TRUE(timer->Stop());
+  EXPECT_TRUE(timer->Create(300, 300, [&]() {
+    ++count;
+    latch.CountDown();
+  }));
+
+  EXPECT_TRUE(latch.Await(absl::Seconds(2)));
   EXPECT_EQ(count, 3);
-}
-
-TEST(Timer, DISABLED_TestFireNow) {
-  int count = 0;
-
-  auto timer = nearby::api::ImplementationPlatform::CreateTimer();
-
-  EXPECT_TRUE(timer != nullptr);
-  EXPECT_TRUE(timer->Create(3000, 3000, [&]() { ++count; }));
-  EXPECT_TRUE(timer->FireNow());
   EXPECT_TRUE(timer->Stop());
-  EXPECT_EQ(count, 1);
 }
 
 }  // namespace

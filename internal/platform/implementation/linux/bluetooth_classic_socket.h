@@ -27,46 +27,21 @@
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_device.h"
-#include "internal/platform/input_stream.h"
-#include "internal/platform/output_stream.h"
+
+#include "internal/platform/implementation/linux/stream.h"
 
 namespace nearby {
 namespace linux {
 
-class BluetoothInputStream final : public nearby::InputStream {
- public:
-  explicit BluetoothInputStream(std::shared_ptr<sdbus::UnixFd> fd)
-      : fd_raw_(std::move(fd)){}
-
-  ExceptionOr<ByteArray> Read(std::int64_t size) override;
-  Exception Close() override;
-
- private:
-  std::shared_ptr<sdbus::UnixFd> fd_raw_;
-};
-
-class BluetoothOutputStream : public nearby::OutputStream {
- public:
-  explicit BluetoothOutputStream(std::shared_ptr<sdbus::UnixFd> fd)
-      : fd_raw_(std::move(fd)) {}
-
-  Exception Write(absl::string_view data) override;
-  Exception Flush() override { return {Exception::kSuccess}; }
-  Exception Close() override;
-
- private:
-  mutable absl::Mutex fd_mutex_;
-  std::shared_ptr<sdbus::UnixFd> fd_raw_;
-};
 
 class BluetoothSocket final : public api::BluetoothSocket {
  public:
   BluetoothSocket(std::shared_ptr<BluetoothDevice> device,
                   sdbus::UnixFd fd)
-      :fd_(std::make_shared<sdbus::UnixFd>(fd)), device_(std::move(device)), output_stream_(fd_), input_stream_(fd_) {}
+      :fd_(fd), device_(std::move(device)), output_stream_(fd_), input_stream_(fd_) {}
 
-  nearby::InputStream &GetInputStream() override { return input_stream_; }
-  nearby::OutputStream &GetOutputStream() override { return output_stream_; }
+  InputStream &GetInputStream() override { return input_stream_; }
+  OutputStream &GetOutputStream() override { return output_stream_; }
   Exception Close() override {
     input_stream_.Close();
     output_stream_.Close();
@@ -76,10 +51,10 @@ class BluetoothSocket final : public api::BluetoothSocket {
   api::BluetoothDevice *GetRemoteDevice() override { return device_.get(); };
 
  private:
-  std::shared_ptr<sdbus::UnixFd> fd_;
+  sdbus::UnixFd fd_;
   std::shared_ptr<BluetoothDevice> device_;
-  BluetoothOutputStream output_stream_;
-  BluetoothInputStream input_stream_;
+  OutputStream output_stream_;
+  InputStream input_stream_;
 };
 }  // namespace linux
 }  // namespace nearby
