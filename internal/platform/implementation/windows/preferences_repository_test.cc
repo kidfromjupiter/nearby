@@ -44,8 +44,7 @@ TEST(PreferencesRepository, LoadWithBadPath) {
 
 TEST(PreferencesRepository, RecoverFromBadPreferences) {
   std::optional<FilePath> app_data_path =
-      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath(
-          FilePath());
+      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath();
   ASSERT_TRUE(app_data_path.has_value());
   FilePath full_path = app_data_path->append(FilePath(kPreferencesPath));
   FilePath full_name = app_data_path->append(FilePath(kPreferencesFileName));
@@ -64,8 +63,7 @@ TEST(PreferencesRepository, RecoverFromBadPreferences) {
 
 TEST(PreferencesRepository, SaveAndLoadPreferences) {
   std::optional<FilePath> app_data_path =
-      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath(
-          FilePath());
+      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath();
   ASSERT_TRUE(app_data_path.has_value());
   FilePath full_path = app_data_path->append(FilePath(kPreferencesPath));
   FilePath full_name = app_data_path->append(FilePath(kPreferencesFileName));
@@ -88,8 +86,7 @@ TEST(PreferencesRepository, SaveAndLoadPreferences) {
 
 TEST(PreferencesRepository, LoadFromBackup) {
   std::optional<FilePath> app_data_path =
-      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath(
-          FilePath());
+      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath();
   ASSERT_TRUE(app_data_path.has_value());
   FilePath full_path = app_data_path->append(FilePath(kPreferencesPath));
   FilePath full_name = app_data_path->append(FilePath(kPreferencesFileName));
@@ -126,8 +123,7 @@ TEST(PreferencesRepository, LoadFromBackup) {
 
 TEST(PreferencesRepository, RecoverFromCorruption) {
   std::optional<FilePath> app_data_path =
-      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath(
-          FilePath());
+      api::ImplementationPlatform::CreateDeviceInfo()->GetLocalAppDataPath();
   ASSERT_TRUE(app_data_path.has_value());
   FilePath full_path = app_data_path->append(FilePath(kPreferencesPath));
   FilePath full_name = app_data_path->append(FilePath(kPreferencesFileName));
