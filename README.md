@@ -16,14 +16,13 @@
 https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
 
 ## What
-This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 sections. 
+This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 (now 2) sections. 
 - Sharing
 - Connections
-- ~Presence~ ( Build fails for some reason. Haven't had time to investigate. Maybe something minor. Check the validate.yaml for build steps and see why its faiing )
+- ~Presence~ ( *Was removed by google from their repo. RIP :(*   )
 
     
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
-Nearby presence may or may not build.
 
 ## Why
 This repo could've been a PR on the official repo. All I've done is implement the platform abstraction layer google has provided for a linux specific environment.
@@ -91,67 +90,71 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 ---
 
-### 🔴 P0 — Critical / Core Functionality
+### 🔴 P0 - Critical / Core Functionality
 
 > Issues that break core functionality. These should be addressed immediately.
 
-- **Merge latest upstream changes**
+- [x] ~**Merge latest upstream changes**~
+
+- [ ] **Moving away from google's own implementation of QuickShare**
+
+    Till now, we've relied upon a few compatibility stubs here and there to get the sharing library to a buildable state. Going forward it's increasinly unlikely that will remain the case. I am seeing much more activity in that portion of the repo from google's side. It seems to me as an outsider, that they are trying to abstract away the closed source certificates and account logic. Which is appreciated of course, but this breaks all my compatibility shims :(
+
+    So I'll need to avoid touching the turbulent `sharing/` directory till it becomes stable enough. In the meantime, I'll probably need to access the sharing functionality using interfaces/adapters
   
 
-- **Bluetooth classic bandwidth**
+- [ ] **Bluetooth classic bandwidth**
   
     File transfer on bluetooth classic is painfully slow. Bandwidth close to 20KB/s. ~May be a regression issue after bluetooth socket refactor~. May be an issue with sending back acknowledgements. Issue is present on pre-refactor versions. ~Look into Multiplexing maybe~ Multiplexing did not fix it : (?
-- **~Linux → Android~ file sharing is unreliable** after the newest Android Quick Share updates.  
+- [ ] **~Linux → Android~ file sharing is unreliable** 
   Investigate why and fix it. ~Possibly related to proprietary certificate changes~. Should probably add unit tests and integration tests for each medium. Everything is so fucking buggy it makes me wanna rip my fucking eyes out. Might be related to recent upstream changes. I could probably properly test linux -> linux bidirectional sharing. Will need to simulate a lot of hardware stuff though. Since there's no stable reference platform to write automatic tests against writing linux to linux tests could be like clown to clown communication
   
    <img width="200" height="143" alt="image" src="https://github.com/user-attachments/assets/caed18f3-1337-4499-ba4d-b49f549c0cf5" />
 
 
 
-- **QR code scanning does not work.**  
+- [ ] **QR code scanning does not work.**
+      
   Likely related to the Linux → Android sharing issue above. I did get it working once in a very old build. So it shouldn't impossible. Unless google changed something 
 
 ---
 
-### 🟠 P1 — Important Annoyances
+### 🟠 P1 - Important Annoyances
 
 > Problems that are not fully blocking, but noticeably affect usability.
 
-- **Investigate why Bluetooth connection requests pairing.**  
+- [ ] **Investigate why Bluetooth connection requests pairing.**
+      
   Both the L2CAP socket and Bluetooth profile should be unauthenticated.
-- **Handle existing files when receiving.**  
+- [ ] **Handle existing files when receiving.**
+      
   Currently, files are not overwritten if they already exist. Decide whether to overwrite, rename, or skip.
 
 ---
 
-### 🟡 P2 — Quality of Life / Cleanup
+### 🟡 P2 - Quality of Life / Cleanup
 
 > Improvements that would make the project cleaner, smoother, or easier to maintain.
 
-- **Bluetooth Classic transfer progress issue.**  
+- [ ] **Bluetooth Classic transfer progress issue.**
+      
   When transferring Android → Linux, Android shows 100% transferred but still says `Sending...`, while Linux lags behind. Could be a bottleneck or Android-side issue.
-- **Add tests for basically everything.**
-- **Clean up `implementation/linux`.**  
+- [ ] **Add tests for basically everything.**
+- [ ] **Clean up `implementation/linux`.**
+      
   Linux-specific implementation files are currently all in one directory. This matches the other platforms, but creates visual bloat.
-- **Document basically everything.**  
+- [ ] **Document basically everything.**
+      
   This would be a large project on its own.
-- **Resolve random crashes in the Quick Share application.**
+- [ ] **Resolve random crashes in the Quick Share application.**
 
 ---
 
-### 🔵 P3 — New Features
+### 🔵 P3 - New Features
 
 > Non-essential features and future improvements.
 
-- **Support fast initiation.**
-- Upstream has been slowly adding webrtc support. Should we support it?
-
-
-## Apologies
-I may have done things in *incredibly* stupid and overcomplicated ways. It doesn't certainly help that this was the way I decided to learn C++. Blessed be my naive soul. I also do not have much experience working with such 
-enormous codebases. 
-
-If you see any such stupidities, feel free to berate me in the most shameless of manners in an issue. I look forward to learning how to do it the proper way and to improve my atrocious code quality.
+- [ ] Upstream has been slowly adding webrtc support. Should we support it?
 
 ## Special thanks
 
