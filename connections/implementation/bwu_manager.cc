@@ -25,9 +25,8 @@
 #include "absl/functional/bind_front.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
+#include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/analytics/connection_attempt_metadata_params.h"
-#include "connections/implementation/awdl_bwu_handler.h"
-#include "connections/implementation/bluetooth_bwu_handler.h"
 #include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
@@ -38,16 +37,7 @@
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/service_id_constants.h"
 #include "internal/flags/nearby_flags.h"
-#ifdef NO_WEBRTC
-#include "connections/implementation/webrtc_bwu_handler_stub.h"
-#else
-#include "connections/implementation/webrtc_bwu_handler.h"
-#endif
-#include "connections/implementation/wifi_direct_bwu_handler.h"
-#include "connections/implementation/wifi_hotspot_bwu_handler.h"
-#include "connections/implementation/wifi_lan_bwu_handler.h"
 #include "connections/medium_selector.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/expected.h"
@@ -72,6 +62,8 @@ using ::location::nearby::proto::connections::ConnectionAttemptResult;
 using ::location::nearby::proto::connections::ConnectionAttemptType;
 using ::location::nearby::proto::connections::DisconnectionReason;
 using ::location::nearby::proto::connections::OperationResultCode;
+using ::nearby::analytics::AnalyticsRecorder;
+
 }  // namespace
 
 BwuManager::BwuManager(
@@ -135,43 +127,37 @@ void BwuManager::InitBwuHandlers() {
   if (config_.allow_upgrade_to.awdl) {
     handlers_.emplace(
         Medium::AWDL,
-        std::make_unique<AwdlBwuHandler>(
-            *mediums_,
+        mediums_->GetAwdl().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
   if (config_.allow_upgrade_to.wifi_hotspot) {
     handlers_.emplace(
         Medium::WIFI_HOTSPOT,
-        std::make_unique<WifiHotspotBwuHandler>(
-            *mediums_,
+        mediums_->GetWifiHotspot().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
   if (config_.allow_upgrade_to.wifi_direct) {
     handlers_.emplace(
         Medium::WIFI_DIRECT,
-        std::make_unique<WifiDirectBwuHandler>(
-            *mediums_,
+        mediums_->GetWifiDirect().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
   if (config_.allow_upgrade_to.wifi_lan) {
     handlers_.emplace(
         Medium::WIFI_LAN,
-        std::make_unique<WifiLanBwuHandler>(
-            *mediums_,
+        mediums_->GetWifiLan().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
   if (config_.allow_upgrade_to.web_rtc) {
     handlers_.emplace(
         Medium::WEB_RTC,
-        std::make_unique<WebrtcBwuHandler>(
-            *mediums_,
+        mediums_->GetWebRtc().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
   if (config_.allow_upgrade_to.bluetooth) {
     handlers_.emplace(
         Medium::BLUETOOTH,
-        std::make_unique<BluetoothBwuHandler>(
-            *mediums_,
+        mediums_->GetBluetoothClassic().CreateBwuHandler(
             absl::bind_front(&BwuManager::OnIncomingConnection, this)));
   }
 }
@@ -197,8 +183,9 @@ void BwuManager::Shutdown() {
   medium_ = Medium::UNKNOWN_MEDIUM;
   endpoint_id_to_bwu_medium_.clear();
   for (auto& medium_handler_pair : handlers_) {
-    assert(medium_handler_pair.second);
-    medium_handler_pair.second->RevertInitiatorState();
+    if (medium_handler_pair.second != nullptr) {
+      medium_handler_pair.second->RevertInitiatorState();
+    }
   }
   handlers_.clear();
 
@@ -341,12 +328,12 @@ void BwuManager::InitiateBwuForEndpoint(ClientProxy* client,
     }
 
     std::string service_id = channel->GetServiceId();
-    ByteArray bytes = handler->InitializeUpgradedMediumForEndpoint(
+    std::string bytes = handler->InitializeUpgradedMediumForEndpoint(
         client, service_id, endpoint_id);
 
     // Because we grab the endpointChannel first thing, it is possible the
     // endpointChannel is stale by the time we attempt to write over it.
-    if (bytes.Empty()) {
+    if (bytes.empty()) {
       LOG(ERROR) << "BwuManager couldn't complete the upgrade for endpoint "
                  << endpoint_id << " to medium "
                  << location::nearby::proto::connections::Medium_Name(
@@ -401,8 +388,7 @@ void BwuManager::InitiateBwuForEndpoint(ClientProxy* client,
 
 void BwuManager::OnIncomingFrame(OfflineFrame& frame,
                                  const std::string& endpoint_id,
-                                 ClientProxy* client, Medium medium,
-                                 PacketMetaData& packet_meta_data) {
+                                 ClientProxy* client, Medium medium) {
   V1Frame::FrameType frame_type = parser::GetFrameType(frame);
   if (frame_type != V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION) return;
 
@@ -549,7 +535,7 @@ BwuHandler* BwuManager::GetHandlerForMedium(Medium medium) const {
 }
 
 void BwuManager::OnBwuNegotiationFrame(
-    ClientProxy* client, const BandwidthUpgradeNegotiationFrame frame,
+    ClientProxy* client, const BandwidthUpgradeNegotiationFrame& frame,
     const std::string& endpoint_id) {
   LOG(INFO) << "OnBwuNegotiationFrame: processing incoming "
             << BandwidthUpgradeNegotiationFrame::EventType_Name(
@@ -586,9 +572,19 @@ void BwuManager::OnBwuNegotiationFrame(
           OperationResultCode::NEARBY_GENERIC_REMOTE_UPGRADE_FAILURE);
       break;
     case BandwidthUpgradeNegotiationFrame::LAST_WRITE_TO_PRIOR_CHANNEL:
+      if (!in_progress_upgrades_.contains(endpoint_id)) {
+        LOG(ERROR) << "Received LAST_WRITE_TO_PRIOR_CHANNEL for endpoint "
+                   << endpoint_id << " but no upgrade is in progress.";
+        return;
+      }
       ProcessLastWriteToPriorChannelEvent(client, endpoint_id);
       break;
     case BandwidthUpgradeNegotiationFrame::SAFE_TO_CLOSE_PRIOR_CHANNEL:
+      if (!in_progress_upgrades_.contains(endpoint_id)) {
+        LOG(ERROR) << "Received SAFE_TO_CLOSE_PRIOR_CHANNEL for endpoint "
+                   << endpoint_id << " but no upgrade is in progress.";
+        return;
+      }
       ProcessSafeToClosePriorChannelEvent(client, endpoint_id);
       break;
     default:
@@ -680,7 +676,7 @@ void BwuManager::OnIncomingConnection(
         connections_attempt_metadata_params;
     if (channel != nullptr) {
       connections_attempt_metadata_params =
-          client->GetAnalyticsRecorder().BuildConnectionAttemptMetadataParams(
+          AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
               channel->GetTechnology(), channel->GetBand(),
               channel->GetFrequency(), channel->GetTryCount());
       connections_attempt_metadata_params->operation_result_code =
@@ -891,7 +887,7 @@ void BwuManager::ProcessBwuPathAvailableEvent(
   if (channel != nullptr) {
     std::unique_ptr<ConnectionAttemptMetadataParams>
         connections_attempt_metadata_params =
-            client->GetAnalyticsRecorder().BuildConnectionAttemptMetadataParams(
+            AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
                 channel->GetTechnology(), channel->GetBand(),
                 channel->GetFrequency(), channel->GetTryCount());
     connections_attempt_metadata_params->operation_result_code =
@@ -1138,7 +1134,7 @@ bool BwuManager::ReadClientIntroductionFrame(
   auto data = channel->Read();
   timeout_alarm.Cancel();
   if (!data.ok()) return false;
-  auto transfer(parser::FromBytes(data.result()));
+  auto transfer(parser::FromBytes(data.result().AsStringView()));
   if (!transfer.ok()) {
     LOG(ERROR) << "In ReadClientIntroductionFrame, attempted to read a "
                   "ClientIntroductionFrame from EndpointChannel "
@@ -1189,7 +1185,7 @@ bool BwuManager::ReadClientIntroductionAckFrame(EndpointChannel* channel) {
   auto data = channel->Read();
   timeout_alarm.Cancel();
   if (!data.ok()) return false;
-  auto transfer(parser::FromBytes(data.result()));
+  auto transfer(parser::FromBytes(data.result().AsStringView()));
   if (!transfer.ok()) return false;
   OfflineFrame frame = transfer.result();
   if (!frame.has_v1() || !frame.v1().has_bandwidth_upgrade_negotiation())
@@ -1219,14 +1215,19 @@ void BwuManager::ProcessLastWriteToPriorChannelEvent(
   // loss). But now that we've received this definitive final write over that
   // prior EndpointChannel, we can let the remote device that they can safely
   // close their end of this now-dormant EndpointChannel.
-  EndpointChannel* previous_endpoint_channel =
-      previous_endpoint_channels_[endpoint_id].get();
-  if (!previous_endpoint_channel) {
+  auto it = previous_endpoint_channels_.find(endpoint_id);
+  if (it == previous_endpoint_channels_.end()) {
     LOG(ERROR)
         << "BwuManager received a BWU_NEGOTIATION.LAST_WRITE_TO_PRIOR_CHANNEL "
            "OfflineFrame for unknown endpoint "
         << endpoint_id << ", can't complete the upgrade protocol.";
     successfully_upgraded_endpoints_.emplace(endpoint_id);
+    return;
+  }
+  EndpointChannel* previous_endpoint_channel = it->second.get();
+  if (!previous_endpoint_channel) {
+    LOG(ERROR) << "previous_endpoint_channel is null for endpoint "
+               << endpoint_id;
     return;
   }
 
@@ -1281,6 +1282,13 @@ void BwuManager::ProcessSafeToClosePriorChannelEvent(
   // or not (as is the case with Android's Bluetooth sockets, where closing
   // instantly throws an IOException on the remote device).
   auto item = previous_endpoint_channels_.extract(endpoint_id);
+  if (item.empty()) {
+    LOG(ERROR)
+        << "BwuManager received a BWU_NEGOTIATION.SAFE_TO_CLOSE_PRIOR_CHANNEL "
+           "OfflineFrame for unknown endpoint "
+        << endpoint_id << ", can't complete the upgrade protocol.";
+    return;
+  }
   auto& previous_endpoint_channel = item.mapped();
   if (previous_endpoint_channel == nullptr) {
     LOG(ERROR)

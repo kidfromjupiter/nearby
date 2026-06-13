@@ -172,62 +172,6 @@ bool GattClient::WriteCharacteristic(
   return success;
 }
 
-bool GattClient::SetCharacteristicSubscription(
-    const api::ble::GattCharacteristic &characteristic, bool enable,
-    absl::AnyInvocable<void(absl::string_view value)>
-        on_characteristic_changed_cb) {
-  LOG(INFO) << __func__ << ": "
-            << (enable ? "Enabling" : "Disabling")
-            << " subscription for characteristic '"
-            << absl::Substitute("$0", characteristic) << "'";
-  absl::MutexLock lock(&characteristics_mutex_);
-  if (characteristics_.count(characteristic) == 0) {
-    LOG(ERROR) << __func__ << ": Unknown characteristic '"
-                       << absl::Substitute("$0", characteristic) << "'";
-    return false;
-  }
-
-  if (enable) {
-    auto subbed_chr = gatt_discovery_->GetSubscribedCharacteristic(
-        peripheral_object_path_, characteristic.service_uuid,
-        characteristic.uuid, std::move(on_characteristic_changed_cb));
-    if (subbed_chr == nullptr) {
-      LOG(INFO) << __func__
-                << ": Failed to get subscribed characteristic client.";
-      return false;
-    }
-    try {
-      subbed_chr->StartNotify();
-    } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(subbed_chr, "StartNotify", e);
-      return false;
-    }
-    characteristics_[characteristic] = std::move(subbed_chr);
-  } else if (std::holds_alternative<
-                 std::unique_ptr<bluez::SubscribedGattCharacteristicClient>>(
-                 characteristics_[characteristic])) {
-    auto chr = gatt_discovery_->GetCharacteristic(peripheral_object_path_,
-                                                  characteristic.service_uuid,
-                                                  characteristic.uuid);
-    if (chr == nullptr) {
-      LOG(INFO) << __func__
-                << ": Failed to get characteristic client for unsubscribe.";
-      return false;
-    }
-    try {
-      chr->StopNotify();
-    } catch (const sdbus::Error &e) {
-      DBUS_LOG_METHOD_CALL_ERROR(chr, "StopNotify", e);
-      return false;
-    }
-
-    characteristics_[characteristic] = std::move(chr);
-  }
-  LOG(INFO) << __func__ << ": Subscription update succeeded for characteristic '"
-            << absl::Substitute("$0", characteristic) << "'";
-  return true;
-}
-
 void GattClient::Disconnect() {
   LOG(INFO) << __func__
             << ": Disconnecting GATT client for peripheral "

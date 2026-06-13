@@ -29,7 +29,6 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
@@ -155,26 +154,26 @@ struct GattCharacteristic {
   Property property;
 
   // overloading operator for enum class Permission and Property
-  friend inline Permission operator|(Permission a, Permission b) {
+  friend Permission operator|(Permission a, Permission b) {
     return static_cast<Permission>(static_cast<int>(a) | static_cast<int>(b));
   }
 
-  friend inline Permission operator&(Permission a, Permission b) {
+  friend Permission operator&(Permission a, Permission b) {
     return static_cast<Permission>(static_cast<int>(a) & static_cast<int>(b));
   }
-  friend inline Permission& operator|=(Permission& a, Permission b) {
+  friend Permission& operator|=(Permission& a, Permission b) {
     a = a | b;
     return a;
   }
 
-  friend inline Property operator|(Property a, Property b) {
+  friend Property operator|(Property a, Property b) {
     return static_cast<Property>(static_cast<int>(a) | static_cast<int>(b));
   }
 
-  friend inline Property operator&(Property a, Property b) {
+  friend Property operator&(Property a, Property b) {
     return static_cast<Property>(static_cast<int>(a) & static_cast<int>(b));
   }
-  friend inline Property& operator|=(Property& a, Property b) {
+  friend Property& operator|=(Property& a, Property b) {
     a = a | b;
     return a;
   }
@@ -231,13 +230,13 @@ class GattClient {
   // It is okay for duplicate services to exist, as long as the specified
   // characteristic UUID is unique among all services of the same UUID.
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  virtual absl::optional<GattCharacteristic> GetCharacteristic(
+  virtual std::optional<GattCharacteristic> GetCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#readCharacteristic(android.bluetooth.BluetoothGattCharacteristic)
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#getValue()
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  virtual absl::optional<std::string> ReadCharacteristic(
+  virtual std::optional<std::string> ReadCharacteristic(
       const GattCharacteristic& characteristic) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGattCharacteristic.html#setValue(byte[])
@@ -247,14 +246,6 @@ class GattClient {
   // whether or not it was successful.
   virtual bool WriteCharacteristic(const GattCharacteristic& characteristic,
                                    absl::string_view value, WriteType type) = 0;
-
-  // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#setCharacteristicNotification(android.bluetooth.BluetoothGattCharacteristic,%20boolean)
-  //
-  // Enable or disable notifications/indications for a given characteristic.
-  virtual bool SetCharacteristicSubscription(
-      const GattCharacteristic& characteristic, bool enable,
-      absl::AnyInvocable<void(absl::string_view value)>
-          on_characteristic_changed_cb) = 0;
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#disconnect()
   virtual void Disconnect() = 0;
@@ -281,7 +272,7 @@ class GattServer {
   // more information about this descriptor, please go to:
   // https://www.bluetooth.com/specifications/Gatt/viewer?attributeXmlFile=org.bluetooth.descriptor.Gatt.client_characteristic_configuration.xml
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  virtual absl::optional<GattCharacteristic> CreateCharacteristic(
+  virtual std::optional<GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
       GattCharacteristic::Permission permission,
       GattCharacteristic::Property property) = 0;

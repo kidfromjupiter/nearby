@@ -56,19 +56,19 @@ constexpr absl::string_view kIpv4PatternString{
     "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
     "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
     "([01]?\\d\\d?|2[0-4]\\d|25[0-5])$"};
-constexpr absl::string_view kIpv6PatternString{
-    "^([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
-    "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
-    "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
-    "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
-    "([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\."
-    "([01]?\\d\\d?|2[0-4]\\d|25[0-5])$"};
 constexpr absl::string_view kWifiDirectSsidPatternString{
     "^DIRECT-[a-zA-Z0-9]{2}.*$"};
 constexpr int kWifiDirectSsidMaxLength = 32;
 constexpr int kWifiPasswordSsidMinLength = 8;
 constexpr int kWifiPasswordSsidMaxLength = 64;
-constexpr int kWifiDirectPinMinLength = 4;
+// For Windows Wifi Direct based on WinRT Windows.Devices.WiFiDirect, user can't
+// choose pin when pairing with the other device. Instead, When GO is created, a
+// pin is created by OS. But at this stage, BWU has already sent device name as
+// credential to GC for connection. Current BWU design has no way to send second
+// ForBwuWifiDirectPathAvailable frame with pin as crdential to GC. To avoid
+// major change in BWU structure, we decided to use ConfirmOnly(Push Button) for
+// WPS, so no pin is required, the min length should be 0.
+constexpr int kWifiDirectPinMinLength = 0;
 constexpr int kWifiDirectPinMaxLength = 16;
 
 inline bool WithinRange(int value, int min, int max) {
@@ -298,18 +298,17 @@ Exception EnsureValidBandwidthUpgradeWifiDirectPathAvailableFrame(
       wifi_direct_credentials.has_password() &&
       WithinRange(wifi_direct_credentials.password().length(),
                   kWifiPasswordSsidMinLength, kWifiPasswordSsidMaxLength);
-  bool service_name_valid =
-      wifi_direct_credentials.has_service_name() &&
-      wifi_direct_credentials.service_name().length() <
+  bool device_name_valid =
+      wifi_direct_credentials.has_device_name() &&
+      wifi_direct_credentials.device_name().length() <
           kWifiDirectSsidMaxLength;
   bool pin_valid =
       wifi_direct_credentials.has_pin() &&
       WithinRange(wifi_direct_credentials.pin().length(),
                   kWifiDirectPinMinLength, kWifiDirectPinMaxLength);
 
-  if ((ssid_valid && password_valid) || (service_name_valid && pin_valid))
+  if ((ssid_valid && password_valid) || (device_name_valid && pin_valid))
     return {Exception::kSuccess};
-
   return {Exception::kInvalidProtocolBuffer};
 
   // For backwards compatibility reasons, no other fields should be null-checked

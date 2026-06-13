@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_apple//apple:apple.bzl", "apple_static_xcframework")
+load("@rules_apple//apple:apple_xcframework.bzl", "apple_static_xcframework")
 load("@rules_apple//apple:macos.bzl", "macos_dylib")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//third_party/cpptoolchains/portable_llvm/build_defs:windows.bzl", "windows")
@@ -51,16 +51,18 @@ cc_library(
         ":nc_types",
         "//connections:core",
         "//connections:core_types",
+        "//connections/implementation/analytics:analytics_recorder_impl",
         "//connections/implementation/flags:connections_flags",
-        "//internal/analytics:event_logger",
         "//internal/flags:flag_reader",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
+        "//internal/platform:comm",
         "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
-        "//internal/proto/analytics:connections_log_cc_proto",
-        "//sharing/proto/analytics:sharing_log_cc_proto",
+        "//location/nearby/analytics/cpp/logging:event_logger",
+        "//location/nearby/analytics/cpp/proto:connections_log_cc_proto",
+        "//location/nearby/analytics/cpp/proto:sharing_log_cc_proto",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
@@ -73,6 +75,7 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    alwayslink = True,
 )
 
 # iOS only.

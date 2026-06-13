@@ -242,18 +242,19 @@ void BleV2Socket::SetGattClient(
       });
 
   // Subscribe to RX characteristic to receive data
-  bool subscribed = gatt_client_->SetCharacteristicSubscription(
-      rx_char_, /*enable=*/true,
-      [this](absl::string_view value) {
-        if (!IsClosed()) {
-          ByteArray data(value.data(), value.size());
-          input_stream_.ReceiveData(data);
-        }
-      });
 
-  if (!subscribed) {
-    LOG(ERROR) << "Failed to subscribe to RX characteristic";
-  }
+  //bool subscribed = gatt_client_->SetCharacteristicSubscription(
+  //    rx_char_, /*enable=*/true,
+  //    [this](absl::string_view value) {
+  //      if (!IsClosed()) {
+  //        ByteArray data(value.data(), value.size());
+  //        input_stream_.ReceiveData(data);
+  //      }
+  //    });
+
+  //if (!subscribed) {
+  //  LOG(ERROR) << "Failed to subscribe to RX characteristic";
+  //}
 
   LOG(INFO) << "BLE socket configured with GATT client, RX: "
                     << std::string(rx_char.uuid)

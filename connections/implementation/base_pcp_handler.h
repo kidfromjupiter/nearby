@@ -31,7 +31,7 @@
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
-#include "connections/implementation/analytics/packet_meta_data.h"
+#include "connections/implementation/analytics/operation_result_with_medium.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/encryption_runner.h"
@@ -158,10 +158,10 @@ class BasePcpHandler : public PcpHandler,
                           const std::string& endpoint_id) override;
 
   // @EndpointManagerReaderThread
-  void OnIncomingFrame(location::nearby::connections::OfflineFrame& frame,
-                       const std::string& endpoint_id, ClientProxy* client,
-                       location::nearby::proto::connections::Medium medium,
-                       analytics::PacketMetaData& packet_meta_data) override;
+  void OnIncomingFrame(
+      location::nearby::connections::OfflineFrame& frame,
+      const std::string& endpoint_id, ClientProxy* client,
+      location::nearby::proto::connections::Medium medium) override;
 
   // Called when an endpoint disconnects while we're waiting for both sides to
   // approve/reject the connection.
@@ -190,8 +190,7 @@ class BasePcpHandler : public PcpHandler,
     // If success, the mediums on which we are now advertising/discovering, for
     // analytics.
     std::vector<location::nearby::proto::connections::Medium> mediums;
-    std::vector<location::nearby::analytics::proto::ConnectionsLog::
-                    OperationResultWithMedium>
+    std::vector<nearby::analytics::OperationResultWithMedium>
         operation_result_with_mediums;
   };
 
@@ -413,8 +412,7 @@ class BasePcpHandler : public PcpHandler,
 
   void StripOutWifiHotspotMedium(ConnectionInfo& connection_info);
 
-  std::unique_ptr<location::nearby::analytics::proto::ConnectionsLog::
-                      OperationResultWithMedium>
+  nearby::analytics::OperationResultWithMedium
   GetOperationResultWithMediumByResultCode(
       ClientProxy* client, location::nearby::proto::connections::Medium medium,
       int update_index,
@@ -476,11 +474,11 @@ class BasePcpHandler : public PcpHandler,
     // Only (possibly) vector for incoming connections.
     std::vector<location::nearby::proto::connections::Medium> supported_mediums;
 
-    // Keep track of a channel before we pass it to EndpointChannelManager. This
-    // is owned until the call to OnEncryptionSuccessRunnableV3 or
-    // OnEncryptionSuccessRunnable when ownership is transferred to the
-    // EndpointManager.
-    std::unique_ptr<EndpointChannel> channel;
+    // Keep track of a channel before it is registered with the
+    // EndpointManager. This reference is held during the handshake phase and
+    // passed to the EndpointManager upon successful encryption
+    // (OnEncryptionSuccessRunnableV3 or OnEncryptionSuccessRunnable).
+    std::shared_ptr<EndpointChannel> channel;
 
     // Crypto context; initially empty; established first thing after channel
     // creation by running UKey2 session. While it is in progress, we keep track
@@ -509,24 +507,27 @@ class BasePcpHandler : public PcpHandler,
   void OnEncryptionFailureImpl(const std::string& endpoint_id,
                                EndpointChannel* channel);
 
-  EncryptionRunner::ResultListener GetResultListener();
+  EncryptionRunner::ResultListener GetResultListener(
+      std::shared_ptr<EndpointChannel> endpoint_channel);
   EncryptionRunner::ResultListener GetResultListenerV3(
       const NearbyDeviceProvider& device_provider,
       const NearbyDevice& remote_device,
-      const EndpointChannel& endpoint_channel);
+      std::shared_ptr<EndpointChannel> endpoint_channel);
 
   void OnEncryptionSuccessRunnable(
       const std::string& endpoint_id,
       std::unique_ptr<securegcm::UKey2Handshake> ukey2,
-      const std::string& auth_token, const ByteArray& raw_auth_token);
+      const std::string& auth_token, const ByteArray& raw_auth_token,
+      std::shared_ptr<EndpointChannel> endpoint_channel);
   void OnEncryptionSuccessRunnableV3(
       const NearbyDevice& remote_device,
       std::unique_ptr<::securegcm::UKey2Handshake> ukey2,
       absl::string_view auth_token, const ByteArray& raw_auth_token,
-      const EndpointChannel& endpoint_channel,
+      std::shared_ptr<EndpointChannel> endpoint_channel,
       const NearbyDeviceProvider& device_provider);
-  void OnEncryptionFailureRunnable(const std::string& endpoint_id,
-                                   EndpointChannel* endpoint_channel);
+  void OnEncryptionFailureRunnable(
+      const std::string& endpoint_id,
+      std::shared_ptr<EndpointChannel> endpoint_channel);
   void RegisterDeviceAfterEncryptionSuccess(
       std::string_view endpoint_id,
       std::unique_ptr<::securegcm::UKey2Handshake> ukey2,

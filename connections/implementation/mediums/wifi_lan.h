@@ -16,17 +16,15 @@
 #define CORE_INTERNAL_MEDIUMS_WIFI_LAN_H_
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
-#include "connections/implementation/mediums/multiplex/multiplex_socket.h"
-#include "internal/flags/nearby_flags.h"
+#include "connections/implementation/bwu_handler.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
@@ -117,6 +115,9 @@ class WifiLan {
   // on.
   api::UpgradeAddressInfo GetUpgradeAddressCandidates(
       const std::string& service_id) ABSL_LOCKS_EXCLUDED(mutex_);
+
+  std::unique_ptr<BwuHandler> CreateBwuHandler(
+      BwuHandler::IncomingConnectionCallback incoming_connection_callback);
 
  private:
   struct AdvertisingInfo {
@@ -217,17 +218,6 @@ class WifiLan {
   // and thus require pointer stability.
   absl::flat_hash_map<std::string, WifiLanServerSocket> server_sockets_
       ABSL_GUARDED_BY(mutex_);
-
-  // Whether the multiplex feature is enabled.
-  bool is_multiplex_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex) &&
-      NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableMultiplexWifiLan);
-
-  // A map of IpAddress -> MultiplexSocket.
-  absl::flat_hash_map<std::string, mediums::multiplex::MultiplexSocket*>
-      multiplex_sockets_ ABSL_GUARDED_BY(mutex_);
 
   std::string last_mdns_service_name_ ABSL_GUARDED_BY(mutex_);
   int last_server_port_ ABSL_GUARDED_BY(mutex_) = 0;

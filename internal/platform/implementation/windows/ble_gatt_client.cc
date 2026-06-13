@@ -17,7 +17,6 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -30,7 +29,6 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "absl/types/optional.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/utils.h"
@@ -261,7 +259,7 @@ bool BleGattClient::DiscoverServiceAndCharacteristics(
   return false;
 }
 
-absl::optional<api::ble::GattCharacteristic> BleGattClient::GetCharacteristic(
+std::optional<api::ble::GattCharacteristic> BleGattClient::GetCharacteristic(
     const Uuid& service_uuid, const Uuid& characteristic_uuid) {
   absl::MutexLock lock(mutex_);
   VLOG(1) << __func__ << ": Stared to get characteristic UUID="
@@ -273,7 +271,7 @@ absl::optional<api::ble::GattCharacteristic> BleGattClient::GetCharacteristic(
 
     if (!gatt_characteristic.has_value()) {
       LOG(ERROR) << __func__ << ": Failed to get native GATT characteristic.";
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     api::ble::GattCharacteristic result;
@@ -323,10 +321,10 @@ absl::optional<api::ble::GattCharacteristic> BleGattClient::GetCharacteristic(
                << error.code() << ": " << winrt::to_string(error.message());
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<std::string> BleGattClient::ReadCharacteristic(
+std::optional<std::string> BleGattClient::ReadCharacteristic(
     const api::ble::GattCharacteristic& characteristic) {
   absl::MutexLock lock(mutex_);
   VLOG(1) << __func__
@@ -338,7 +336,7 @@ absl::optional<std::string> BleGattClient::ReadCharacteristic(
 
     if (!gatt_characteristic.has_value()) {
       LOG(ERROR) << __func__ << ": Failed to get native GATT characteristic.";
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     GattReadResult result =
@@ -347,7 +345,7 @@ absl::optional<std::string> BleGattClient::ReadCharacteristic(
       LOG(ERROR) << __func__
                  << ": Failed to read GATT characteristic with error: "
                  << GattCommunicationStatusToString(result.Status());
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     IBuffer buffer = result.Value();
@@ -377,7 +375,7 @@ absl::optional<std::string> BleGattClient::ReadCharacteristic(
                << error.code() << ": " << winrt::to_string(error.message());
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool BleGattClient::WriteCharacteristic(
@@ -431,80 +429,6 @@ bool BleGattClient::WriteCharacteristic(
   return false;
 }
 
-bool BleGattClient::SetCharacteristicSubscription(
-    const api::ble::GattCharacteristic& characteristic, bool enable,
-    absl::AnyInvocable<void(absl::string_view value)>
-        on_characteristic_changed_cb) {
-  absl::MutexLock lock(mutex_);
-  VLOG(1) << __func__ << ": Started to set Characteristic Subscription.";
-  GattClientCharacteristicConfigurationDescriptorValue gcccd_value =
-      GattClientCharacteristicConfigurationDescriptorValue::None;
-  if ((characteristic.property & Property::kNotify) != Property::kNone) {
-    gcccd_value = GattClientCharacteristicConfigurationDescriptorValue::Notify;
-  } else if ((characteristic.property & Property::kIndicate) !=
-             Property::kNone) {
-    gcccd_value =
-        GattClientCharacteristicConfigurationDescriptorValue::Indicate;
-  } else {
-    LOG(WARNING) << "Characeristic: " << std::string(characteristic.uuid)
-                 << " supports neither notifications nor indications.";
-    return false;
-  }
-
-  std::optional<GattCharacteristic> gatt_characteristic;
-
-  gatt_characteristic =
-      native_characteristic_map_[characteristic].native_characteristic;
-
-  if (!gatt_characteristic.has_value()) {
-    LOG(ERROR) << __func__ << ": Failed to get native GATT characteristic.";
-    return false;
-  }
-
-  // Write characteristic configuration descriptor
-  if (!WriteCharacteristicConfigurationDescriptor(
-          gatt_characteristic.value(),
-          enable
-              ? gcccd_value
-              : GattClientCharacteristicConfigurationDescriptorValue::None)) {
-    return false;
-  }
-
-  // Set value changed handler
-  try {
-    if (enable) {
-      native_characteristic_map_[characteristic].on_characteristic_changed_cb =
-          std::move(on_characteristic_changed_cb);
-      native_characteristic_map_[characteristic].notification_token =
-          gatt_characteristic->ValueChanged(
-              [&](GattCharacteristic const& native_characteristic,
-                  GattValueChangedEventArgs args) {
-                BleGattClient::OnCharacteristicValueChanged(characteristic,
-                                                            args);
-              });
-
-      if (!native_characteristic_map_[characteristic].notification_token) {
-        LOG(ERROR) << __func__ << ": Failed to add value change handler.";
-        return false;
-      }
-    } else if (native_characteristic_map_[characteristic].notification_token) {
-      gatt_characteristic->ValueChanged(std::exchange(
-          native_characteristic_map_[characteristic].notification_token, {}));
-    }
-    LOG(ERROR) << __func__ << ": Successfully set Characteristic Subscription.";
-    return true;
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Failed to set Characteristic Subscription."
-               << exception.what();
-  } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__
-               << ": Failed to set Characteristic Subscription."
-                  " WinRT exception: "
-               << error.code() << ": " << winrt::to_string(error.message());
-  }
-  return false;
-}
-
 void BleGattClient::Disconnect() {
   absl::MutexLock lock(mutex_);
   try {
@@ -533,12 +457,12 @@ std::optional<GattCharacteristic> BleGattClient::GetNativeCharacteristic(
   try {
     if (ble_device_ == nullptr) {
       LOG(ERROR) << __func__ << ": BLE device is disconnected.";
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     if (gatt_devices_services_result_ == nullptr) {
       LOG(ERROR) << __func__ << ": No available GATT services.";
-      return absl::nullopt;
+      return std::nullopt;
     }
 
     for (const auto& service : gatt_devices_services_result_.Services()) {
@@ -579,7 +503,7 @@ std::optional<GattCharacteristic> BleGattClient::GetNativeCharacteristic(
         << error.code() << ": " << winrt::to_string(error.message());
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool BleGattClient::WriteCharacteristicConfigurationDescriptor(

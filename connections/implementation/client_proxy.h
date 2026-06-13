@@ -32,6 +32,7 @@
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
+#include "connections/implementation/analytics/operation_result_with_medium.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
@@ -41,7 +42,6 @@
 #include "connections/v3/connection_listening_options.h"
 #include "connections/v3/connections_device_provider.h"
 #include "connections/v3/listeners.h"
-#include "internal/analytics/event_logger.h"
 #include "internal/interop/device.h"
 #include "internal/interop/device_provider.h"
 #include "internal/platform/byte_array.h"
@@ -54,7 +54,6 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/scheduled_executor.h"
-#include "internal/proto/analytics/connections_log.pb.h"
 
 namespace nearby::connections {
 
@@ -66,8 +65,8 @@ class ClientProxy final {
   static constexpr absl::Duration
       kHighPowerAdvertisementEndpointIdCacheTimeout = absl::Seconds(30);
 
-  explicit ClientProxy(
-      ::nearby::analytics::EventLogger* event_logger = nullptr);
+  explicit ClientProxy(std::unique_ptr<nearby::analytics::AnalyticsRecorder>
+                           analytics_recorder = nullptr);
   ~ClientProxy();
   ClientProxy(ClientProxy&&) = default;
   ClientProxy& operator=(ClientProxy&&) = default;
@@ -109,8 +108,7 @@ class ClientProxy final {
       const std::string& service_id, Strategy strategy,
       const ConnectionListener& connection_lifecycle_listener,
       absl::Span<location::nearby::proto::connections::Medium> mediums,
-      const std::vector<location::nearby::analytics::proto::ConnectionsLog::
-                            OperationResultWithMedium>&
+      const std::vector<analytics::OperationResultWithMedium>&
           operation_result_with_medium,
       const AdvertisingOptions& advertising_options = AdvertisingOptions{});
   // Marks this client as not advertising.
@@ -134,8 +132,7 @@ class ClientProxy final {
       const std::string& service_id, Strategy strategy,
       DiscoveryListener discovery_listener,
       absl::Span<location::nearby::proto::connections::Medium> mediums,
-      const std::vector<location::nearby::analytics::proto::ConnectionsLog::
-                            OperationResultWithMedium>&
+      const std::vector<analytics::OperationResultWithMedium>&
           operation_result_with_medium,
       const DiscoveryOptions& discovery_options = DiscoveryOptions{});
   // Marks this client as not discovering at all.
@@ -264,7 +261,8 @@ class ClientProxy final {
   // Adds a CancellationFlag for endpoint id.
   void AddCancellationFlag(const std::string& endpoint_id);
   // Returns the CancellationFlag for endpoint id,
-  CancellationFlag* GetCancellationFlag(const std::string& endpoint_id);
+  std::shared_ptr<CancellationFlag> GetCancellationFlag(
+      const std::string& endpoint_id);
   // Sets the CancellationFlag to true for endpoint id.
   void CancelEndpoint(const std::string& endpoint_id);
   // Cancels all CancellationFlags.
@@ -311,19 +309,9 @@ class ClientProxy final {
   bool IsSafeToDisconnectEnabled(absl::string_view endpoint_id);
   bool IsPayloadReceivedAckEnabled(absl::string_view endpoint_id);
 
-  // Returns the multiplex socket supports status for local device.
-  std::int32_t GetLocalMultiplexSocketBitmask() const;
   // Sets the multiplex socket supports status for remote device.
   void SetRemoteMultiplexSocketBitmask(absl::string_view endpoint_id,
                                        int remote_multiplex_socket_bitmask);
-  // Returns true if the multiplex socket is supported for the given medium.
-  bool IsLocalMultiplexSocketSupported(Medium medium);
-
-  // Gets the multiplex socket supports status for remote device.
-  std::optional<std::int32_t> GetRemoteMultiplexSocketBitmask(
-      absl::string_view endpoint_id) const;
-  // Returns true if the multiplex socket is supported for the given medium.
-  bool IsMultiplexSocketSupported(absl::string_view endpoint_id, Medium medium);
 
   // Gets the WebRTC non cellular network status.
   bool GetWebRtcNonCellular();
@@ -344,18 +332,6 @@ class ClientProxy final {
 
   std::optional<location::nearby::connections::MediumRole> GetMediumRole(
       absl::string_view endpoint_id) const;
-
-  /** Bitmask for bt multiplex connection support. */
-  // Note. Deprecates the first and second bit of BT_MULTIPLEX_ENABLED and
-  // WIFI_LAN_MULTIPLEX_ENABLED and shift them to the third and the forth bit.
-  // The reason is we need to escape the (0, 1) bit which has been set in some
-  // devices without salt enabled. If accompany with the devices with salted
-  // enabled, the frames passed cannot be decrypted and the connection shall be
-  // failed. Please refer to b/295925531#comment#14 for the details.
-  enum MultiplexSocketBitmask : uint32_t {
-    kBtMultiplexEnabled = 1 << 2,
-    kWifiLanMultiplexEnabled = 1 << 3,
-  };
 
   // Forces client to regenerate a new local endpoint id.
   void ClearCachedLocalEndpointId();
@@ -519,11 +495,11 @@ class ClientProxy final {
   // Maps endpoint_id to CancellationFlag. CancellationFlags are passed around
   // as raw pointers to other classes in Nearby Connections, so it is important
   // that objects in this map are not cleared, even if they are cancelled.
-  absl::flat_hash_map<std::string, std::unique_ptr<CancellationFlag>>
+  absl::flat_hash_map<std::string, std::shared_ptr<CancellationFlag>>
       cancellation_flags_;
   // A default cancellation flag with isCancelled set be true.
-  std::unique_ptr<CancellationFlag> default_cancellation_flag_ =
-      std::make_unique<CancellationFlag>(true);
+  std::shared_ptr<CancellationFlag> default_cancellation_flag_ =
+      std::make_shared<CancellationFlag>(true);
 
   // An app lifecycle monitor for monitoring the app lifecycle state.
   std::unique_ptr<api::AppLifecycleMonitor> app_lifecycle_monitor_;

@@ -15,12 +15,14 @@
 #ifndef PLATFORM_API_DEVICE_INFO_H_
 #define PLATFORM_API_DEVICE_INFO_H_
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
 #include "internal/base/file_path.h"
+#include "internal/base/files.h"
 
 namespace nearby {
 namespace api {
@@ -51,6 +53,11 @@ class DeviceInfo {
   virtual FilePath GetTemporaryPath() const = 0;
   virtual FilePath GetLogPath() const = 0;
 
+  virtual std::optional<size_t> GetAvailableDiskSpaceInBytes(
+      const FilePath& path) const {
+        return Files::GetAvailableDiskSpaceInBytes(path);
+  };
+
   // Monitor screen status
   virtual bool IsScreenLocked() const = 0;
   virtual void RegisterScreenLockedListener(
@@ -63,6 +70,24 @@ class DeviceInfo {
   virtual bool PreventSleep() = 0;
   virtual bool AllowSleep() = 0;
 };
+
+template <typename Sink>
+void AbslStringify(Sink& sink, DeviceInfo::DeviceType device_type) {
+  switch (device_type) {
+    case DeviceInfo::DeviceType::kUnknown:
+      sink.Append("Unknown");
+      return;
+    case DeviceInfo::DeviceType::kPhone:
+      sink.Append("Phone");
+      return;
+    case DeviceInfo::DeviceType::kTablet:
+      sink.Append("Tablet");
+      return;
+    case DeviceInfo::DeviceType::kLaptop:
+      sink.Append("PC");
+      return;
+  }
+}
 
 }  // namespace api
 }  // namespace nearby

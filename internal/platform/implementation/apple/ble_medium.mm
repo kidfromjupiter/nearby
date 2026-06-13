@@ -173,11 +173,19 @@ void BleMedium::HandleAdvertisementFound(id<GNCPeripheral> peripheral,
   }
 #endif
 
-  if (scanning_cb_.advertisement_found_cb) {
-    scanning_cb_.advertisement_found_cb(unique_id, data);
+  std::shared_ptr<api::ble::BleMedium::ScanningCallback> scanning_cb;
+  std::shared_ptr<api::ble::BleMedium::ScanCallback> scan_cb;
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    scanning_cb = scanning_cb_;
+    scan_cb = scan_cb_;
   }
-  if (scan_cb_.advertisement_found_cb) {
-    scan_cb_.advertisement_found_cb(unique_id, data);
+
+  if (scanning_cb && scanning_cb->advertisement_found_cb) {
+    scanning_cb->advertisement_found_cb(unique_id, data);
+  }
+  if (scan_cb && scan_cb->advertisement_found_cb) {
+    scan_cb->advertisement_found_cb(unique_id, data);
   }
 }
 
@@ -185,7 +193,17 @@ std::unique_ptr<api::ble::BleMedium::ScanningSession> BleMedium::StartScanning(
     const Uuid &service_uuid, api::ble::TxPowerLevel tx_power_level,
     api::ble::BleMedium::ScanningCallback callback) {
   CBUUID *serviceUUID = CBUUID128FromCPP(service_uuid);
-  scanning_cb_ = std::move(callback);
+
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    scanning_cb_ = std::make_shared<api::ble::BleMedium::ScanningCallback>(std::move(callback));
+
+    if (central_manager_factory_) {
+      socketCentralManager_ = central_manager_factory_(serviceUUID);
+    } else {
+      socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
+    }
+  }
 
   // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
   // map every time we stopped a scan, we would not be able to connect to peripherals that we
@@ -193,8 +211,10 @@ std::unique_ptr<api::ble::BleMedium::ScanningSession> BleMedium::StartScanning(
   peripherals_.Clear();
   ClearAdvertisementPacketsMap();
 
-  socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
-  [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
+  }
 
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block NSError *blockError = nil;
@@ -207,8 +227,13 @@ std::unique_ptr<api::ble::BleMedium::ScanningSession> BleMedium::StartScanning(
       }
       completionHandler:^(NSError *error) {
         blockError = error;
-        if (scanning_cb_.start_scanning_result) {
-          scanning_cb_.start_scanning_result(
+        std::shared_ptr<api::ble::BleMedium::ScanningCallback> scanning_cb;
+        {
+          absl::MutexLock lock(&scanning_mutex_);
+          scanning_cb = scanning_cb_;
+        }
+        if (scanning_cb && scanning_cb->start_scanning_result) {
+          scanning_cb->start_scanning_result(
               error == nil ? absl::OkStatus()
                            : absl::InternalError(error.localizedDescription.UTF8String));
         }
@@ -218,8 +243,13 @@ std::unique_ptr<api::ble::BleMedium::ScanningSession> BleMedium::StartScanning(
   dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, kApiTimeoutInSeconds * NSEC_PER_SEC);
   if (dispatch_semaphore_wait(semaphore, timeout) != 0) {
     GNCLoggerError(@"Start scanning operation timed out.");
-    if (scanning_cb_.start_scanning_result) {
-      scanning_cb_.start_scanning_result(absl::DeadlineExceededError("Start scanning timed out"));
+    std::shared_ptr<api::ble::BleMedium::ScanningCallback> scanning_cb;
+    {
+      absl::MutexLock lock(&scanning_mutex_);
+      scanning_cb = scanning_cb_;
+    }
+    if (scanning_cb && scanning_cb->start_scanning_result) {
+      scanning_cb->start_scanning_result(absl::DeadlineExceededError("Start scanning timed out"));
     }
     return nullptr;
   }
@@ -239,7 +269,17 @@ std::unique_ptr<api::ble::BleMedium::ScanningSession> BleMedium::StartScanning(
 bool BleMedium::StartScanning(const Uuid &service_uuid, api::ble::TxPowerLevel tx_power_level,
                               api::ble::BleMedium::ScanCallback callback) {
   CBUUID *serviceUUID = CBUUID128FromCPP(service_uuid);
-  scan_cb_ = std::move(callback);
+
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    scan_cb_ = std::make_shared<api::ble::BleMedium::ScanCallback>(std::move(callback));
+
+    if (central_manager_factory_) {
+      socketCentralManager_ = central_manager_factory_(serviceUUID);
+    } else {
+      socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
+    }
+  }
 
   // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
   // map every time we stopped a scan, we would not be able to connect to peripherals that we
@@ -247,8 +287,10 @@ bool BleMedium::StartScanning(const Uuid &service_uuid, api::ble::TxPowerLevel t
   peripherals_.Clear();
   ClearAdvertisementPacketsMap();
 
-  socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUID];
-  [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUID ]];
+  }
 
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block NSError *blockError = nil;
@@ -286,7 +328,16 @@ bool BleMedium::StartMultipleServicesScanning(const std::vector<Uuid> &service_u
     [serviceUUIDs addObject:CBUUID128FromCPP(service_uuid)];
   }
 
-  scan_cb_ = std::move(callback);
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    scan_cb_ = std::make_shared<api::ble::BleMedium::ScanCallback>(std::move(callback));
+
+    if (central_manager_factory_) {
+      socketCentralManager_ = central_manager_factory_(serviceUUIDs[0]);
+    } else {
+      socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUIDs[0]];
+    }
+  }
 
   // Clear the map of discovered peripherals only when we are starting a new scan. If we cleared the
   // map every time we stopped a scan, we would not be able to connect to peripherals that we
@@ -294,8 +345,10 @@ bool BleMedium::StartMultipleServicesScanning(const std::vector<Uuid> &service_u
   peripherals_.Clear();
   ClearAdvertisementPacketsMap();
 
-  socketCentralManager_ = [[GNSCentralManager alloc] initWithSocketServiceUUID:serviceUUIDs[0]];
-  [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUIDs[0] ]];
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    [socketCentralManager_ startNoScanModeWithAdvertisedServiceUUIDs:@[ serviceUUIDs[0] ]];
+  }
 
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block NSError *blockError = nil;
@@ -321,7 +374,12 @@ bool BleMedium::StartMultipleServicesScanning(const std::vector<Uuid> &service_u
 }
 
 bool BleMedium::StopScanning() {
-  [socketCentralManager_ stopNoScanMode];
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    [socketCentralManager_ stopNoScanMode];
+    scan_cb_ = nullptr;
+    scanning_cb_ = nullptr;
+  }
 
   dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
   __block NSError *blockError = nil;
@@ -448,24 +506,118 @@ std::unique_ptr<api::ble::GattClient> BleMedium::ConnectToGattServer(
 // TODO(b/293336684): Old Weave code that need to be deleted once shared Weave is complete.
 std::unique_ptr<api::ble::BleServerSocket> BleMedium::OpenServerSocket(
     const std::string &service_id) {
+  if (GNCFeatureFlags.fixBleServerSocketDeadlockEnabled) {
+    return OpenServerSocketWithDeadlockSafety(service_id);
+  } else {
+    return OpenServerSocketLegacy(service_id);
+  }
+}
+
+std::unique_ptr<api::ble::BleServerSocket> BleMedium::OpenServerSocketWithDeadlockSafety(
+    const std::string &service_id) {
   auto server_socket = std::make_unique<BleServerSocket>();
-  __block auto server_socket_ptr = server_socket.get();
 
   if (socketPeripheralManager_ == nil) {
-    socketPeripheralManager_ = [[GNSPeripheralManager alloc] initWithAdvertisedName:nil
-                                                                  restoreIdentifier:nil];
+    if (peripheral_manager_factory_) {
+      socketPeripheralManager_ = peripheral_manager_factory_();
+    } else {
+      socketPeripheralManager_ = [[GNSPeripheralManager alloc] initWithAdvertisedName:nil
+                                                                    restoreIdentifier:nil];
+    }
   }
 
-  if (socketPeripheralManager_ == nil) {
-    GNCLoggerError(@"Failed to create peripheral manager.");
-    return nullptr;
+  // Fix for b/494335036 (Registry + Background Queue)
+  {
+    absl::MutexLock lock(server_socket_mutex_);
+    server_socket_ptr_ = server_socket.get();
   }
+  server_socket->SetCloseNotifier([this]() {
+    absl::MutexLock lock(server_socket_mutex_);
+    server_socket_ptr_ = nullptr;
+  });
 
   socketPeripheralServiceManager_ = [[GNSPeripheralServiceManager alloc]
          initWithBleServiceUUID:[CBUUID UUIDWithString:kWeaveServiceUUID]
        addPairingCharacteristic:NO
       shouldAcceptSocketHandler:^BOOL(GNSSocket *socket) {
-        GNCMWaitForConnection(socket, ^(BOOL didConnect) {
+        // Optimized Path: Use background queue and registry validation.
+        GNCMWaitForConnection(socket, connection_callback_queue_, ^(BOOL didConnect) {
+          GNCMBleConnection *connection =
+              [GNCMBleConnection connectionWithSocket:socket
+                                            serviceID:nil
+                                  expectedIntroPacket:YES
+                                        callbackQueue:connection_callback_queue_];
+
+          auto socket_wrapper = std::make_unique<BleSocket>(connection);
+          socket_wrapper->SetCloseNotifier(
+              [socketPeripheralManager = socketPeripheralManager_,
+               serviceUUID = socketPeripheralServiceManager_.serviceUUID]() {
+                [socketPeripheralManager
+                    removePeripheralServiceManagerForServiceUUID:serviceUUID
+                                     bleServiceRemovedCompletion:^(NSError *_Nullable error) {
+                                       GNCLoggerInfo(@"BleSocket is removed peripheral manager.");
+                                     }];
+              });
+
+          connection.connectionHandlers = socket_wrapper->GetInputStream().GetConnectionHandlers();
+
+          // Fix: Verify the BleServerSocket still exists before calling Connect().
+          // This prevents the use-after-free/deadlock reported in b/494335036.
+          absl::MutexLock lock(server_socket_mutex_);
+          if (server_socket_ptr_) {
+            server_socket_ptr_->Connect(std::move(socket_wrapper));
+            GNCLoggerInfo(@"BleServerSocket is created with connection");
+          } else {
+            GNCLoggerWarning(@"BleServerSocket was destroyed; ignoring connection.");
+          }
+        });
+        return YES;
+      }];
+
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSError *blockError = nil;
+  [socketPeripheralManager_ addPeripheralServiceManager:socketPeripheralServiceManager_
+                              bleServiceAddedCompletion:^(NSError *error) {
+                                if (error != nil) {
+                                  GNCLoggerError(@"Failed to add Weave service: %@", error);
+                                  blockError = error;
+                                }
+                                dispatch_semaphore_signal(semaphore);
+                              }];
+  [socketPeripheralManager_ start];
+  dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, kApiTimeoutInSeconds * NSEC_PER_SEC);
+  if (dispatch_semaphore_wait(semaphore, timeout) != 0) {
+    GNCLoggerError(@"OpenServerSocket operation timed out.");
+    return nullptr;
+  }
+  if (blockError != nil) {
+    return nullptr;
+  }
+  return std::move(server_socket);
+}
+
+std::unique_ptr<api::ble::BleServerSocket> BleMedium::OpenServerSocketLegacy(
+    const std::string &service_id) {
+  auto server_socket = std::make_unique<BleServerSocket>();
+
+  if (socketPeripheralManager_ == nil) {
+    if (peripheral_manager_factory_) {
+      socketPeripheralManager_ = peripheral_manager_factory_();
+    } else {
+      socketPeripheralManager_ = [[GNSPeripheralManager alloc] initWithAdvertisedName:nil
+                                                                    restoreIdentifier:nil];
+    }
+  }
+
+  // Raw pointer for closure capture in the legacy path (risks use-after-free).
+  BleServerSocket *server_socket_ptr = server_socket.get();
+
+  socketPeripheralServiceManager_ = [[GNSPeripheralServiceManager alloc]
+         initWithBleServiceUUID:[CBUUID UUIDWithString:kWeaveServiceUUID]
+       addPairingCharacteristic:NO
+      shouldAcceptSocketHandler:^BOOL(GNSSocket *socket) {
+        // Legacy Path: Verbatim copy of original code (blocks Main Thread).
+        GNCMWaitForConnection(socket, nil, ^(BOOL didConnect) {
           GNCMBleConnection *connection =
               [GNCMBleConnection connectionWithSocket:socket
                                             // This must be nil as the advertiser even though we
@@ -588,8 +740,12 @@ std::unique_ptr<api::ble::BleSocket> BleMedium::Connect(
     return nullptr;
   }
 
-  GNSCentralPeerManager *updatedCentralPeerManager =
-      [socketCentralManager_ retrieveCentralPeerWithIdentifier:peripheral.identifier];
+  GNSCentralPeerManager *updatedCentralPeerManager;
+  {
+    absl::MutexLock lock(&scanning_mutex_);
+    updatedCentralPeerManager =
+        [socketCentralManager_ retrieveCentralPeerWithIdentifier:peripheral.identifier];
+  }
   if (!updatedCentralPeerManager) {
     return nullptr;
   }
@@ -603,7 +759,14 @@ std::unique_ptr<api::ble::BleSocket> BleMedium::Connect(
                                dispatch_semaphore_signal(semaphore);
                                return;
                              }
-                             GNCMWaitForConnection(nssocket, ^(BOOL didConnect) {
+
+                             // Suggestion: Use the connection callback queue instead of nil
+                             dispatch_queue_t targetQueue =
+                                 GNCFeatureFlags.fixBleServerSocketDeadlockEnabled
+                                     ? connection_callback_queue_
+                                     : nil;
+
+                             GNCMWaitForConnection(nssocket, targetQueue, ^(BOOL didConnect) {
                                if (!didConnect) {
                                  dispatch_semaphore_signal(semaphore);
                                  return;

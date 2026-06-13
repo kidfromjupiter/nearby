@@ -64,6 +64,7 @@ static const int kMaxAdvertisementLengthOnIOS = 23;
   self = [super init];
   if (self) {
     _queue = queue ?: dispatch_queue_create(kGNCBLEGATTServerQueueLabel, DISPATCH_QUEUE_SERIAL);
+<<<<<<< HEAD
     if (GNCFeatureFlags.sharedPeripheralManagerEnabled) {
       if (!peripheralManager) {
         // In shared mode, the peripheral manager must be injected.
@@ -90,6 +91,34 @@ static const int kMaxAdvertisementLengthOnIOS = 23;
     _pendingCharacteristics = [[NSMutableDictionary alloc] init];
     _characteristicValues = [[NSMutableDictionary alloc] init];
     _advertisementData = nil;
+=======
+    _services = [[NSMutableDictionary alloc] init];
+    _pendingCharacteristics = [[NSMutableDictionary alloc] init];
+    _characteristicValues = [[NSMutableDictionary alloc] init];
+    _advertisementData = nil;
+
+    if (GNCFeatureFlags.sharedPeripheralManagerEnabled) {
+      if (!peripheralManager) {
+        // In shared mode, the peripheral manager must be injected.
+        [NSException raise:NSInvalidArgumentException
+                    format:@"Peripheral manager cannot be nil when shared manager is enabled."];
+      }
+      _peripheralManager = peripheralManager;
+      // In shared mode, do NOT set the delegate. The Multiplexer handles callbacks.
+    } else {
+      // Legacy mode: Create a new manager if one isn't provided.
+      if (!peripheralManager) {
+        peripheralManager = [[CBPeripheralManager alloc]
+            initWithDelegate:nil
+                       queue:_queue
+                     options:@{CBPeripheralManagerOptionShowPowerAlertKey : @NO}];
+      }
+      _peripheralManager = peripheralManager;
+      // In legacy mode, we own the manager (or use the injected one as if we own it) and set the
+      // delegate.
+      _peripheralManager.peripheralDelegate = self;
+    }
+>>>>>>> nearby/main
   }
   return self;
 }

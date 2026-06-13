@@ -40,6 +40,7 @@ cc_library(
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/test",
+        "//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
         "//sharing/internal/api:platform",
         "//sharing/internal/public:pref_names",
         "//sharing/internal/public:types",

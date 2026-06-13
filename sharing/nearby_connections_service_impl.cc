@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/analytics/cpp/logging/event_logger.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -31,6 +32,7 @@
 #include "connections/connection_options.h"
 #include "connections/core.h"
 #include "connections/discovery_options.h"
+#include "connections/implementation/analytics/analytics_recorder_impl.h"
 #include "connections/implementation/service_controller_router.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
@@ -39,7 +41,6 @@
 #include "connections/payload_type.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
-#include "internal/analytics/event_logger.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
@@ -51,6 +52,7 @@ namespace nearby {
 namespace sharing {
 namespace {
 
+using ::nearby::analytics::AnalyticsRecorderImpl;
 using ::nearby::connections::ConnectionRequestInfo;
 using ::nearby::connections::ConnectionResponseInfo;
 using ::nearby::connections::Core;
@@ -85,7 +87,8 @@ NearbyConnectionsServiceImpl::NearbyConnectionsServiceImpl(
         // at an invalid instance.
         return connectivity_manager_.IsHPRealtekDevice();
       });
-  static Core* core = new Core(event_logger, router);
+  static Core* core =
+      new Core(std::make_unique<AnalyticsRecorderImpl>(event_logger), router);
   service_handle_ = core;
 }
 

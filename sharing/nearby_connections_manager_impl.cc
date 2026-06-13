@@ -32,7 +32,7 @@
 #include "absl/types/span.h"
 #include "internal/base/file_path.h"
 #include "internal/flags/nearby_flags.h"
-#include "internal/platform/device_info.h"
+#include "internal/platform/implementation/device_info.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/advertisement.h"
@@ -150,7 +150,8 @@ std::string PayloadStatusToString(PayloadStatus status) {
 
 NearbyConnectionsManagerImpl::NearbyConnectionsManagerImpl(
     TaskRunner* connections_callback_task_runner, Context* context,
-    ConnectivityManager& connectivity_manager, nearby::DeviceInfo& device_info,
+    ConnectivityManager& connectivity_manager,
+    nearby::api::DeviceInfo& device_info,
     std::unique_ptr<NearbyConnectionsService> nearby_connections_service)
     : connections_callback_task_runner_(connections_callback_task_runner),
       context_(context),
@@ -333,6 +334,12 @@ void NearbyConnectionsManagerImpl::StopDiscovery() {
       });
 }
 
+void NearbyConnectionsManagerImpl::RemoveTransferManagerOnCallbackThread(
+    std::unique_ptr<TransferManager> transfer_manager) const {
+  connections_callback_task_runner_->PostTask(
+      [transfer_manager = std::move(transfer_manager)]() {});
+}
+
 void NearbyConnectionsManagerImpl::Connect(
     std::vector<uint8_t> endpoint_info, absl::string_view endpoint_id,
     std::optional<std::vector<uint8_t>> bluetooth_mac_address,
@@ -415,15 +422,20 @@ void NearbyConnectionsManagerImpl::Connect(
       [this, endpoint_id = std::string(endpoint_id)](ConnectionsStatus status) {
         MutexLock lock(&mutex_);
         if (status != ConnectionsStatus::kSuccess) {
-          transfer_managers_.erase(endpoint_id);
+          auto node = transfer_managers_.extract(endpoint_id);
+          if (!node.empty()) {
+            RemoveTransferManagerOnCallbackThread(std::move(node.mapped()));
+          }
         }
         OnConnectionRequested(endpoint_id, status);
       });
 
   // Setup transfer manager.
   if (IsTransportTypeFlagsSet(transport_type, TransportType::kHighQuality)) {
-    transfer_managers_[endpoint_id] =
-        std::make_unique<TransferManager>(context_, endpoint_id);
+    transfer_managers_[endpoint_id] = std::make_unique<TransferManager>(
+        connections_callback_task_runner_, endpoint_id,
+        absl::bind_front(&NearbyConnectionsManagerImpl::SendWithoutDelay,
+                         this));
   }
 }
 
@@ -498,23 +510,18 @@ void NearbyConnectionsManagerImpl::Send(
     RegisterPayloadStatusListener(payload->id, listener);
   }
 
-  if (transfer_managers_.contains(endpoint_id) && payload->content.is_file()) {
-    VLOG(1) << __func__ << ": Send payload " << payload->id << " to "
-            << endpoint_id << " to transfer manager. payload is file: "
-            << payload->content.is_file() << ", is bytes "
-            << payload->content.is_bytes();
-    transfer_managers_.at(endpoint_id)
-        ->Send([&, endpoint_id = std::string(endpoint_id),
-                payload_copy = *payload]() {
-          VLOG(1) << __func__ << ": Send payload " << payload_copy.id << " to "
-                  << endpoint_id;
-          auto sent_payload = std::make_unique<Payload>(payload_copy);
-          SendWithoutDelay(endpoint_id, std::move(sent_payload));
-        });
-    transfer_managers_.at(endpoint_id)->StartTransfer();
-    return;
+  if (payload->content.is_file()) {
+    const auto& it = transfer_managers_.find(endpoint_id);
+    if (it != transfer_managers_.end()) {
+      VLOG(1) << __func__ << ": Send payload " << payload->id << " to "
+              << endpoint_id << " to transfer manager. payload is file: "
+              << payload->content.is_file() << ", is bytes "
+              << payload->content.is_bytes();
+      it->second->Send(std::move(payload));
+      it->second->StartTransfer();
+      return;
+    }
   }
-
   SendWithoutDelay(endpoint_id, std::move(payload));
 }
 
@@ -739,9 +746,13 @@ void NearbyConnectionsManagerImpl::OnDisconnected(
     absl::string_view endpoint_id) {
   MutexLock lock(&mutex_);
   // Remove transfer manager.
-  if (transfer_managers_.contains(endpoint_id)) {
-    transfer_managers_[endpoint_id]->CancelTransfer();
-    transfer_managers_.erase(endpoint_id);
+  const auto& transfer_manager_it = transfer_managers_.find(endpoint_id);
+  if (transfer_manager_it != transfer_managers_.end()) {
+    transfer_manager_it->second->CancelTransfer();
+    auto node = transfer_managers_.extract(transfer_manager_it);
+    if (!node.empty()) {
+      RemoveTransferManagerOnCallbackThread(std::move(node.mapped()));
+    }
   }
 
   Status connection_layer_status = Status::kUnknown;
@@ -771,8 +782,9 @@ void NearbyConnectionsManagerImpl::OnBandwidthChanged(
           << ": Bandwidth changed to medium=" << static_cast<int>(medium)
           << "; endpoint_id=" << endpoint_id;
 
-  if (transfer_managers_.contains(endpoint_id)) {
-    transfer_managers_[endpoint_id]->OnMediumQualityChanged(medium);
+  const auto& transfer_manager_it = transfer_managers_.find(endpoint_id);
+  if (transfer_manager_it != transfer_managers_.end()) {
+    transfer_manager_it->second->OnMediumQualityChanged(medium);
   }
 
   current_upgraded_mediums_.insert_or_assign(endpoint_id, medium);
@@ -907,7 +919,11 @@ void NearbyConnectionsManagerImpl::Reset() {
   for (auto& transfer_manager : transfer_managers_) {
     transfer_manager.second->CancelTransfer();
   }
-  transfer_managers_.clear();
+  absl::flat_hash_map<std::string, std::unique_ptr<TransferManager>>
+      transfer_managers;
+  transfer_managers.swap(transfer_managers_);
+  connections_callback_task_runner_->PostTask(
+      [transfer_managers = std::move(transfer_managers)]() {});
 
   for (auto& entry : pending_outgoing_connections_)
     std::move(entry.second)(entry.first, /*connection=*/nullptr,

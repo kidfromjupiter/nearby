@@ -88,8 +88,7 @@ TEST(OfflineFramesTest, CanParseMessageFromBytes) {
       sub_frame->add_mediums(MediumToConnectionRequestMedium(medium));
     }
   }
-  auto serialized_bytes = ByteArray(tx_message.SerializeAsString());
-  auto ret_value = FromBytes(serialized_bytes);
+  auto ret_value = FromBytes(tx_message.SerializeAsString());
   ASSERT_TRUE(ret_value.ok());
   const auto& rx_message = ret_value.result();
   EXPECT_THAT(rx_message, EqualsProto(tx_message));
@@ -141,8 +140,8 @@ TEST(OfflineFramesTest, CanGenerateLegacyConnectionRequest) {
                                      kMediums.begin(), kMediums.end()),
                                  kKeepAliveIntervalMillis,
                                  kKeepAliveTimeoutMillis};
-  ByteArray bytes = ForConnectionRequestConnections({}, connection_info);
-  auto response = FromBytes(bytes);
+  auto response =
+      FromBytes(ForConnectionRequestConnections({}, connection_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -208,9 +207,8 @@ TEST(OfflineFramesTest, CanGenerateConnectionsConnectionRequest) {
                                  kKeepAliveIntervalMillis,
                                  kKeepAliveTimeoutMillis,
                                  medium_role};
-  ByteArray bytes =
-      ForConnectionRequestConnections(connections_device, connection_info);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(
+      ForConnectionRequestConnections(connections_device, connection_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -268,9 +266,8 @@ TEST(OfflineFramesTest, CanGeneratePresenceConnectionRequest) {
   presence_device.set_endpoint_type(
       location::nearby::connections::PRESENCE_ENDPOINT);
   presence_device.set_device_name("TEST DEVICE");
-  ByteArray bytes =
-      ForConnectionRequestPresence(presence_device, connection_info);
-  auto response = FromBytes(bytes);
+  auto response =
+      FromBytes(ForConnectionRequestPresence(presence_device, connection_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -292,7 +289,7 @@ TEST(OfflineFramesTest,
           supports_5_ghz: true
           bssid: "FF:FF:FF:FF:FF:FF"
           ap_frequency: 2412
-          supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_PIN
+          supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_DEVICE_NAME
           supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_PASSWORD
         >
         mediums: MDNS
@@ -327,7 +324,7 @@ TEST(OfflineFramesTest,
                                  kKeepAliveIntervalMillis,
                                  kKeepAliveTimeoutMillis};
   connection_info.supported_wifi_direct_auth_types = {
-      WifiDirectAuthType::WIFI_DIRECT_WITH_PIN,
+      WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME,
       WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD};
 
   location::nearby::connections::ConnectionsDevice connections_device;
@@ -336,9 +333,8 @@ TEST(OfflineFramesTest,
       location::nearby::connections::CONNECTIONS_ENDPOINT);
   connections_device.set_endpoint_info("XYZ");
 
-  ByteArray bytes =
-      ForConnectionRequestConnections(connections_device, connection_info);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(
+      ForConnectionRequestConnections(connections_device, connection_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -354,7 +350,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionResponse) {
         status: 1
         response: REJECT
         os_info { type: LINUX }
-        multiplex_socket_bitmask: 0x01
+        multiplex_socket_bitmask: 0
         safe_to_disconnect_version: 5
       >
     >)pb";
@@ -365,9 +361,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionResponse) {
       config_package_nearby::nearby_connections_feature::
           kSafeToDisconnectVersion,
       5);
-  ByteArray bytes =
-      ForConnectionResponse(1, os_info, /*multiplex_socket_bitmask=*/0x01);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForConnectionResponse(1, os_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -393,8 +387,7 @@ TEST(OfflineFramesTest, CanGenerateControlPayloadTransfer) {
         control_message: < event: PAYLOAD_CANCELED offset: 150 >
       >
     >)pb";
-  ByteArray bytes = ForControlPayloadTransfer(header, control);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForControlPayloadTransfer(header, control));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -421,8 +414,7 @@ TEST(OfflineFramesTest, CanGenerateDataPayloadTransfer) {
         payload_chunk: < flags: 1 offset: 150 body: "payload data" >
       >
     >)pb";
-  ByteArray bytes = ForDataPayloadTransfer(header, chunk);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForDataPayloadTransfer(header, chunk));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -439,8 +431,7 @@ TEST(OfflineFramesTest, CanGeneratePayloadAckPayloadTransfer) {
         payload_header: < id: 12345 total_size: -1 >
       >
     >)pb";
-  ByteArray bytes = ForPayloadAckPayloadTransfer(12345);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForPayloadAckPayloadTransfer(12345));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -487,9 +478,8 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiHotspotPathAvailable) {
   address_candidate = credentials.add_address_candidates();
   address_candidate->set_ip_address(std::string("\xc0\xa8\x00\x01", 4));
   address_candidate->set_port(5678);
-  ByteArray bytes =
-      ForBwuWifiHotspotPathAvailable(std::move(credentials), false);
-  auto response = FromBytes(bytes);
+  auto response =
+      FromBytes(ForBwuWifiHotspotPathAvailable(std::move(credentials), false));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -521,7 +511,7 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiLanPathAvailable) {
         >
       >
     >)pb";
-  ByteArray bytes = ForBwuWifiLanPathAvailable(
+  std::string bytes = ForBwuWifiLanPathAvailable(
       {ServiceAddress{
            .address = {'\x2a', '\x00', '\x79', '\xe0', '\x2e', '\x87', '\x00',
                        '\x06', '\xb7', '\x28', '\x67', '\x45', '\x7a', '\xdd',
@@ -555,9 +545,8 @@ TEST(OfflineFramesTest, CanGenerateBwuAwdlPathAvailable) {
         >
       >
     >)pb";
-  ByteArray bytes = ForBwuAwdlPathAvailable("service_name", "nearby_upgrade",
-                                            "password", true);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuAwdlPathAvailable(
+      "service_name", "nearby_upgrade", "password", true));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -583,9 +572,9 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiAwarePathAvailable) {
         >
       >
     >)pb";
-  ByteArray bytes = ForBwuWifiAwarePathAvailable("service_id", "service_info",
-                                                 "password", false);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(
+      ForBwuWifiAwarePathAvailable("service_id", "service_info", "password",
+                                   /*supports_disabling_encryption=*/false));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -607,7 +596,7 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiDirectPathAvailable) {
             port: 1000
             frequency: 2412
             gateway: "192.168.1.1"
-            service_name: "NC-WifiDirectTest"
+            device_name: "NC-WifiDirectTest"
             pin: "b592f7d3"
           >
           supports_disabling_encryption: false
@@ -615,10 +604,10 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiDirectPathAvailable) {
         >
       >
     >)pb";
-  ByteArray bytes = ForBwuWifiDirectPathAvailable(
-      "", "", 1000, 2412, false, "192.168.1.1",
-      "NC-WifiDirectTest", "b592f7d3");
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuWifiDirectPathAvailable(
+      /*ssid=*/"", /*password=*/"", /*port=*/1000, /*frequency=*/2412,
+      /*supports_disabling_encryption=*/false, "192.168.1.1",
+      "NC-WifiDirectTest", "b592f7d3"));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -644,8 +633,8 @@ TEST(OfflineFramesTest, CanGenerateBwuBluetoothPathAvailable) {
     >)pb";
   MacAddress mac_address;
   MacAddress::FromString("11:22:33:44:55:66", mac_address);
-  ByteArray bytes = ForBwuBluetoothPathAvailable("service", mac_address);
-  auto response = FromBytes(bytes);
+  auto response =
+      FromBytes(ForBwuBluetoothPathAvailable("service", mac_address));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -659,8 +648,7 @@ TEST(OfflineFramesTest, CanGenerateBwuLastWrite) {
       type: BANDWIDTH_UPGRADE_NEGOTIATION
       bandwidth_upgrade_negotiation: < event_type: LAST_WRITE_TO_PRIOR_CHANNEL >
     >)pb";
-  ByteArray bytes = ForBwuLastWrite();
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuLastWrite());
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -674,8 +662,7 @@ TEST(OfflineFramesTest, CanGenerateBwuSafeToClose) {
       type: BANDWIDTH_UPGRADE_NEGOTIATION
       bandwidth_upgrade_negotiation: < event_type: SAFE_TO_CLOSE_PRIOR_CHANNEL >
     >)pb";
-  ByteArray bytes = ForBwuSafeToClose();
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuSafeToClose());
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -695,9 +682,8 @@ TEST(OfflineFramesTest, CanGenerateBwuIntroduction) {
         >
       >
     >)pb";
-  ByteArray bytes = ForBwuIntroduction(
-      std::string(kEndpointId), false /* supports_disabling_encryption */);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuIntroduction(
+      std::string(kEndpointId), false /* supports_disabling_encryption */));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -711,8 +697,7 @@ TEST(OfflineFramesTest, CanGenerateKeepAlive) {
       type: KEEP_ALIVE
       keep_alive: <>
     >)pb";
-  ByteArray bytes = ForKeepAlive();
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForKeepAlive());
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -729,9 +714,9 @@ TEST(OfflineFramesTest, CanGenerateDisconnection) {
         ack_safe_to_disconnect: true
       >
     >)pb";
-  ByteArray bytes = ForDisconnection(/* request_safe_to_disconnect */ true,
-                                     /* ack_safe_to_disconnect */ true);
-  auto response = FromBytes(bytes);
+  auto response =
+      FromBytes(ForDisconnection(/* request_safe_to_disconnect */ true,
+                                 /* ack_safe_to_disconnect */ true));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -760,8 +745,7 @@ TEST(OfflineFramesTest, CanGenerateBwuPathRequest) {
   mediums.push_back(Medium::WIFI_HOTSPOT);
   MediumRole medium_role;
   medium_role.set_support_wifi_hotspot_client(true);
-  ByteArray bytes = ForBwuPathRequest(mediums, medium_role);
-  auto response = FromBytes(bytes);
+  auto response = FromBytes(ForBwuPathRequest(mediums, medium_role));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -772,8 +756,8 @@ TEST(OfflineFramesTest, WFDAuthTypeToMediumMetadataWFDAuthType) {
                 WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD),
             MediumMetadata::WIFI_DIRECT_WITH_PASSWORD);
   EXPECT_EQ(WFDAuthTypeToMediumMetadataWFDAuthType(
-                WifiDirectAuthType::WIFI_DIRECT_WITH_PIN),
-            MediumMetadata::WIFI_DIRECT_WITH_PIN);
+                WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME),
+            MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME);
   EXPECT_EQ(WFDAuthTypeToMediumMetadataWFDAuthType(
                 WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN),
             MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN);
@@ -784,8 +768,8 @@ TEST(OfflineFramesTest, MediumMetadataWFDAuthTypeToWFDAuthType) {
                 MediumMetadata::WIFI_DIRECT_WITH_PASSWORD),
             WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD);
   EXPECT_EQ(MediumMetadataWFDAuthTypeToWFDAuthType(
-                MediumMetadata::WIFI_DIRECT_WITH_PIN),
-            WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
+                MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME),
+            WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME);
   EXPECT_EQ(MediumMetadataWFDAuthTypeToWFDAuthType(
                 MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN),
             WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN);
@@ -796,11 +780,11 @@ TEST(OfflineFramesTest, MediumMetadataWFDAuthTypesToWFDAuthTypes) {
   medium_metadata.add_supported_wifi_direct_auth_types(
       MediumMetadata::WIFI_DIRECT_WITH_PASSWORD);
   medium_metadata.add_supported_wifi_direct_auth_types(
-      MediumMetadata::WIFI_DIRECT_WITH_PIN);
+      MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME);
 
   std::vector<WifiDirectAuthType> expected = {
       WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD,
-      WifiDirectAuthType::WIFI_DIRECT_WITH_PIN};
+      WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME};
 
   EXPECT_THAT(MediumMetadataWFDAuthTypesToWFDAuthTypes(medium_metadata),
               Pointwise(testing::Eq(), expected));
