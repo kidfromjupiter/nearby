@@ -1,4 +1,0 @@
-/usr/bin/nearby_qml_file_tray_app
-/usr/lib/libnearby_sharing_api_shared.so
-/usr/share/applications/nearby-file-share.desktop
-/usr/share/icons/hicolor/48x48/apps/nearby-file-share.png

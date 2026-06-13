@@ -1,9 +1,0 @@
--rootPath
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app
--cmake-output
--output-file
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/build-appimage/.qt/qml_imports/nearby_qml_file_tray_app_conf.cmake
--importPath
-/home/lasan/Dev/nearby_latest/sharing/linux/qml_tray_app/build-appimage
--importPath
-/usr/lib64/qt6/qml
