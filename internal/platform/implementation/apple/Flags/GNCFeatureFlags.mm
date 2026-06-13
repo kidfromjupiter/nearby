@@ -48,4 +48,18 @@
           kEnableSharedPeripheralManager);
 }
 
+<<<<<<< HEAD
+=======
++ (BOOL)singleCopyEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableSingleCopy);
+}
+
++ (BOOL)fixBleServerSocketDeadlockEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kFixBleServerSocketDeadlock);
+}
+
+>>>>>>> nearby/main
 @end

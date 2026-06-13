@@ -30,9 +30,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/base",
-        "//internal/platform:types",
-        "//internal/platform/implementation:account_manager",
         "//internal/platform/implementation:types",
+        "//location/nearby/sharing/lib/account:account_manager",
         "//sharing/common:enum",
         "//sharing/internal/api:platform",
         "//sharing/internal/base:utf_utils",
@@ -68,9 +67,10 @@ cc_test(
     ],
     deps = [
         ":local_device_data",
-        "//internal/platform/implementation:account_manager",
         "//internal/platform/implementation:platform_impl",
         "//internal/test",
+        "//location/nearby/sharing/lib/account:account_manager",
+        "//location/nearby/sharing/lib/account:fake_account_manager",
         "//sharing/common",
         "//sharing/common:enum",
         "//sharing/internal/test:nearby_test",

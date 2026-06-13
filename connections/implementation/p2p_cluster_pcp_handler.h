@@ -25,6 +25,7 @@
 #include "absl/strings/string_view.h"
 #include "connections/advertising_options.h"
 #include "connections/discovery_options.h"
+#include "connections/implementation/analytics/operation_result_with_medium.h"
 #include "connections/implementation/base_pcp_handler.h"
 #include "connections/implementation/ble_advertisement.h"
 #include "connections/implementation/bluetooth_device_name.h"
@@ -55,12 +56,7 @@
 #include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/nsd_service_info.h"
 #include "internal/platform/wifi_lan.h"
-#ifdef NO_WEBRTC
-#include "connections/implementation/mediums/webrtc_socket_stub.h"
-#include "connections/implementation/mediums/webrtc_stub.h"
-#else
 #include "connections/implementation/mediums/webrtc.h"
-#endif
 #include "connections/implementation/pcp.h"
 #include "connections/implementation/wifi_lan_service_info.h"
 #include "internal/platform/byte_array.h"
@@ -212,8 +208,8 @@ class P2pClusterPcpHandler : public BasePcpHandler {
       ClientProxy* client, const std::string& service_id,
       const DiscoveryOptions& discovery_options,
       std::vector<Medium>& mediums_started_successfully,
-      std::vector<location::nearby::analytics::proto::ConnectionsLog::
-                      OperationResultWithMedium>& operation_result_with_mediums,
+      std::vector<nearby::analytics::OperationResultWithMedium>&
+          operation_result_with_mediums,
       int update_index);
   BasePcpHandler::ConnectImplResult BluetoothConnectImpl(
       ClientProxy* client, BluetoothEndpoint* endpoint);

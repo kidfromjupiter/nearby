@@ -23,28 +23,23 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "connections/implementation/mediums/multiplex/multiplex_socket.h"
+#include "connections/implementation/bwu_handler.h"
+#include "connections/implementation/mediums/awdl_bwu_handler.h"
 #include "connections/implementation/mediums/utils.h"
-#include "connections/medium_selector.h"
 #include "internal/platform/awdl.h"
-#include "internal/platform/base64_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/implementation/psk_info.h"
-#include "internal/platform/implementation/wifi_utils.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/nsd_service_info.h"
-#include "internal/platform/socket.h"
-#include "internal/platform/types.h"
 
 namespace nearby {
 namespace connections {
 namespace {
 
-using MultiplexSocket = mediums::multiplex::MultiplexSocket;
 using location::nearby::proto::connections::OperationResultCode;
 constexpr absl::string_view kAwdlServiceIdSuffixForServiceType = "_AWDL";
 
@@ -477,6 +472,12 @@ ErrorOr<AwdlSocket> Awdl::InternalConnect(
   LOG(INFO) << "Successfully connected via Awdl [service_id=" << service_id
             << "]";
   return socket;
+}
+
+std::unique_ptr<BwuHandler> Awdl::CreateBwuHandler(
+    BwuHandler::IncomingConnectionCallback incoming_connection_callback) {
+  return std::make_unique<AwdlBwuHandler>(
+      this, std::move(incoming_connection_callback));
 }
 
 }  // namespace connections

@@ -21,18 +21,16 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/time/time.h"
+#include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "internal/platform/mutex.h"
-#include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 using DisconnectionReason =
     ::location::nearby::proto::connections::DisconnectionReason;
-using SafeDisconnectionResult = ::location::nearby::analytics::proto::
-    ConnectionsLog::EstablishedConnection::SafeDisconnectionResult;
+using SafeDisconnectionResult = nearby::analytics::SafeDisconnectionResult;
 
 // NOTE(std::string):
 // All the strings in internal class public interfaces should be exchanged as
@@ -59,7 +57,7 @@ class EndpointChannelManager final {
   // be closed before continuing the registration.
   void RegisterChannelForEndpoint(ClientProxy* client,
                                   const std::string& endpoint_id,
-                                  std::unique_ptr<EndpointChannel> channel)
+                                  std::shared_ptr<EndpointChannel> channel)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   // Replaces the EndpointChannel to be associated with an endpoint from here on
@@ -67,7 +65,7 @@ class EndpointChannelManager final {
   // to the newly-provided EndpointChannel.
   void ReplaceChannelForEndpoint(ClientProxy* client,
                                  const std::string& endpoint_id,
-                                 std::unique_ptr<EndpointChannel> channel,
+                                 std::shared_ptr<EndpointChannel> channel,
                                  bool enable_encryption)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
@@ -168,7 +166,7 @@ class EndpointChannelManager final {
     // Stores a new EndpointChannel for the endpoint.
     // Prevoius one is destroyed, if it existed.
     void UpdateChannelForEndpoint(const std::string& endpoint_id,
-                                  std::unique_ptr<EndpointChannel> channel);
+                                  std::shared_ptr<EndpointChannel> channel);
 
     // Stores a new EncryptionContext for the endpoint.
     // Prevoius one is destroyed, if it existed.
@@ -207,7 +205,7 @@ class EndpointChannelManager final {
 
   void SetActiveEndpointChannel(ClientProxy* client,
                                 const std::string& endpoint_id,
-                                std::unique_ptr<EndpointChannel> channel,
+                                std::shared_ptr<EndpointChannel> channel,
                                 bool enable_encryption)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
@@ -215,7 +213,6 @@ class EndpointChannelManager final {
   ChannelState channel_state_;
 };
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections
 
 #endif  // CORE_INTERNAL_ENDPOINT_CHANNEL_MANAGER_H_

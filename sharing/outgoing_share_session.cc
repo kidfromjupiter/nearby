@@ -41,7 +41,9 @@
 #include "sharing/nearby_connections_types.h"
 #include "sharing/nearby_sharing_util.h"
 #include "sharing/payload_tracker.h"
+#include "sharing/proto/wire_format.pb.h"
 #include "sharing/share_session.h"
+#include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
 #include "sharing/text_attachment.h"
 #include "sharing/thread_timer.h"
@@ -55,6 +57,8 @@ namespace {
 using ::location::nearby::proto::sharing::ConnectionLayerStatus;
 using ::location::nearby::proto::sharing::EstablishConnectionStatus;
 using ::nearby::sharing::proto::DataUsage;
+using ::nearby::sharing::service::proto::BindingRequest;
+using ::nearby::sharing::service::proto::BindingResponse;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
 using ::nearby::sharing::service::proto::Frame;
 using ::nearby::sharing::service::proto::IntroductionFrame;
@@ -182,6 +186,7 @@ bool OutgoingShareSession::InitiateSendAttachments(
                     "create payloads.";
     UpdateTransferMetadata(
         TransferMetadataBuilder()
+            .set_usage(session_usage())
             .set_status(TransferMetadata::Status::kMediaUnavailable)
             .build());
   }
@@ -316,7 +321,8 @@ bool OutgoingShareSession::FillIntroductionFrame(
 }
 
 bool OutgoingShareSession::AcceptTransfer(
-    std::function<void(std::optional<ConnectionResponseFrame>)>
+    std::function<void(bool is_timeout,
+                       std::optional<ConnectionResponseFrame>)>
         response_callback) {
   if (!IsConnected()) {
     LOG(WARNING) << "Accept invoked for unconnected share target";
@@ -330,6 +336,7 @@ bool OutgoingShareSession::AcceptTransfer(
   // Wait for remote accept in response frame.
   UpdateTransferMetadata(
       TransferMetadataBuilder()
+          .set_usage(session_usage())
           .set_token(token())
           .set_status(TransferMetadata::Status::kAwaitingRemoteAcceptance)
           .build());
@@ -339,10 +346,10 @@ bool OutgoingShareSession::AcceptTransfer(
       [callback = std::move(response_callback)](bool is_timeout,
                                                 std::optional<V1Frame> frame) {
         if (!frame.has_value()) {
-          callback(std::nullopt);
+          callback(is_timeout, std::nullopt);
           return;
         }
-        callback(frame->connection_response());
+        callback(is_timeout, frame->connection_response());
       },
       kReadResponseFrameTimeout);
   return true;
@@ -404,6 +411,7 @@ void OutgoingShareSession::SendAttachmentsCompleted(
 
 bool OutgoingShareSession::SendIntroduction(
     std::function<void()> timeout_callback) {
+  set_session_usage(ShareSessionUsage::kSharing);
   Frame frame;
   frame.set_version(Frame::V1);
   V1Frame* v1_frame = frame.mutable_v1();
@@ -429,14 +437,15 @@ bool OutgoingShareSession::SendIntroduction(
 
 std::optional<TransferMetadata::Status>
 OutgoingShareSession::HandleConnectionResponse(
-    std::optional<ConnectionResponseFrame> response) {
+    bool is_timeout, std::optional<ConnectionResponseFrame> response) {
   // Stop accept timer.
   mutual_acceptance_timeout_.reset();
 
   if (!response.has_value()) {
     LOG(WARNING)
         << "Failed to read a response from the remote device. Disconnecting.";
-    return TransferMetadata::Status::kFailed;
+    return is_timeout ? TransferMetadata::Status::kTimedOut
+                      : TransferMetadata::Status::kFailed;
   }
 
   VLOG(1) << "Successfully read the connection response frame.";
@@ -445,6 +454,7 @@ OutgoingShareSession::HandleConnectionResponse(
     case ConnectionResponseFrame::ACCEPT: {
       UpdateTransferMetadata(
           TransferMetadataBuilder()
+              .set_usage(session_usage())
               .set_status(TransferMetadata::Status::kInProgress)
               .build());
       return std::nullopt;
@@ -546,6 +556,7 @@ void OutgoingShareSession::Connect(
   // Send process initialized successfully, from now on status updated
   // will be sent out via TransferUpdates.
   UpdateTransferMetadata(TransferMetadataBuilder()
+                             .set_usage(session_usage())
                              .set_status(TransferMetadata::Status::kConnecting)
                              .build());
   connection_start_time_ = clock().Now();
@@ -622,12 +633,55 @@ OutgoingShareSession::ProcessPayloadTransferUpdates() {
     return std::nullopt;
   }
 
-  std::optional<TransferMetadata> metadata;
+  std::optional<TransferMetadataBuilder> metadata_builder;
   for (; !updates.empty(); updates.pop()) {
-    metadata =
+    metadata_builder =
         get_payload_tracker()->ProcessPayloadUpdate(std::move(updates.front()));
   }
-  return metadata;
+  return metadata_builder.has_value()
+             ? std::make_optional(
+                   metadata_builder->set_usage(session_usage()).build())
+             : std::nullopt;
+}
+
+void OutgoingShareSession::StartPeerBinding(
+    std::string binding_id, BindingRequest::Type binding_type,
+    absl::AnyInvocable<void(BindingResponse::Status)> callback) {
+  Frame frame;
+  frame.set_version(Frame::V1);
+  V1Frame* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BINDINGS);
+  BindingRequest* binding_request =
+      v1_frame->mutable_bindings()->mutable_binding_request();
+  binding_request->set_binding_id(binding_id);
+  binding_request->set_type(binding_type);
+  WriteFrame(frame);
+  LOG(INFO) << "Waiting for bindings response frame from " << share_target().id;
+  UpdateTransferMetadata(
+      TransferMetadataBuilder()
+          .set_usage(session_usage())
+          .set_token(token())
+          .set_status(TransferMetadata::Status::kAwaitingRemoteAcceptance)
+          .build());
+  frames_reader()->ReadFrame(
+      nearby::sharing::service::proto::V1Frame::BINDINGS,
+      [callback = std::move(callback)](
+          bool is_timeout, std::optional<V1Frame> frame) mutable {
+        if (!frame.has_value()) {
+          std::move(callback)(BindingResponse::FAILURE);
+          return;
+        }
+        if (!frame->has_bindings() ||
+            !frame->bindings().has_binding_response() ||
+            frame->bindings().binding_response().status() !=
+                BindingResponse::SUCCESS) {
+          std::move(callback)(BindingResponse::FAILURE);
+          return;
+        }
+        // Peer binding flow completed successfully.
+        std::move(callback)(BindingResponse::SUCCESS);
+      },
+      kReadResponseFrameTimeout);
 }
 
 }  // namespace nearby::sharing

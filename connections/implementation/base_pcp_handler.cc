@@ -36,7 +36,9 @@
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
+#include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/analytics/connection_attempt_metadata_params.h"
+#include "connections/implementation/analytics/operation_result_with_medium.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/connections_authentication_transport.h"
@@ -51,7 +53,6 @@
 #include "connections/implementation/mediums/webrtc_peer_id.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/pcp.h"
-#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/implementation/webrtc_state.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
@@ -84,11 +85,24 @@
 #include "internal/platform/runnable.h"
 #include "internal/platform/wifi.h"
 #include "internal/platform/wifi_lan_connection_info.h"
-#include "proto/connections_enums.pb.h"
 
 namespace nearby::connections {
 
 namespace {
+using ::location::nearby::connections::ConnectionRequestFrame;
+using ::location::nearby::connections::ConnectionResponseFrame;
+using ::location::nearby::connections::ConnectionsDevice;
+using ::location::nearby::connections::MediumMetadata;
+using ::location::nearby::connections::OfflineFrame;
+using ::location::nearby::connections::OsInfo;
+using ::location::nearby::connections::PresenceDevice;
+using ::location::nearby::connections::V1Frame;
+using ::location::nearby::proto::connections::OperationResultCode;
+using ::location::nearby::proto::connections::WifiDirectAuthType;
+using ::nearby::analytics::AnalyticsRecorder;
+using ::nearby::analytics::OperationResultWithMedium;
+using ::securegcm::UKey2Handshake;
+
 constexpr int kEndpointCancelAlarmTimeout = 10;
 
 std::string AuthenticationStatusToString(nearby::AuthenticationStatus status) {
@@ -101,20 +115,8 @@ std::string AuthenticationStatusToString(nearby::AuthenticationStatus status) {
       return "failure";
   }
 }
-}  // namespace
 
-using ::location::nearby::analytics::proto::ConnectionsLog;
-using ::location::nearby::connections::ConnectionRequestFrame;
-using ::location::nearby::connections::ConnectionResponseFrame;
-using ::location::nearby::connections::ConnectionsDevice;
-using ::location::nearby::connections::MediumMetadata;
-using ::location::nearby::connections::OfflineFrame;
-using ::location::nearby::connections::OsInfo;
-using ::location::nearby::connections::PresenceDevice;
-using ::location::nearby::connections::V1Frame;
-using ::location::nearby::proto::connections::OperationResultCode;
-using ::location::nearby::proto::connections::WifiDirectAuthType;
-using ::securegcm::UKey2Handshake;
+}  // namespace
 
 BasePcpHandler::BasePcpHandler(Mediums* mediums,
                                EndpointManager* endpoint_manager,
@@ -212,8 +214,7 @@ std::vector<ConnectionInfoVariant> BasePcpHandler::GetConnectionInfoFromResult(
       }
       WifiLanConnectionInfo info(
           std::string(ip_address.begin(), ip_address.end()),
-          absl::StrCat(absl::Hex(port, absl::kZeroPad16)), "",
-          {});
+          absl::StrCat(absl::Hex(port, absl::kZeroPad16)), "", {});
       connection_infos.push_back(info);
     }
   }
@@ -279,11 +280,10 @@ Status BasePcpHandler::StartAdvertising(
         // Save the advertising options for local reference in later process
         // like upgrading bandwidth.
         advertising_listener_ = info.listener;
-        client->StartedAdvertising(
-            service_id, GetStrategy(), info.listener,
-            absl::MakeSpan(result.mediums),
-            std::move(result.operation_result_with_mediums),
-            compatible_advertising_options);
+        client->StartedAdvertising(service_id, GetStrategy(), info.listener,
+                                   absl::MakeSpan(result.mediums),
+                                   result.operation_result_with_mediums,
+                                   compatible_advertising_options);
         client->UpdateLocalEndpointInfo(info.endpoint_info.string_data());
         response.Set({Status::kSuccess});
       });
@@ -424,25 +424,25 @@ BooleanMediumSelector BasePcpHandler::ComputeIntersectionOfSupportedMediums(
             pending_connection_info.connection_options.connection_info
                 .supported_wifi_direct_auth_types;
         LOG(INFO) << "Remote supported WifiDirect auth types: "
-                << absl::StrJoin(
-                       remote_supported_wifi_direct_auth_types, ", ",
-                       [](std::string* out, int auth_type) {
-                         absl::StrAppend(
-                             out,
-                             WifiDirectAuthType_Name(
-                                 static_cast<WifiDirectAuthType>(auth_type)));
-                       });
+                  << absl::StrJoin(
+                         remote_supported_wifi_direct_auth_types, ", ",
+                         [](std::string* out, int auth_type) {
+                           absl::StrAppend(
+                               out,
+                               WifiDirectAuthType_Name(
+                                   static_cast<WifiDirectAuthType>(auth_type)));
+                         });
         auto local_supported_wifi_direct_auth_types =
             mediums_->GetWifiDirect().GetSupportedWifiDirectAuthTypes();
         LOG(INFO) << "Local supported WifiDirect auth types: "
-                << absl::StrJoin(
-                       local_supported_wifi_direct_auth_types, ", ",
-                       [](std::string* out, int auth_type) {
-                         absl::StrAppend(
-                             out,
-                             WifiDirectAuthType_Name(
-                                 static_cast<WifiDirectAuthType>(auth_type)));
-                       });
+                  << absl::StrJoin(
+                         local_supported_wifi_direct_auth_types, ", ",
+                         [](std::string* out, int auth_type) {
+                           absl::StrAppend(
+                               out,
+                               WifiDirectAuthType_Name(
+                                   static_cast<WifiDirectAuthType>(auth_type)));
+                         });
         bool found_common_auth_type = false;
         for (const auto& auth_type : local_supported_wifi_direct_auth_types) {
           if (auth_type == WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN) {
@@ -510,11 +510,11 @@ Status BasePcpHandler::StartDiscovery(ClientProxy* client,
               MutexLock lock(&discovered_endpoint_mutex_);
               discovered_endpoints_.clear();
             }
-            client->StartedDiscovery(
-                service_id, GetStrategy(), std::move(listener),
-                absl::MakeSpan(result.mediums),
-                std::move(result.operation_result_with_mediums),
-                stripped_discovery_options);
+            client->StartedDiscovery(service_id, GetStrategy(),
+                                     std::move(listener),
+                                     absl::MakeSpan(result.mediums),
+                                     result.operation_result_with_mediums,
+                                     stripped_discovery_options);
             response.Set({Status::kSuccess});
           });
   return WaitForResult(absl::StrCat("StartDiscovery(", service_id, ")"),
@@ -587,34 +587,50 @@ void BasePcpHandler::RunOnPcpHandlerThread(const std::string& name,
   serial_executor_.Execute(name, std::move(runnable));
 }
 
-EncryptionRunner::ResultListener BasePcpHandler::GetResultListener() {
+EncryptionRunner::ResultListener BasePcpHandler::GetResultListener(
+    std::shared_ptr<EndpointChannel> endpoint_channel) {
+  std::weak_ptr<EndpointChannel> weak_channel = endpoint_channel;
+
   return {
       .on_success_cb =
-          [this](const std::string& endpoint_id,
-                 std::unique_ptr<UKey2Handshake> ukey2,
-                 const std::string& auth_token,
-                 const ByteArray& raw_auth_token) {
+          [this, weak_channel](const std::string& endpoint_id,
+                               std::unique_ptr<UKey2Handshake> ukey2,
+                               const std::string& auth_token,
+                               const ByteArray& raw_auth_token) {
+            auto channel = weak_channel.lock();
+            if (!channel) return;
+
             RunOnPcpHandlerThread(
                 "encryption-success",
-                [this, endpoint_id, raw_ukey2 = ukey2.release(), auth_token,
-                 raw_auth_token]() RUN_ON_PCP_HANDLER_THREAD() mutable {
-                  OnEncryptionSuccessRunnable(
-                      endpoint_id, std::unique_ptr<UKey2Handshake>(raw_ukey2),
-                      auth_token, raw_auth_token);
-                });
+                [this, endpoint_id, weak_channel, raw_ukey2 = ukey2.release(),
+                 auth_token, raw_auth_token]()
+                    RUN_ON_PCP_HANDLER_THREAD() mutable {
+                      std::unique_ptr<UKey2Handshake> ukey2(raw_ukey2);
+                      auto channel = weak_channel.lock();
+                      if (!channel) return;
+                      OnEncryptionSuccessRunnable(endpoint_id, std::move(ukey2),
+                                                  auth_token, raw_auth_token,
+                                                  channel);
+                    });
           },
       .on_failure_cb =
-          [this](const std::string& endpoint_id, EndpointChannel* channel) {
+          [this, weak_channel](const std::string& endpoint_id) {
+            auto channel = weak_channel.lock();
+            if (!channel) return;
+
             RunOnPcpHandlerThread(
                 "encryption-failure",
-                [this, endpoint_id, channel]() RUN_ON_PCP_HANDLER_THREAD() {
-                  LOG(ERROR)
-                      << "Encryption failed for endpoint_id=" << endpoint_id
-                      << " on medium="
-                      << location::nearby::proto::connections::Medium_Name(
-                             channel->GetMedium());
-                  OnEncryptionFailureRunnable(endpoint_id, channel);
-                });
+                [this, endpoint_id, weak_channel]()
+                    RUN_ON_PCP_HANDLER_THREAD() {
+                      auto channel = weak_channel.lock();
+                      if (!channel) return;
+                      LOG(ERROR)
+                          << "Encryption failed for endpoint_id=" << endpoint_id
+                          << " on medium="
+                          << location::nearby::proto::connections::Medium_Name(
+                                 channel->GetMedium());
+                      OnEncryptionFailureRunnable(endpoint_id, channel);
+                    });
           },
   };
 }
@@ -622,36 +638,49 @@ EncryptionRunner::ResultListener BasePcpHandler::GetResultListener() {
 EncryptionRunner::ResultListener BasePcpHandler::GetResultListenerV3(
     const NearbyDeviceProvider& device_provider,
     const NearbyDevice& remote_device,
-    const EndpointChannel& endpoint_channel) {
+    std::shared_ptr<EndpointChannel> endpoint_channel) {
+  std::weak_ptr<EndpointChannel> weak_channel = endpoint_channel;
+
   return {
       .on_success_cb =
-          [this, &device_provider, &remote_device, &endpoint_channel](
+          [this, &device_provider, &remote_device, weak_channel](
               const std::string& endpoint_id,
               std::unique_ptr<UKey2Handshake> ukey2,
               const std::string& auth_token, const ByteArray& raw_auth_token) {
+            auto channel = weak_channel.lock();
+            if (!channel) return;
+
             RunOnPcpHandlerThread(
                 "encryption-success",
-                [this, &device_provider, &remote_device, &endpoint_channel,
-                 raw_ukey2 = ukey2.release(), auth_token,
-                 raw_auth_token]() RUN_ON_PCP_HANDLER_THREAD() mutable {
-                  OnEncryptionSuccessRunnableV3(
-                      remote_device, std::unique_ptr<UKey2Handshake>(raw_ukey2),
-                      auth_token, raw_auth_token, endpoint_channel,
-                      device_provider);
-                });
+                [this, &device_provider, &remote_device, weak_channel,
+                 raw_ukey2 = ukey2.release(), auth_token, raw_auth_token]()
+                    RUN_ON_PCP_HANDLER_THREAD() mutable {
+                      std::unique_ptr<UKey2Handshake> ukey2(raw_ukey2);
+                      auto channel = weak_channel.lock();
+                      if (!channel) return;
+                      OnEncryptionSuccessRunnableV3(
+                          remote_device, std::move(ukey2), auth_token,
+                          raw_auth_token, channel, device_provider);
+                    });
           },
       .on_failure_cb =
-          [this](const std::string& endpoint_id, EndpointChannel* channel) {
+          [this, weak_channel](const std::string& endpoint_id) {
+            auto channel = weak_channel.lock();
+            if (!channel) return;
+
             RunOnPcpHandlerThread(
                 "encryption-failure",
-                [this, endpoint_id, channel]() RUN_ON_PCP_HANDLER_THREAD() {
-                  LOG(ERROR)
-                      << "Encryption failed for endpoint_id=" << endpoint_id
-                      << " on medium="
-                      << location::nearby::proto::connections::Medium_Name(
-                             channel->GetMedium());
-                  OnEncryptionFailureRunnable(endpoint_id, channel);
-                });
+                [this, endpoint_id, weak_channel]()
+                    RUN_ON_PCP_HANDLER_THREAD() {
+                      auto channel = weak_channel.lock();
+                      if (!channel) return;
+                      LOG(ERROR)
+                          << "Encryption failed for endpoint_id=" << endpoint_id
+                          << " on medium="
+                          << location::nearby::proto::connections::Medium_Name(
+                                 channel->GetMedium());
+                      OnEncryptionFailureRunnable(endpoint_id, channel);
+                    });
           },
   };
 }
@@ -659,7 +688,7 @@ EncryptionRunner::ResultListener BasePcpHandler::GetResultListenerV3(
 void BasePcpHandler::OnEncryptionSuccessRunnableV3(
     const NearbyDevice& remote_device, std::unique_ptr<UKey2Handshake> ukey2,
     absl::string_view auth_token, const ByteArray& raw_auth_token,
-    const EndpointChannel& endpoint_channel,
+    std::shared_ptr<EndpointChannel> endpoint_channel,
     const NearbyDeviceProvider& device_provider) {
   // Quick fail if we've been removed from pending connections while we were
   // busy running UKEY2.
@@ -674,7 +703,11 @@ void BasePcpHandler::OnEncryptionSuccessRunnableV3(
   }
 
   BasePcpHandler::PendingConnectionInfo& pending_connection_info = it->second;
-
+  // Verify pointer equality to avoid accidental action on superseded
+  // channels.
+  if (endpoint_channel != pending_connection_info.channel) {
+    return;
+  }
   // TODO(b/300149127): Add test coverage.
   if (!ukey2) {
     // Fail early, if there is no crypto context.
@@ -697,8 +730,15 @@ void BasePcpHandler::OnEncryptionSuccessRunnableV3(
   //
   // TODO(b/305004353): Authenticate the connection in the responder role for
   // outgoing connections.
-  if (!pending_connection_info.is_incoming) {
+  if (pending_connection_info.is_incoming) {
     LOG(ERROR) << __func__ << ": only outgoing connections are supported";
+    ProcessPreConnectionInitiationFailure(
+        pending_connection_info.client, pending_connection_info.medium,
+        remote_device.GetEndpointId(), pending_connection_info.channel.get(),
+        pending_connection_info.is_incoming, /*log_failure=*/true,
+        pending_connection_info.start_time, {Status::kConnectionRejected},
+        OperationResultCode::DETAIL_UNKNOWN,
+        pending_connection_info.result.lock().get());
     return;
   }
 
@@ -724,7 +764,8 @@ void BasePcpHandler::OnEncryptionSuccessRunnableV3(
 
 void BasePcpHandler::OnEncryptionSuccessRunnable(
     const std::string& endpoint_id, std::unique_ptr<UKey2Handshake> ukey2,
-    const std::string& auth_token, const ByteArray& raw_auth_token) {
+    const std::string& auth_token, const ByteArray& raw_auth_token,
+    std::shared_ptr<EndpointChannel> endpoint_channel) {
   // Quick fail if we've been removed from pending connections while we were
   // busy running UKEY2.
   // TODO(b/316421187): Add test coverage
@@ -737,6 +778,12 @@ void BasePcpHandler::OnEncryptionSuccessRunnable(
   }
 
   BasePcpHandler::PendingConnectionInfo& pending_connection_info = it->second;
+
+  // Verify pointer equality to avoid accidental action on superseded
+  // channels.
+  if (endpoint_channel != pending_connection_info.channel) {
+    return;
+  }
 
   if (!ukey2) {
     // Fail early, if there is no crypto context.
@@ -801,24 +848,21 @@ void BasePcpHandler::RegisterDeviceAfterEncryptionSuccess(
 }
 
 void BasePcpHandler::OnEncryptionFailureRunnable(
-    const std::string& endpoint_id, EndpointChannel* endpoint_channel) {
+    const std::string& endpoint_id,
+    std::shared_ptr<EndpointChannel> endpoint_channel) {
   auto it = pending_connections_.find(endpoint_id);
   if (it == pending_connections_.end()) {
     LOG(INFO)
-        << "Connection not found on UKEY negotination complete; endpoint_id="
+        << "Connection not found on UKEY negotiation complete; endpoint_id="
         << endpoint_id;
     return;
   }
 
   BasePcpHandler::PendingConnectionInfo& pending_connection_info = it->second;
-  // We had a bug here, caused by a race with EncryptionRunner. We now verify
-  // the EndpointChannel to avoid it. In a simultaneous connection, we clean
-  // up one of the two EndpointChannels and then update our pendingConnections
-  // with the winning channel's state. Closing a channel that was in the
-  // middle of EncryptionRunner would trigger onEncryptionFailed, and, since
-  // the map had already updated with the winning EndpointChannel, we closed
-  // it too by accident.
-  if (*endpoint_channel != *pending_connection_info.channel) {
+
+  // Verify pointer equality to avoid accidental action on superseded
+  // channels.
+  if (endpoint_channel != pending_connection_info.channel) {
     LOG(INFO) << "Not destroying channel [mismatch]: passed="
               << endpoint_channel->GetName()
               << "; expected=" << pending_connection_info.channel->GetName();
@@ -871,8 +915,8 @@ ConnectionInfo BasePcpHandler::FillConnectionInfo(
     connection_info.supported_wifi_direct_auth_types =
         mediums_->GetWifiDirect().GetSupportedWifiDirectAuthTypes();
     VLOG(1) << "Set SupportedWifiDirectAuthTypes for WIFI_DIRECT: "
-              << absl::StrJoin(connection_info.supported_wifi_direct_auth_types,
-                               ",");
+            << absl::StrJoin(connection_info.supported_wifi_direct_auth_types,
+                             ",");
   } else {
     connection_info.supported_wifi_direct_auth_types = {};
   }
@@ -975,8 +1019,8 @@ Status BasePcpHandler::RequestConnection(
               client, channel_medium, endpoint_id, channel.get(),
               /*is_incoming=*/false, /*log_failure=*/true, start_time,
               {Status::kEndpointIoError},
-              client->GetAnalyticsRecorder()
-                  .GetChannelIoErrorResultCodeFromMedium(channel_medium),
+              AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(
+                  channel_medium),
               result.get());
           return;
         }
@@ -1005,17 +1049,32 @@ Status BasePcpHandler::RequestConnection(
         pending_connection_info.medium = channel->GetMedium();
         pending_connection_info.channel = std::move(channel);
 
-        EndpointChannel* endpoint_channel =
-            pending_connections_
-                .emplace(endpoint_id, std::move(pending_connection_info))
-                .first->second.channel.get();
+        std::shared_ptr<EndpointChannel> channel_to_close_on_failure =
+            pending_connection_info.channel;
+        auto [it, inserted] = pending_connections_.emplace(
+            endpoint_id, std::move(pending_connection_info));
+        if (!inserted) {
+          LOG(ERROR) << "Failed to add outgoing connection to pending set; "
+                        "endpoint_id="
+                     << endpoint_id
+                     << ". Likely a collision with an existing pending "
+                        "connection.";
+          if (channel_to_close_on_failure) {
+            channel_to_close_on_failure->Close(
+                location::nearby::proto::connections::DisconnectionReason::
+                    IO_ERROR);
+          }
+          result->Set({Status::kEndpointIoError});
+          return;
+        }
+        std::shared_ptr<EndpointChannel> endpoint_channel = it->second.channel;
 
         LOG(INFO) << "Initiating secure connection: endpoint_id="
                   << endpoint_id;
         // Next, we'll set up encryption. When it's done, our future will return
         // and RequestConnection() will finish.
         encryption_runner_.StartClient(client, endpoint_id, endpoint_channel,
-                                       GetResultListener());
+                                       GetResultListener(endpoint_channel));
       });
   LOG(INFO) << "Waiting for connection to complete: endpoint_id="
             << endpoint_id;
@@ -1122,8 +1181,8 @@ Status BasePcpHandler::RequestConnectionV3(
               client, channel_medium, endpoint_id, channel.get(),
               /*is_incoming=*/false, /*log_failure=*/true, start_time,
               {Status::kEndpointIoError},
-              client->GetAnalyticsRecorder()
-                  .GetChannelIoErrorResultCodeFromMedium(channel_medium),
+              AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(
+                  channel_medium),
               result.get());
           return;
         }
@@ -1144,7 +1203,7 @@ Status BasePcpHandler::RequestConnectionV3(
         pending_connection_info.client = client;
         pending_connection_info.remote_endpoint_info = endpoint->endpoint_info;
         pending_connection_info.nonce = connection_info.nonce;
-        pending_connection_info.is_incoming = true;
+        pending_connection_info.is_incoming = false;
         pending_connection_info.start_time = start_time;
         pending_connection_info.listener = info.listener;
         pending_connection_info.connection_options = connection_options;
@@ -1152,10 +1211,25 @@ Status BasePcpHandler::RequestConnectionV3(
         pending_connection_info.medium = channel->GetMedium();
         pending_connection_info.channel = std::move(channel);
 
-        EndpointChannel* endpoint_channel =
-            pending_connections_
-                .emplace(endpoint_id, std::move(pending_connection_info))
-                .first->second.channel.get();
+        std::shared_ptr<EndpointChannel> channel_to_close_on_failure =
+            pending_connection_info.channel;
+        auto [it, inserted] = pending_connections_.emplace(
+            endpoint_id, std::move(pending_connection_info));
+        if (!inserted) {
+          LOG(ERROR) << "Failed to add outgoing connection to pending set; "
+                        "endpoint_id="
+                     << endpoint_id
+                     << ". Likely a collision with an existing pending "
+                        "connection.";
+          if (channel_to_close_on_failure) {
+            channel_to_close_on_failure->Close(
+                location::nearby::proto::connections::DisconnectionReason::
+                    IO_ERROR);
+          }
+          result->Set({Status::kEndpointIoError});
+          return;
+        }
+        std::shared_ptr<EndpointChannel> endpoint_channel = it->second.channel;
 
         LOG(INFO) << "Initiating secure connection: endpoint_id="
                   << endpoint_id;
@@ -1165,7 +1239,7 @@ Status BasePcpHandler::RequestConnectionV3(
         encryption_runner_.StartClient(
             client, endpoint_id, endpoint_channel,
             GetResultListenerV3(*(client->GetLocalDeviceProvider()),
-                                remote_device, *endpoint_channel));
+                                remote_device, endpoint_channel));
       });
   LOG(INFO) << "Waiting for connection to complete: endpoint_id="
             << endpoint_id;
@@ -1231,22 +1305,21 @@ void BasePcpHandler::StripOutUnavailableMediums(
   }
 }
 
-std::unique_ptr<ConnectionsLog::OperationResultWithMedium>
+OperationResultWithMedium
 BasePcpHandler::GetOperationResultWithMediumByResultCode(
     ClientProxy* client, location::nearby::proto::connections::Medium medium,
     int update_index,
     location::nearby::proto::connections::OperationResultCode
         operation_result_code,
     location::nearby::proto::connections::ConnectionMode connection_mode) {
-  auto operation_result_with_medium =
-      std::make_unique<ConnectionsLog::OperationResultWithMedium>();
-  operation_result_with_medium->set_medium(medium);
-  operation_result_with_medium->set_result_code(operation_result_code);
-  operation_result_with_medium->set_result_category(
+  OperationResultWithMedium operation_result_with_medium;
+  operation_result_with_medium.set_medium(medium);
+  operation_result_with_medium.set_result_code(operation_result_code);
+  operation_result_with_medium.set_result_category(
       client->GetAnalyticsRecorder().GetOperationResultCategory(
           operation_result_code));
-  operation_result_with_medium->set_connection_mode(connection_mode);
-  operation_result_with_medium->set_update_index(update_index);
+  operation_result_with_medium.set_connection_mode(connection_mode);
+  operation_result_with_medium.set_update_index(update_index);
 
   return operation_result_with_medium;
 }
@@ -1512,8 +1585,7 @@ Status BasePcpHandler::AcceptConnection(ClientProxy* client,
 
         Exception write_exception =
             channel->Write(parser::ForConnectionResponse(
-                Status::kSuccess, client->GetLocalOsInfo(),
-                client->GetLocalMultiplexSocketBitmask()));
+                Status::kSuccess, client->GetLocalOsInfo()));
         if (!write_exception.Ok()) {
           LOG(INFO) << "AcceptConnection: failed to send response: endpoint_id="
                     << endpoint_id;
@@ -1574,8 +1646,7 @@ Status BasePcpHandler::RejectConnection(ClientProxy* client,
 
         Exception write_exception =
             channel->Write(parser::ForConnectionResponse(
-                Status::kConnectionRejected, client->GetLocalOsInfo(),
-                client->GetLocalMultiplexSocketBitmask()));
+                Status::kConnectionRejected, client->GetLocalOsInfo()));
         if (!write_exception.Ok()) {
           LOG(INFO) << "RejectConnection: failed to send response: endpoint_id="
                     << endpoint_id;
@@ -1600,8 +1671,7 @@ Status BasePcpHandler::RejectConnection(ClientProxy* client,
 
 void BasePcpHandler::OnIncomingFrame(
     OfflineFrame& frame, const std::string& endpoint_id, ClientProxy* client,
-    location::nearby::proto::connections::Medium medium,
-    PacketMetaData& packet_meta_data) {
+    location::nearby::proto::connections::Medium medium) {
   CountDownLatch latch(1);
   RunOnPcpHandlerThread(
       "incoming-frame",
@@ -1967,8 +2037,7 @@ Exception BasePcpHandler::OnIncomingConnection(
           /*is_incoming=*/true,
           /*log_failure=*/wrapped_frame.exception() != Exception::kNoData,
           start_time, {Status::kError},
-          client->GetAnalyticsRecorder().GetChannelIoErrorResultCodeFromMedium(
-              medium),
+          AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(medium),
           nullptr);
     }
     return wrapped_frame.GetException();
@@ -2133,14 +2202,23 @@ Exception BasePcpHandler::OnIncomingConnection(
   pending_connection_info.medium = channel->GetMedium();
   pending_connection_info.channel = std::move(channel);
 
-  auto* owned_channel = pending_connections_
-                            .emplace(connection_request.endpoint_id(),
-                                     std::move(pending_connection_info))
-                            .first->second.channel.get();
+  auto [it, inserted] = pending_connections_.emplace(
+      connection_request.endpoint_id(), std::move(pending_connection_info));
+  // This should not happen since BreakTie() above should have checked that
+  // the endpoint_id is not already in pending_connections_.
+  if (!inserted) {
+    LOG(ERROR) << "Failed to add incoming connection to pending set; "
+                  "endpoint_id="
+               << connection_request.endpoint_id()
+               << ". Likely a collision with an existing pending connection.";
+    return {Exception::kIo};
+  }
+  std::shared_ptr<EndpointChannel> endpoint_channel = it->second.channel;
 
   // Next, we'll set up encryption.
   encryption_runner_.StartServer(client, connection_request.endpoint_id(),
-                                 owned_channel, GetResultListener());
+                                 endpoint_channel,
+                                 GetResultListener(endpoint_channel));
   return {Exception::kSuccess};
 }
 
@@ -2383,26 +2461,6 @@ void BasePcpHandler::EvaluateConnectionResult(ClientProxy* client,
                                                      std::move(context))) {
       response_code = {Status::kEndpointUnknown};
     }
-
-    std::shared_ptr<EndpointChannel> channel =
-        channel_manager_->GetChannelForEndpoint(endpoint_id);
-    if (channel != nullptr) {
-      if (client->IsMultiplexSocketSupported(endpoint_id,
-                                             channel->GetMedium())) {
-        if (!channel->EnableMultiplexSocket()) {
-          LOG(INFO) << "MultiplexSocket is not implemented for Medium: "
-                    << location::nearby::proto::connections::Medium_Name(
-                           channel->GetMedium());
-        } else {
-          LOG(INFO) << "MultiplexSocket is supported for Medium: "
-                    << location::nearby::proto::connections::Medium_Name(
-                           channel->GetMedium())
-                    << " on both sides.";
-        }
-      }
-    } else {
-      LOG(INFO) << "channel is null";
-    }
   } else {
     LOG(INFO) << "Pending connection rejected; endpoint_id=" << endpoint_id;
     response_code = {Status::kConnectionRejected};
@@ -2477,8 +2535,8 @@ ExceptionOr<OfflineFrame> BasePcpHandler::ReadConnectionRequestFrame(
     return ExceptionOr<OfflineFrame>(wrapped_bytes.exception());
   }
 
-  ByteArray bytes = std::move(wrapped_bytes.result());
-  ExceptionOr<OfflineFrame> wrapped_frame = parser::FromBytes(bytes);
+  ExceptionOr<OfflineFrame> wrapped_frame =
+      parser::FromBytes(wrapped_bytes.result().AsStringView());
   if (wrapped_frame.GetException().Raised(Exception::kInvalidProtocolBuffer)) {
     return ExceptionOr<OfflineFrame>(Exception::kIo);
   }
@@ -2510,7 +2568,7 @@ void BasePcpHandler::LogConnectionAttemptFailure(
       connections_attempt_metadata_params;
   if (endpoint_channel != nullptr) {
     connections_attempt_metadata_params =
-        client->GetAnalyticsRecorder().BuildConnectionAttemptMetadataParams(
+        AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
             endpoint_channel->GetTechnology(), endpoint_channel->GetBand(),
             endpoint_channel->GetFrequency(), endpoint_channel->GetTryCount());
     connections_attempt_metadata_params->operation_result_code =
@@ -2536,12 +2594,11 @@ void BasePcpHandler::LogConnectionAttemptSuccess(
       connections_attempt_metadata_params;
   if (pending_connection_info.channel != nullptr) {
     connections_attempt_metadata_params =
-        pending_connection_info.client->GetAnalyticsRecorder()
-            .BuildConnectionAttemptMetadataParams(
-                pending_connection_info.channel->GetTechnology(),
-                pending_connection_info.channel->GetBand(),
-                pending_connection_info.channel->GetFrequency(),
-                pending_connection_info.channel->GetTryCount());
+        AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
+            pending_connection_info.channel->GetTechnology(),
+            pending_connection_info.channel->GetBand(),
+            pending_connection_info.channel->GetFrequency(),
+            pending_connection_info.channel->GetTryCount());
     connections_attempt_metadata_params->operation_result_code =
         OperationResultCode::DETAIL_SUCCESS;
   } else {

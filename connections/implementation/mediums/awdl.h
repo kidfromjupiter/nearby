@@ -16,6 +16,7 @@
 #define CORE_INTERNAL_MEDIUMS_AWDL_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -24,12 +25,9 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
-#include "connections/implementation/mediums/multiplex/multiplex_socket.h"
-#include "internal/flags/nearby_flags.h"
+#include "connections/implementation/bwu_handler.h"
 #include "internal/platform/awdl.h"
 #include "internal/platform/cancellation_flag.h"
-#include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/implementation/psk_info.h"
 #include "internal/platform/multi_thread_executor.h"
@@ -132,6 +130,9 @@ class Awdl {
   // Credential is for the currently-hosted Wifi ServerSocket (if any).
   AwdlCredential GetCredentials(const std::string& service_id)
       ABSL_LOCKS_EXCLUDED(mutex_);
+
+  std::unique_ptr<BwuHandler> CreateBwuHandler(
+      BwuHandler::IncomingConnectionCallback incoming_connection_callback);
 
  private:
   struct AdvertisingInfo {

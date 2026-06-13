@@ -105,9 +105,6 @@ class IncomingShareSession : public ShareSession {
   // Called when an incoming connection is established.
   void OnConnected(NearbyConnection* connection);
 
-  void ProcessSyncFrame(nearby::sharing::SyncManager& sync_manager,
-    const nearby::sharing::service::proto::SyncFrame& sync_frame);
-
  protected:
   void InvokeTransferUpdateCallback(const TransferMetadata& metadata) override;
 
@@ -128,9 +125,6 @@ class IncomingShareSession : public ShareSession {
   // corresponding Attachment.
   // Returns true if all payloads were successfully finalized.
   bool FinalizePayloads();
-
-  void WriteSyncConfigFrame(
-      const nearby::sharing::service::proto::SyncConfig& config);
 
   std::function<void(const IncomingShareSession&, const TransferMetadata&)>
       transfer_update_callback_;

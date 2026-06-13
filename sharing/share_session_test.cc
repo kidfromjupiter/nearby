@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/analytics/cpp/logging/mock_event_logger.h"
+#include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
@@ -28,11 +30,9 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "internal/analytics/mock_event_logger.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
-#include "sharing/analytics/analytics_recorder.h"
 #include "sharing/certificates/fake_nearby_share_certificate_manager.h"
 #include "sharing/fake_nearby_connections_manager.h"
 #include "sharing/nearby_connection.h"
@@ -97,8 +97,8 @@ class TestShareSession : public ShareSession {
   FakeNearbyConnectionsManager connections_manager_;
   FakeDeviceInfo device_info_;
   nearby::analytics::MockEventLogger mock_event_logger_;
-  analytics::AnalyticsRecorder analytics_recorder_{/*vendor_id=*/0,
-                                                   &mock_event_logger_};
+  analytics::AnalyticsRecorderImpl analytics_recorder_{/*vendor_id=*/0,
+                                                       &mock_event_logger_};
   const bool is_incoming_;
 };
 
@@ -386,20 +386,6 @@ TEST(ShareSessionTest, ProcessKeyVerificationResultNotSelfShareUnable) {
       OSType::WINDOWS));
   EXPECT_EQ(session.os_type(), OSType::WINDOWS);
   EXPECT_FALSE(session.self_share());
-  EXPECT_FALSE(session.token().empty());
-}
-
-TEST(ShareSessionTest, ProcessKeyVerificationResultUnknown) {
-  ShareTarget share_target;
-  TestShareSession session(std::string(kEndpointId), share_target);
-  NearbyConnectionImpl connection(session.device_info());
-  session.SetNearbyConnection(&connection);
-  session.SetTokenForTests("9876");
-
-  EXPECT_FALSE(session.ProcessKeyVerificationResult(
-      PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnknown,
-      OSType::WINDOWS));
-  EXPECT_EQ(session.os_type(), OSType::WINDOWS);
   EXPECT_FALSE(session.token().empty());
 }
 

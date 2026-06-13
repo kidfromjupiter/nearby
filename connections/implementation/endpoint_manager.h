@@ -16,7 +16,6 @@
 #define CORE_INTERNAL_ENDPOINT_MANAGER_H_
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -24,10 +23,9 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
-#include "connections/implementation/analytics/packet_meta_data.h"
+#include "connections/connection_options.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
@@ -36,6 +34,8 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/condition_variable.h"
 #include "internal/platform/count_down_latch.h"
+#include "internal/platform/exception.h"
+#include "internal/platform/mutex.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/single_thread_executor.h"
 
@@ -79,8 +79,7 @@ class EndpointManager {
     virtual void OnIncomingFrame(
         location::nearby::connections::OfflineFrame& offline_frame,
         const std::string& from_endpoint_id, ClientProxy* to_client,
-        location::nearby::proto::connections::Medium current_medium,
-        analytics::PacketMetaData& packet_meta_data) = 0;
+        location::nearby::proto::connections::Medium current_medium) = 0;
 
     // Implementations must call barrier.CountDown() once
     // they're done. This parallelizes the disconnection event across all frame
@@ -114,7 +113,7 @@ class EndpointManager {
   void RegisterEndpoint(ClientProxy* client, const std::string& endpoint_id,
                         const ConnectionResponseInfo& info,
                         const ConnectionOptions& connection_options,
-                        std::unique_ptr<EndpointChannel> channel,
+                        std::shared_ptr<EndpointChannel> channel,
                         const ConnectionListener& listener,
                         const std::string& connection_token);
   // Called when a client explicitly asks to disconnect from this endpoint. In
@@ -133,8 +132,7 @@ class EndpointManager {
           payload_header,
       const location::nearby::connections::PayloadTransferFrame::PayloadChunk&
           payload_chunk,
-      const std::vector<std::string>& endpoint_ids,
-      analytics::PacketMetaData& packet_meta_data);
+      const std::vector<std::string>& endpoint_ids);
   std::vector<std::string> SendControlMessage(
       const location::nearby::connections::PayloadTransferFrame::PayloadHeader&
           payload_header,
@@ -283,9 +281,8 @@ class EndpointManager {
 
   std::vector<std::string> SendTransferFrameBytes(
       const std::vector<std::string>& endpoint_ids,
-      const ByteArray& payload_transfer_frame_bytes, std::int64_t payload_id,
-      std::int64_t offset, const std::string& packet_type,
-      analytics::PacketMetaData& packet_meta_data);
+      const std::string& payload_transfer_frame_bytes, std::int64_t payload_id,
+      std::int64_t offset, const std::string& packet_type);
 
   // Executes all jobs sequentially, on a serial_executor_.
   void RunOnEndpointManagerThread(const std::string& name, Runnable runnable);

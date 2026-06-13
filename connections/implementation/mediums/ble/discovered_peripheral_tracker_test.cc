@@ -17,7 +17,6 @@
 #include <atomic>
 #include <list>
 #include <memory>
-#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -53,7 +52,6 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/uuid.h"
-#include "internal/test/fake_clock.h"
 
 namespace nearby {
 namespace connections {
@@ -223,6 +221,42 @@ class DiscoveredPeripheralTrackerTest
   BlePeripheral CreateBlePeripheral() {
     return BlePeripheral(*ble_central_,
                          adapter_peripheral_->GetAddress().address());
+  }
+
+  void SetupMultipleAdvertisementsState(
+      const BleAdvertisementHeader& header,
+      const BleAdvertisement& advertisement_1,
+      const BleAdvertisement& advertisement_2) {
+    MutexLock lock(&discovered_peripheral_tracker_->mutex_);
+    ByteArray advertisement_bytes_1 = advertisement_1.ByteArrayWithExtraField();
+    ByteArray advertisement_bytes_2 = advertisement_2.ByteArrayWithExtraField();
+    std::vector<const ByteArray*> gatt_advertisement_bytes_list = {
+        &advertisement_bytes_1, &advertisement_bytes_2};
+
+    discovered_peripheral_tracker_->HandleRawGattAdvertisements(
+        CreateBlePeripheral(), header, gatt_advertisement_bytes_list,
+        /*service_uuid=*/{});
+  }
+
+  void RegisterServiceIdCallback(const std::string& service_id,
+                                 CountDownLatch& lost_latch) {
+    discovered_peripheral_tracker_->StartTracking(
+        service_id, /*include_dct_advertisement=*/false, Pcp::kP2pPointToPoint,
+        {
+            .instant_lost_cb =
+                [&lost_latch](
+                    BlePeripheral peripheral, const std::string& service_id,
+                    const ByteArray& advertisement_bytes,
+                    bool fast_advertisement) { lost_latch.CountDown(); },
+        },
+        /*fast_advertisement_service_uuid=*/{});
+  }
+
+  bool CallHandleOnLostAdvertisementLocked(
+      const api::ble::BleAdvertisementData& advertisement_data) {
+    MutexLock lock(&discovered_peripheral_tracker_->mutex_);
+    return discovered_peripheral_tracker_->HandleOnLostAdvertisementLocked(
+        advertisement_data);
   }
 
   // Simulates to see a fast advertisement.
@@ -1270,6 +1304,58 @@ TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
+       InstantLostPeripheralForInstantOnLost_MultipleAdvertisements) {
+  ByteArray advertisement_hash = GenerateRandomAdvertisementHash();
+  BleAdvertisementHeader header(BleAdvertisementHeader::Version::kV2,
+                                /*extended_advertisement=*/false,
+                                /*num_slots=*/1, ByteArray{},  // bloom filter
+                                advertisement_hash,
+                                BleAdvertisementHeader::kDefaultPsmValue);
+
+  ByteArray advertisement_bytes_1 = CreateBleAdvertisement(
+      std::string(kServiceIdA), ByteArray(std::string(kData)),
+      ByteArray(std::string(kDeviceToken)));
+  ByteArray advertisement_bytes_2 = CreateBleAdvertisement(
+      std::string(kServiceIdB), ByteArray(std::string(kData2)),
+      ByteArray(std::string(kDeviceToken)));
+
+  auto adv_status_or_1 =
+      BleAdvertisement::CreateBleAdvertisement(advertisement_bytes_1);
+  ASSERT_OK(adv_status_or_1);
+  BleAdvertisement advertisement_1 = adv_status_or_1.value();
+
+  auto adv_status_or_2 =
+      BleAdvertisement::CreateBleAdvertisement(advertisement_bytes_2);
+  ASSERT_OK(adv_status_or_2);
+  BleAdvertisement advertisement_2 = adv_status_or_2.value();
+
+  // Register callbacks for both Service A and Service B.
+  CountDownLatch lost_latch(2);
+  RegisterServiceIdCallback(std::string(kServiceIdA), lost_latch);
+  RegisterServiceIdCallback(std::string(kServiceIdB), lost_latch);
+
+  // Use helper method to set up state manually.
+  SetupMultipleAdvertisementsState(header, advertisement_1, advertisement_2);
+
+  // Create OnLost advertisement for advertisement_1's hash.
+  auto advertisement = InstantOnLostAdvertisement::CreateFromHashes(
+      std::list<std::string>({std::string(bleutils::GenerateAdvertisementHash(
+          advertisement_1.ByteArrayWithExtraField()))}));
+  ASSERT_OK(advertisement);
+
+  api::ble::BleAdvertisementData loss_advertisement_data{};
+  loss_advertisement_data.service_data.insert(
+      {bleutils::kCopresenceServiceUuid, ByteArray(advertisement->ToBytes())});
+
+  // Call HandleOnLostAdvertisementLocked using helper.
+  bool result = CallHandleOnLostAdvertisementLocked(loss_advertisement_data);
+  EXPECT_TRUE(result);
+
+  // Verify that both are lost (callback triggered twice).
+  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+}
+
+TEST_P(DiscoveredPeripheralTrackerTest,
        IgnoreFoundAdvertisementForInstantOnLost) {
   std::vector<std::string> service_ids = {std::string(kServiceIdA)};
   ByteArray advertisement_hash = GenerateRandomAdvertisementHash();
@@ -1628,9 +1714,6 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
 TEST_P(DiscoveredPeripheralTrackerTest,
        OnlyGattAdvertisementReceivedOnDeviceWithExtended) {
-  std::optional<FakeClock*> fake_clock =
-      MediumEnvironment::Instance().GetSimulatedClock();
-
   std::vector<std::string> service_ids = {std::string(kServiceIdA)};
   ByteArray advertisement_hash = GenerateRandomAdvertisementHash();
   ByteArray advertisement_header_bytes =
@@ -1668,7 +1751,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   // 2. Receive GATT advertisement data again after 4 seconds, it should access
   // GATT server.
-  (*fake_clock)->FastForward(absl::Seconds(4));
+  MediumEnvironment::Instance().FastForward(absl::Seconds(4));
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
@@ -1678,9 +1761,6 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
-  std::optional<FakeClock*> fake_clock =
-      MediumEnvironment::Instance().GetSimulatedClock();
-
   std::vector<std::string> service_ids = {std::string(kServiceIdA)};
   ByteArray advertisement_hash = GenerateRandomAdvertisementHash();
   ByteArray advertisement_header_bytes =
@@ -1718,7 +1798,7 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
 
   // 2. The GATT advertisement is already queued and will be skipped.
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
-  (*fake_clock)->FastForward(absl::Seconds(20));
+  MediumEnvironment::Instance().FastForward(absl::Seconds(20));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
 
   // We should not receive a client callback of a peripheral discovery.
@@ -1729,9 +1809,6 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
 
 TEST_P(DiscoveredPeripheralTrackerTest,
        DiscoveredOnceWhenGattAndExtendedAdvertisementReceived) {
-  std::optional<FakeClock*> fake_clock =
-      MediumEnvironment::Instance().GetSimulatedClock();
-
   std::vector<std::string> service_ids = {std::string(kServiceIdA)};
   ByteArray advertisement_hash = GenerateRandomAdvertisementHash();
   ByteArray advertisement_header_bytes =
@@ -1756,7 +1833,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
               },
       },
       bleutils::kCopresenceServiceUuid);
-  (*fake_clock)->FastForward(absl::Seconds(4));
+  MediumEnvironment::Instance().FastForward(absl::Seconds(4));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
 
   // 1. Received extended advertisement.
@@ -1784,8 +1861,6 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
 TEST_P(DiscoveredPeripheralTrackerTest,
        FindGattAdvertisementInHigherPriorityThanExtendedGattAdvertisement) {
-  std::optional<FakeClock*> fake_clock =
-      MediumEnvironment::Instance().GetSimulatedClock();
   std::vector<std::string> service_ids = {std::string(kServiceIdA)};
   ByteArray advertisement_hash_a = GenerateRandomAdvertisementHash();
   ByteArray advertisement_header_a =
@@ -1823,7 +1898,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
               },
       },
       bleutils::kCopresenceServiceUuid);
-  (*fake_clock)->FastForward(absl::Seconds(4));
+  MediumEnvironment::Instance().FastForward(absl::Seconds(4));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
 
   // 1. Find peripheral A with GATT advertisement.

@@ -23,12 +23,13 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/sharing/lib/account/account_manager.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "internal/base/file_path.h"
-#include "internal/platform/implementation/account_manager.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
 #include "sharing/certificates/nearby_share_certificate_storage.h"
@@ -42,15 +43,7 @@
 #include "sharing/proto/enums.pb.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
-namespace google::nearby::identity::v1 {
-class PublishDeviceRequest;
-}  // namespace google::nearby::identity::v1
-
-namespace nearby {
-namespace sharing {
-namespace api {
-class IdentityRpcClient;
-}  // namespace api
+namespace nearby::sharing {
 
 class NearbyShareScheduler;
 
@@ -125,6 +118,7 @@ class NearbyShareCertificateManagerImpl
     // On successful download, if  page token in the response is empty, the
     // |download_success_callback_| is invoked with all downloaded certificates.
     void QuerySharedCredentialsFetchNextPage();
+    void QuerySharedCredentialsWithBindingIdsFetchNextPage();
 
    private:
     nearby::sharing::api::IdentityRpcClient* absl_nonnull const
@@ -227,7 +221,6 @@ class NearbyShareCertificateManagerImpl
   std::unique_ptr<TaskRunner> executor_;
 };
 
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing
 
 #endif  // THIRD_PARTY_NEARBY_SHARING_CERTIFICATES_NEARBY_SHARE_CERTIFICATE_MANAGER_IMPL_H_

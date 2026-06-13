@@ -21,11 +21,11 @@
 #include <string>
 #include <vector>
 
+#include "location/nearby/sharing/lib/account/account_manager.h"
+#include "location/nearby/sharing/lib/account/fake_account_manager.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "internal/platform/implementation/account_manager.h"
-#include "internal/test/fake_account_manager.h"
 #include "internal/test/fake_device_info.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/common/nearby_share_prefs.h"
@@ -109,16 +109,16 @@ class NearbyShareLocalDeviceDataManagerImplTest
   }
 
   std::string GetDeviceName() const {
-    return fake_device_info_.GetOsDeviceName();
+    return fake_device_info_.GetOsDeviceName().value_or("unknown");
   }
 
-  std::string GetDeviceTypeName() const {
-    return fake_device_info_.GetDeviceTypeName();
+  nearby::FakeDeviceInfo::DeviceType GetDeviceType() const {
+    return fake_device_info_.GetDeviceType();
   }
 
  protected:
   nearby::FakePreferenceManager preference_manager_;
-  nearby::FakeAccountManager fake_account_manager_;
+  FakeAccountManager fake_account_manager_;
   nearby::FakeDeviceInfo fake_device_info_;
   std::vector<ObserverNotification> notifications_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> manager_;
@@ -138,8 +138,9 @@ TEST_F(NearbyShareLocalDeviceDataManagerImplTest, DefaultDeviceName) {
   fake_account_manager().SetAccount(account);
   EXPECT_EQ(absl::Substitute(kDefaultDeviceName,
                              kFakeGivenName,
-                             GetDeviceTypeName()),
+                             GetDeviceType()),
             manager()->GetDeviceName());
+  EXPECT_EQ(manager()->GetDeviceName(), "Barack奥巴马's PC");
 
   // Make sure that when we use a given name that is very long we truncate
   // correctly.
@@ -152,7 +153,7 @@ TEST_F(NearbyShareLocalDeviceDataManagerImplTest, SetDeviceName) {
   CreateManager();
 
   std::string expected_default_device_name =
-      absl::Substitute(kDefaultDeviceName, kFakeGivenName, GetDeviceTypeName());
+      absl::Substitute(kDefaultDeviceName, kFakeGivenName, GetDeviceType());
   EXPECT_EQ(manager()->GetDeviceName(), expected_default_device_name);
   EXPECT_TRUE(notifications().empty());
 

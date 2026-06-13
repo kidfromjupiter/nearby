@@ -28,7 +28,11 @@
 #include <utility>
 #include <vector>
 
+#include "google/nearby/identity/v1/resources.pb.h"
+#include "google/nearby/identity/v1/rpcs.pb.h"
 #include "google/protobuf/timestamp.pb.h"
+#include "location/nearby/sharing/lib/account/account_manager.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
 #include "absl/algorithm/algorithm.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
@@ -41,7 +45,7 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "internal/base/file_path.h"
-#include "internal/platform/implementation/account_manager.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/mac_address.h"
 #include "sharing/certificates/common.h"
 #include "sharing/certificates/constants.h"
@@ -51,6 +55,7 @@
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
+#include "sharing/flags/generated/nearby_sharing_feature_flags.h"
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/api/public_certificate_database.h"
@@ -60,16 +65,6 @@
 #include "sharing/internal/public/logging.h"
 #include "sharing/internal/public/pref_names.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
-#if defined(__linux__)
-#include "sharing/linux/stubs/highway_fingerprint.h"
-#include "sharing/linux/stubs/identity_rpc_types.h"
-#include "sharing/linux/stubs/sharing_rpc_client.h"
-#else
-#include "google/nearby/identity/v1/resources.pb.h"
-#include "google/nearby/identity/v1/rpcs.pb.h"
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
-#include "util/hash/highway_fingerprint.h"
-#endif
 #include "sharing/proto/certificate_rpc.pb.h"
 #include "sharing/proto/encrypted_metadata.pb.h"
 #include "sharing/proto/enums.pb.h"
@@ -77,12 +72,11 @@
 #include "sharing/proto/timestamp.pb.h"
 #include "sharing/scheduling/nearby_share_scheduler.h"
 #include "sharing/scheduling/nearby_share_scheduler_factory.h"
+#include "util/hash/highway_fingerprint.h"
 
-namespace nearby {
-namespace sharing {
+namespace nearby::sharing {
 namespace {
 
-using ::google::nearby::identity::v1::AccountInfo;
 using ::google::nearby::identity::v1::GetAccountInfoRequest;
 using ::google::nearby::identity::v1::GetAccountInfoResponse;
 using ::google::nearby::identity::v1::PerVisibilitySharedCredentials;
@@ -90,6 +84,10 @@ using ::google::nearby::identity::v1::PublishDeviceRequest;
 using ::google::nearby::identity::v1::PublishDeviceResponse;
 using ::google::nearby::identity::v1::QuerySharedCredentialsRequest;
 using ::google::nearby::identity::v1::QuerySharedCredentialsResponse;
+using ::google::nearby::identity::v1::
+    QuerySharedCredentialsWithBindingIdsRequest;
+using ::google::nearby::identity::v1::
+    QuerySharedCredentialsWithBindingIdsResponse;
 using ::google::nearby::identity::v1::SharedCredential;
 using ::nearby::sharing::api::PreferenceManager;
 using ::nearby::sharing::api::PublicCertificateDatabase;
@@ -188,11 +186,7 @@ void DumpCertificateId(std::stringstream& sstream, absl::string_view cert_id,
   } else {
     sstream << "  Private certificates:[";
   }
-  for (int i = 0; i < cert_id.size() - 1; ++i) {
-    sstream << static_cast<int>(static_cast<int8_t>(cert_id[i])) << ", ";
-  }
-  sstream << static_cast<int>(static_cast<int8_t>(cert_id[cert_id.size() - 1]))
-          << "]" << std::endl;
+  sstream << absl::BytesToHexString(cert_id) << "]" << std::endl;
 }
 
 }  // namespace
@@ -344,7 +338,7 @@ void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
     request.set_page_token(*next_page_token_);
   }
   nearby_identity_client_->QuerySharedCredentials(
-      std::move(request),
+      std::move(request), api::IdentityRpcClient::kTimeout,
       [this](const absl::StatusOr<QuerySharedCredentialsResponse>&
                  response) mutable {
         if (!response.ok()) {
@@ -377,6 +371,55 @@ void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
         }
         next_page_token_ = response->next_page_token();
         QuerySharedCredentialsFetchNextPage();
+      });
+}
+
+
+void NearbyShareCertificateManagerImpl::CertificateDownloadContext::
+    QuerySharedCredentialsWithBindingIdsFetchNextPage() {
+  LOG(INFO) << __func__
+            << ": Downloading public certificates with binding ids page="
+            << page_number_;
+  page_number_++;
+  QuerySharedCredentialsWithBindingIdsRequest request;
+  request.set_name(absl::StrCat("devices/", device_id_));
+  if (next_page_token_.has_value()) {
+    request.set_page_token(*next_page_token_);
+  }
+  nearby_identity_client_->QuerySharedCredentialsWithBindingIds(
+      std::move(request), api::IdentityRpcClient::kTimeout,
+      [this](const absl::StatusOr<QuerySharedCredentialsWithBindingIdsResponse>&
+                 response) mutable {
+        if (!response.ok()) {
+          LOG(WARNING) << "Failed to download public certificates: "
+                       << response.status();
+          std::move(download_callback_)(response.status());
+          return;
+        }
+        for (const auto& credential : response->shared_credentials()) {
+          if (credential.data_type() !=
+              SharedCredential::DATA_TYPE_PUBLIC_CERTIFICATE) {
+            continue;
+          }
+          PublicCertificate certificate;
+          if (!certificate.ParseFromString(credential.data())) {
+            LOG(ERROR) << "Failed parsing to PublicCertificate, credential.id: "
+                       << credential.id() << " data: "
+                       << absl::BytesToHexString(credential.data());
+            continue;
+          }
+          VLOG(1) << "Successfully parsed credential: " << credential.id();
+          certificates_.push_back(certificate);
+        }
+
+        if (response->next_page_token().empty()) {
+          LOG(INFO) << "Completed download of " << certificates_.size()
+                    << " certificates";
+          std::move(download_callback_)(std::move(certificates_));
+          return;
+        }
+        next_page_token_ = response->next_page_token();
+        QuerySharedCredentialsWithBindingIdsFetchNextPage();
       });
 }
 
@@ -445,7 +488,12 @@ bool NearbyShareCertificateManagerImpl::DownloadPublicCertificatesInExecutor() {
         }
         notification.Notify();
       });
-  context->QuerySharedCredentialsFetchNextPage();
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_sharing_feature::kEnableFileSync)) {
+    context->QuerySharedCredentialsWithBindingIdsFetchNextPage();
+  } else {
+    context->QuerySharedCredentialsFetchNextPage();
+  }
   // Wait for all pages of certificates to be downloaded.
   // MUST not terminate early, otherwise notification will go out of scope, and
   // the callback will call Notify on a destroyed object.
@@ -553,7 +601,7 @@ bool NearbyShareCertificateManagerImpl::UploadDeviceCertificatesInExecutor(
   bool regenerate_certificates = false;
   absl::Notification notification;
   nearby_identity_client_->PublishDevice(
-      std::move(request),
+      std::move(request), api::IdentityRpcClient::kTimeout,
       [&upload_certificates_succeeded, &regenerate_certificates,
        &notification](const absl::StatusOr<PublishDeviceResponse>& response) {
         upload_certificates_succeeded = response.ok();
@@ -703,7 +751,7 @@ std::string NearbyShareCertificateManagerImpl::Dump() const {
       certificate_storage_->GetPublicCertificateIds();
   sstream << "  Total count:" << ids.size() << std::endl;
   for (const auto& id : ids) {
-    DumpCertificateId(sstream, id, true);
+    DumpCertificateId(sstream, id, /*is_public_cert=*/true);
   }
   sstream << std::endl;
 
@@ -716,7 +764,7 @@ std::string NearbyShareCertificateManagerImpl::Dump() const {
     sstream << "  Total count:" << private_certs.size() << std::endl;
     for (const auto& cert : private_certs) {
       std::string id(cert.id().begin(), cert.id().end());
-      DumpCertificateId(sstream, id, false);
+      DumpCertificateId(sstream, id, /*is_public_cert=*/false);
     }
   }
 
@@ -885,7 +933,7 @@ bool NearbyShareCertificateManagerImpl::UpdateAccountInfoInExecutor() {
   bool get_account_info_succeeded = false;
   absl::Notification notification;
   nearby_identity_client_->GetAccountInfo(
-      std::move(request),
+      std::move(request), api::IdentityRpcClient::kTimeout,
       [this, &get_account_info_succeeded, &notification](
           const absl::StatusOr<GetAccountInfoResponse>& response) mutable {
         if (!response.ok()) {
@@ -895,8 +943,8 @@ bool NearbyShareCertificateManagerImpl::UpdateAccountInfoInExecutor() {
           const auto& capabilities = response->account_info().capabilities();
           bool has_titanium_capability =
               (std::find(capabilities.begin(), capabilities.end(),
-                         AccountInfo::CAPABILITY_TITANIUM) !=
-               capabilities.end());
+                         google::nearby::identity::v1::AccountInfo::
+                             CAPABILITY_TITANIUM) != capabilities.end());
           preference_manager_.SetBoolean(PrefNames::kAdvancedProtectionEnabled,
                                          has_titanium_capability);
           LOG(INFO) << "GetAccountInfo succeeded, advanced protection enabled: "
@@ -910,5 +958,4 @@ bool NearbyShareCertificateManagerImpl::UpdateAccountInfoInExecutor() {
   return get_account_info_succeeded;
 }
 
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing

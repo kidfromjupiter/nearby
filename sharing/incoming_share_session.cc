@@ -46,6 +46,7 @@
 #include "sharing/payload_tracker.h"
 #include "sharing/proto/wire_format.pb.h"
 #include "sharing/share_session.h"
+#include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
 #include "sharing/text_attachment.h"
 #include "sharing/thread_timer.h"
@@ -56,16 +57,12 @@
 namespace nearby::sharing {
 namespace {
 
-using ::location::nearby::proto::sharing::OSType;
 using ::location::nearby::proto::sharing::ResponseToIntroduction;
 using ::nearby::sharing::service::proto::AppMetadata;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
-using ::nearby::sharing::service::proto::Frame;
 using ::nearby::sharing::service::proto::IntroductionFrame;
-using ::nearby::sharing::service::proto::SyncConfig;
 using ::nearby::sharing::service::proto::V1Frame;
 using ::nearby::sharing::service::proto::WifiCredentials;
-using ::nearby::sharing::sync::SyncConfigPrefs;
 
 }  // namespace
 
@@ -78,7 +75,9 @@ IncomingShareSession::IncomingShareSession(
         transfer_update_callback)
     : ShareSession(clock, service_thread, connections_manager,
                    analytics_recorder, std::move(endpoint_id), share_target),
-      transfer_update_callback_(std::move(transfer_update_callback)) {}
+      transfer_update_callback_(std::move(transfer_update_callback)) {
+  set_session_usage(ShareSessionUsage::kSharing);
+}
 
 IncomingShareSession::IncomingShareSession(IncomingShareSession&&) = default;
 
@@ -144,8 +143,20 @@ IncomingShareSession::ProcessIntroduction(
                       "64 bit integer.";
       return TransferMetadata::Status::kNotEnoughSpace;
     }
+    if (apk.file_name_size() != apk.file_size_size() ||
+        apk.file_name_size() != apk.payload_id_size()) {
+      LOG(WARNING)
+          << __func__
+          << ": Ignore introduction, AppMetadata array length mismatch";
+      return TransferMetadata::Status::kUnsupportedAttachmentType;
+    }
     // Map each apk file to a file attachment.
     for (int index = 0; index < apk.file_name_size(); ++index) {
+      if (apk.file_size(index) <= 0) {
+        LOG(WARNING) << __func__
+                     << ": Ignore introduction, due to invalid apk file size";
+        return TransferMetadata::Status::kUnsupportedAttachmentType;
+      }
       // Locally generate an attachment id for each apk file, and map it to the
       // payload id.
       FileAttachment apk_file(
@@ -219,6 +230,7 @@ bool IncomingShareSession::ReadyForTransfer(
 
   if (!self_share()) {
     TransferMetadataBuilder transfer_metadata_builder;
+    transfer_metadata_builder.set_usage(session_usage());
     transfer_metadata_builder.set_status(
         TransferMetadata::Status::kAwaitingLocalConfirmation);
     transfer_metadata_builder.set_token(token());
@@ -258,6 +270,7 @@ bool IncomingShareSession::AcceptTransfer(
 
   UpdateTransferMetadata(
       TransferMetadataBuilder()
+          .set_usage(session_usage())
           .set_status(TransferMetadata::Status::kAwaitingRemoteAcceptance)
           .set_token(token())
           .build());
@@ -443,7 +456,10 @@ void IncomingShareSession::SendFailureResponse(
   WriteResponseFrame(response_status);
   DCHECK(TransferMetadata::IsFinalStatus(status))
       << "SendFailureResponse should only be called with a final status";
-  UpdateTransferMetadata(TransferMetadataBuilder().set_status(status).build());
+  UpdateTransferMetadata(TransferMetadataBuilder()
+                             .set_usage(session_usage())
+                             .set_status(status)
+                             .build());
 }
 
 std::optional<TransferMetadata>
@@ -458,19 +474,21 @@ IncomingShareSession::ProcessPayloadTransferUpdates(
   // Cancel acceptance timer when payload transfer update is received.
   // This mean sender has begun sending payload.
   mutual_acceptance_timeout_ = nullptr;
-  std::optional<TransferMetadata> metadata;
+  std::optional<TransferMetadataBuilder> metadata_builder;
   // If there is a batch of updates in the queue, only return the latest
   // TransferMetadata.
   for (; !updates.empty(); updates.pop()) {
-    metadata =
+    metadata_builder =
         get_payload_tracker()->ProcessPayloadUpdate(std::move(updates.front()));
-    if (!metadata.has_value()) {
+    if (!metadata_builder.has_value()) {
       continue;
     }
-
-    if (metadata->status() == TransferMetadata::Status::kComplete) {
+    TransferMetadata metadata =
+        metadata_builder->set_usage(session_usage()).build();
+    if (metadata.status() == TransferMetadata::Status::kComplete) {
       if (!FinalizePayloads()) {
         return TransferMetadataBuilder()
+            .set_usage(session_usage())
             .set_status(TransferMetadata::Status::kIncompletePayloads)
             .build();
       }
@@ -483,13 +501,15 @@ IncomingShareSession::ProcessPayloadTransferUpdates(
     if (update_file_paths_in_progress) {
       UpdateFilePayloadPaths();
     } else {
-      if (metadata->status() == TransferMetadata::Status::kCancelled) {
+      if (metadata.status() == TransferMetadata::Status::kCancelled) {
         VLOG(1) << __func__ << ": Update file paths for cancelled transfer";
         UpdateFilePayloadPaths();
       }
     }
   }
-  return metadata;
+  return metadata_builder.has_value()
+             ? std::make_optional(metadata_builder->build())
+             : std::nullopt;
 }
 
 void IncomingShareSession::OnConnected(NearbyConnection* connection) {
@@ -500,45 +520,6 @@ void IncomingShareSession::OnConnected(NearbyConnection* connection) {
 void IncomingShareSession::PushPayloadTransferUpdateForTest(
     std::unique_ptr<PayloadTransferUpdate> update) {
   payload_updates_queue()->Queue(std::move(update));
-}
-
-void IncomingShareSession::ProcessSyncFrame(
-    SyncManager& sync_manager,
-    const nearby::sharing::service::proto::SyncFrame& sync_frame) {
-  if (session_phase_ != SessionPhase::kUninitialized) {
-    LOG(WARNING) << "Ignore SyncFrame received in unexpected session phase: "
-                 << static_cast<int>(session_phase_);
-    return;
-  }
-  // TODO: b/485304482 - Check that the connected device is authenticated and is
-  // part of a sync pairing.
-  if (!certificate().has_value()) {
-    LOG(WARNING) << "Ignore SyncFrame received from unauthenticated device.";
-    return;
-  }
-  if (false &&
-    !sync_manager.IsFileSyncBinding(certificate()->binding_id())) {
-    LOG(WARNING) << "Ignore SyncFrame received in unexpected binding id: "
-                 << certificate()->binding_id();
-    return;
-  }
-  session_phase_ = SessionPhase::kSync;
-  if (sync_frame.has_handshake()) {
-    VLOG(1) << __func__ << ": Received FileSync Handshake";
-    WriteSyncConfigFrame(
-        sync_manager.GetSyncConfig(certificate()->binding_id())
-            .value_or(SyncConfigPrefs())
-            .sync_config());
-  }
-}
-
-void IncomingShareSession::WriteSyncConfigFrame(const SyncConfig& config) {
-  Frame frame;
-  frame.set_version(Frame::V1);
-  V1Frame* v1_frame = frame.mutable_v1();
-  v1_frame->set_type(V1Frame::FILE_SYNC);
-  *v1_frame->mutable_file_sync()->mutable_config() = config;
-  WriteFrame(frame);
 }
 
 }  // namespace nearby::sharing

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Nearby File Share
+Comment=Share files with nearby devices using Nearby Connections
+Exec=nearby_qml_file_tray_app
+Icon=nearby-file-share
+Categories=Utility;Network;FileTransfer;
+Keywords=share;file;nearby;transfer;
+StartupNotify=false
+Terminal=false

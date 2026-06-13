@@ -27,7 +27,6 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
@@ -223,7 +222,7 @@ class GattServer final {
   ~GattServer() { Stop(); }
 
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  absl::optional<api::ble::GattCharacteristic> CreateCharacteristic(
+  std::optional<api::ble::GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
       const api::ble::GattCharacteristic::Permission permission,
       const api::ble::GattCharacteristic::Property property) {
@@ -277,13 +276,13 @@ class GattClient final {
   }
 
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  absl::optional<api::ble::GattCharacteristic> GetCharacteristic(
+  std::optional<api::ble::GattCharacteristic> GetCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid) {
     return impl_->GetCharacteristic(service_uuid, characteristic_uuid);
   }
 
   // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  absl::optional<std::string> ReadCharacteristic(
+  std::optional<std::string> ReadCharacteristic(
       const api::ble::GattCharacteristic& characteristic) {
     return impl_->ReadCharacteristic(characteristic);
   }
@@ -293,17 +292,6 @@ class GattClient final {
                            absl::string_view value,
                            api::ble::GattClient::WriteType write_type) {
     return impl_->WriteCharacteristic(characteristic, value, write_type);
-  }
-
-  // TODO(qinwangz): We should not need  `on_characteristic_changed_cb` when
-  // unsubscribing.
-  // NOLINTNEXTLINE(google3-legacy-absl-backports)
-  bool SetCharacteristicSubscription(
-      const api::ble::GattCharacteristic& characteristic, bool enable,
-      absl::AnyInvocable<void(absl::string_view value)>
-          on_characteristic_changed_cb) {
-    return impl_->SetCharacteristicSubscription(
-        characteristic, enable, std::move(on_characteristic_changed_cb));
   }
 
   void Disconnect() { impl_->Disconnect(); }

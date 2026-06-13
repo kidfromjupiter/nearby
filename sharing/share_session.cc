@@ -176,7 +176,10 @@ void ShareSession::Abort(TransferMetadata::Status status) {
 
   // First invoke the appropriate transfer callback with the final
   // |status|.
-  UpdateTransferMetadata(TransferMetadataBuilder().set_status(status).build());
+  UpdateTransferMetadata(TransferMetadataBuilder()
+                             .set_usage(session_usage())
+                             .set_status(status)
+                             .build());
   Disconnect();
 }
 
@@ -232,12 +235,6 @@ bool ShareSession::ProcessKeyVerificationResult(
       // share flag.
       self_share_ = false;
       break;
-
-    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnknown:
-      LOG(WARNING) << __func__
-                   << ": Unknown PairedKeyVerificationResult for target "
-                   << share_target().id << ". Disconnecting.";
-      return false;
   }
   return true;
 }
@@ -246,7 +243,10 @@ void ShareSession::OnDisconnect() {
   OnConnectionDisconnected();
   if (disconnect_status_ != TransferMetadata::Status::kUnknown) {
     UpdateTransferMetadata(
-        TransferMetadataBuilder().set_status(disconnect_status_).build());
+        TransferMetadataBuilder()
+            .set_usage(session_usage())
+            .set_status(disconnect_status_)
+            .build());
   }
   connection_ = nullptr;
 }
