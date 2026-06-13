@@ -92,10 +92,6 @@ constexpr auto kMediumMaxAllowedReadBytes =
 // Disable/Enable refactor of BLE/L2CAP in Nearby Connections SDK.
 constexpr auto kRefactorBleL2cap =
     flags::Flag<bool>(kConfigPackage, "45737079", false);
-// Enable/Disable usage of shared CBPeripheralManager for GATT and L2CAP
-// servers.
-constexpr auto kEnableSharedPeripheralManager =
-    flags::Flag<bool>(kConfigPackage, "45770787", false);
 // Set the safe-to-disconnect version.
 // 0. Disabled all. 1. safe-to-disconnect 2. reserved 3.
 // auto-reconnect(deprecated)

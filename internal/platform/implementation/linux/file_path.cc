@@ -56,8 +56,8 @@ std::wstring FilePath::GetDownloadPathInternal(std::wstring parent_folder,
   auto nearby_path = info.GetDownloadPath();
 
   std::optional<std::filesystem::path> download_path =
-      nearby_path ? std::optional<std::filesystem::path>(
-                        std::filesystem::path(nearby_path->ToString()))
+      !nearby_path.IsEmpty() ? std::optional<std::filesystem::path>(
+                        std::filesystem::path(nearby_path.ToString()))
                   : std::nullopt;
 
   std::string base_path;

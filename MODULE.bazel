@@ -190,10 +190,11 @@ cmake(
         "CMAKE_C_STANDARD": "17",
         "CMAKE_C_STANDARD_REQUIRED": "ON",
         "CMAKE_C_EXTENSIONS": "ON",
+        "CMAKE_INSTALL_LIBDIR": "lib",
     },
     env = {
         # CMake still needs pkg-config to pass its internal configuration checks for systemd
-        "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig",
     },
     # Link the systemd dependency you defined in your WORKSPACE
     deps = ["@libsystemd//:libsystemd"],

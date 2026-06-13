@@ -42,7 +42,7 @@ PreferencesManager::PreferencesManager(absl::string_view file_path)
     : api::PreferencesManager() {
   std::optional<FilePath> path =
       nearby::api::ImplementationPlatform::CreateDeviceInfo()
-          ->GetLocalAppDataPath();
+          ->GetLocalAppDataPath(nearby::FilePath());
   if (!path.has_value()) {
     path = FilePath("/tmp");
   }

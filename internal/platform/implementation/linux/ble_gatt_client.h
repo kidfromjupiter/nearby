@@ -182,14 +182,6 @@ class GattClient : public api::ble::GattClient {
       absl::string_view value, WriteType type) override
       ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
 
-  // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#setCharacteristicNotification(android.bluetooth.BluetoothGattCharacteristic,%20boolean)
-  //
-  // Enable or disable notifications/indications for a given characteristic.
-  bool SetCharacteristicSubscription(
-      const api::ble::GattCharacteristic &characteristic, bool enable,
-      absl::AnyInvocable<void(absl::string_view value)>
-          on_characteristic_changed_cb) override
-      ABSL_LOCKS_EXCLUDED(characteristics_mutex_);
 
   // https://developer.android.com/reference/android/bluetooth/BluetoothGatt.html#disconnect()
   void Disconnect() override;
