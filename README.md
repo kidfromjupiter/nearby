@@ -95,7 +95,6 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 > Issues that break core functionality. These should be addressed immediately.
 
 - [x] ~**Merge latest upstream changes**~
-
 - [ ] **Moving away from google's own implementation of QuickShare**
 
     Till now, we've relied upon a few compatibility stubs here and there to get the sharing library to a buildable state. Going forward it's increasinly unlikely that will remain the case. I am seeing much more activity in that portion of the repo from google's side. It seems to me as an outsider, that they are trying to abstract away the closed source certificates and account logic. Which is appreciated of course, but this breaks all my compatibility shims :(
@@ -153,7 +152,7 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 ### 🔵 P3 - New Features
 
 > Non-essential features and future improvements.
-
+- [x] ~**Fast initiation implementation for linux**~
 - [ ] Upstream has been slowly adding webrtc support. Should we support it?
 
 ## Special thanks
