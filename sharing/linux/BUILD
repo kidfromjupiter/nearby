@@ -24,13 +24,36 @@ refresh_compile_commands(
     # Specify the targets of interest.
     # For example, specify a dict of targets and any flags required to build.
     targets = {
-        ":nearby_sharing_api_shared": "-s --check_visibility=false --spawn_strategy=standalone --verbose_failures --cxxopt=-std=c++20 --host_cxxopt=-std=c++20  --cxxopt='-fvisibility-inlines-hidden'",
+        ":linux_fast_init": "",
     },
     # No need to add flags already in .bazelrc. They're automatically picked up.
     # If you don't need flags, a list of targets is also okay, as is a single target string.
     # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
     # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
     # And if you're working on a header-only library, specify a test or binary target that compiles it.
+)
+
+
+cc_library(
+    name = "linux_fast_init",
+    hdrs = [
+        "nearby_fast_init_ble_beacon.h",
+        "nearby_fast_init_manager.h",
+    ],
+    srcs = [ 
+        "nearby_fast_init_manager.cc",
+    ],
+    deps = [
+        "//sharing/internal/api:platform",
+        "//connections:core",
+        "//internal/platform/implementation/linux"
+    ]
+)
+
+cc_binary(
+    name = "fast_init_test",
+    srcs = ["nearby_fast_init.cc"],
+    deps = [":linux_fast_init"]
 )
 
 cc_library(

@@ -13,8 +13,26 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 licenses(["notice"])
+
+load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
+refresh_compile_commands(
+    name = "refresh_compile_commands_sharing_platform",
+
+    # Specify the targets of interest.
+    # For example, specify a dict of targets and any flags required to build.
+    targets = {
+        ":platform": "",
+    },
+    # No need to add flags already in .bazelrc. They're automatically picked up.
+    # If you don't need flags, a list of targets is also okay, as is a single target string.
+    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
+    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
+    # And if you're working on a header-only library, specify a test or binary target that compiles it.
+)
 
 cc_library(
     name = "platform",
@@ -43,8 +61,8 @@ cc_library(
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform/implementation:types",
-        "//location/nearby/sharing/lib/account:account_manager",
-        "//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
+        #"//location/nearby/sharing/lib/account:account_manager",
+        #"//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
         "//sharing/proto:share_cc_proto",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings:string_view",
