@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_NEARBY_SHARING_LINUX_STUBS_HIGHWAY_FINGERPRINT_H_
-#define THIRD_PARTY_NEARBY_SHARING_LINUX_STUBS_HIGHWAY_FINGERPRINT_H_
+#ifndef SHARING_LINUX_PLATFORM_LINUX_ACCOUNT_MANAGER_H_
+#define SHARING_LINUX_PLATFORM_LINUX_ACCOUNT_MANAGER_H_
 
-#include <cstdint>
+#include <memory>
 
-#include "absl/hash/hash.h"
-#include "absl/strings/string_view.h"
+#include "location/nearby/sharing/lib/account/account_manager.h"
 
-namespace util_hash {
+namespace nearby::sharing::linux::internal {
 
-inline uint64_t HighwayFingerprint64(absl::string_view input) {
-  return absl::Hash<absl::string_view>{}(input);
-}
+std::unique_ptr<AccountManager> CreateLinuxAccountManager();
 
-}  // namespace util_hash
+}  // namespace nearby::sharing::linux::internal
 
-#endif  // THIRD_PARTY_NEARBY_SHARING_LINUX_STUBS_HIGHWAY_FINGERPRINT_H_
+#endif  // SHARING_LINUX_PLATFORM_LINUX_ACCOUNT_MANAGER_H_

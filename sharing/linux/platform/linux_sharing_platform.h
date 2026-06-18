@@ -1,23 +1,30 @@
-// Copyright 2026
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-#ifndef THIRD_PARTY_NEARBY_SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
-#define THIRD_PARTY_NEARBY_SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
+#ifndef SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
+#define SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
 
-#include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
-#include "absl/strings/string_view.h"
-#include "internal/base/file_path.h"
-#include "internal/platform/device_info.h"
-#include "internal/platform/implementation/account_manager.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/implementation/linux/bluetooth_adapter.h"
+#include "location/nearby/sharing/lib/account/account_manager.h"
 #include "sharing/internal/api/sharing_platform.h"
 
-namespace nearby::sharing {
+namespace nearby::sharing::linux {
 
-class LinuxSharingPlatform final : public nearby::sharing::api::SharingPlatform {
+class LinuxSharingPlatform final : public api::SharingPlatform {
  public:
   LinuxSharingPlatform();
   explicit LinuxSharingPlatform(std::string device_name_override);
@@ -33,32 +40,33 @@ class LinuxSharingPlatform final : public nearby::sharing::api::SharingPlatform 
       std::function<void(bool)> lan_connected_callback,
       std::function<void(bool)> internet_connected_callback) override;
 
-  nearby::sharing::api::BluetoothAdapter& GetBluetoothAdapter() override;
+  api::BluetoothAdapter& GetBluetoothAdapter() override;
   nearby::api::FastInitBleBeacon& GetFastInitBleBeacon() override;
   nearby::api::FastInitiationManager& GetFastInitiationManager() override;
   std::unique_ptr<nearby::api::SystemInfo> CreateSystemInfo() override;
   std::unique_ptr<nearby::api::AppInfo> CreateAppInfo() override;
-  nearby::sharing::api::PreferenceManager& GetPreferenceManager() override;
+  api::PreferenceManager& GetPreferenceManager() override;
   AccountManager& GetAccountManager() override;
-  TaskRunner& GetDefaultTaskRunner() override;
-  nearby::DeviceInfo& GetDeviceInfo() override;
-  std::unique_ptr<nearby::sharing::api::PublicCertificateDatabase>
+  nearby::api::DeviceInfo& GetDeviceInfo() override;
+  std::unique_ptr<api::PublicCertificateDatabase>
   CreatePublicCertificateDatabase(const FilePath& database_path) override;
   bool UpdateFileOriginMetadata(std::vector<FilePath>& file_paths) override;
 
  private:
   void Initialize(std::string device_name_override);
 
-  std::unique_ptr<nearby::sharing::api::PreferenceManager> preference_manager_;
+  std::shared_ptr<::nearby::linux::BluetoothAdapter> fast_init_adapter_;
+  std::unique_ptr<api::PreferenceManager> preference_manager_;
   std::unique_ptr<AccountManager> account_manager_;
-  std::unique_ptr<nearby::sharing::api::BluetoothAdapter> bluetooth_adapter_;
+  std::unique_ptr<api::BluetoothAdapter> bluetooth_adapter_;
   std::unique_ptr<nearby::api::FastInitBleBeacon> fast_init_ble_beacon_;
-  std::unique_ptr<nearby::api::FastInitiationManager> fast_initiation_manager_;
-  std::unique_ptr<TaskRunner> default_task_runner_;
-  std::unique_ptr<nearby::DeviceInfo> device_info_;
+  std::unique_ptr<nearby::api::FastInitiationManager>
+      fast_initiation_manager_;
+  std::unique_ptr<nearby::api::DeviceInfo> device_info_;
   absl::string_view (*product_id_getter_)() = nullptr;
 };
 
 }  // namespace nearby::sharing::linux
 
-#endif  // THIRD_PARTY_NEARBY_SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
+#endif  // SHARING_LINUX_PLATFORM_LINUX_SHARING_PLATFORM_H_
+

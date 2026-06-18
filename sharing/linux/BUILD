@@ -19,12 +19,13 @@ load("@rules_cc//cc/private/rules_impl:cc_static_library.bzl", "cc_static_librar
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
 refresh_compile_commands(
-    name = "refresh_compile_commands_sharing",
+    name = "refresh_compile_commands",
 
     # Specify the targets of interest.
     # For example, specify a dict of targets and any flags required to build.
     targets = {
-        ":linux_fast_init": "",
+        ":fast_init": "",
+        ":nearby_connections_manager": "",
     },
     # No need to add flags already in .bazelrc. They're automatically picked up.
     # If you don't need flags, a list of targets is also okay, as is a single target string.
@@ -35,7 +36,7 @@ refresh_compile_commands(
 
 
 cc_library(
-    name = "linux_fast_init",
+    name = "fast_init",
     hdrs = [
         "nearby_fast_init_ble_beacon.h",
         "nearby_fast_init_manager.h",
@@ -50,29 +51,55 @@ cc_library(
     ]
 )
 
+
 cc_binary(
     name = "fast_init_test",
     srcs = ["nearby_fast_init.cc"],
-    deps = [":linux_fast_init"]
+    deps = [":fast_init"],
+)
+
+cc_binary(
+    name = "nearby_connections",
+    srcs = [
+        "nearby_connections.cc",
+    ],
+    deps = [
+      ":nearby_connections_manager",
+      ":fast_init",
+      "//connections:core",
+      "//internal/platform/implementation/linux:linux"
+    ]
 )
 
 cc_library(
     name = "linux_sharing_platform",
-    srcs = ["platform/linux_sharing_platform.cc"],
+    srcs = [
+        "platform/linux_account_manager.cc",
+        "platform/linux_account_manager.h",
+        "platform/linux_platform_components.cc",
+        "platform/linux_platform_components.h",
+        "platform/linux_preference_manager.cc",
+        "platform/linux_preference_manager.h",
+        "platform/linux_sharing_platform.cc",
+        "platform/platform_util.cc",
+        "platform/platform_util.h",
+    ],
     hdrs = ["platform/linux_sharing_platform.h"],
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
     deps = [
+        ":fast_init",
         "//internal/base:file_path",
         "//internal/base:files",
         "//internal/platform:base",
+        "//internal/platform:logging",
         "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform:uuid",
-        "//internal/platform/implementation:account_manager",
         "//internal/platform/implementation:platform",
-        "//internal/platform/implementation:signin_attempt",
         "//internal/platform/implementation:types",
         "//internal/platform/implementation/linux",
+        "//location/nearby/sharing/lib/account:account_manager",
+        "//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
         "//sharing/internal/api:platform",
         "//sharing/internal/public:pref_names",
         "//sharing/proto:share_cc_proto",
@@ -84,97 +111,5 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@nlohmann_json//:json",
-    ],
-)
-
-cc_library(
-    name = "nearby_sharing_api",
-    srcs = ["nearby_sharing_api.cc"],
-    hdrs = ["nearby_sharing_api.h"],
-    alwayslink = True,
-    visibility = ["//visibility:public"],
-    deps = [
-        ":linux_sharing_platform",
-        "//internal/base:file_path",
-        "//internal/platform/implementation/linux:system_clock",
-        "//sharing:attachments",
-        "//sharing:nearby_sharing_service",
-        "//sharing/analytics",
-        "//sharing/local_device_data",
-    ],
-)
-
-cc_library(
-    name = "nearby_connections_api",
-    srcs = ["nearby_connections_api.cc"],
-    hdrs = ["nearby_connections_api.h"],
-    alwayslink = True,
-    visibility = ["//visibility:public"],
-    deps = [
-        "//internal/platform:base",
-        ":linux_sharing_platform",
-        "//internal/base:file_path",
-        "//sharing/internal/public:nearby_context",
-        "//sharing:nearby_sharing_service",
-    ],
-)
-
-cc_static_library(
-    name = "nearby_sharing_api_static",
-    deps = [":nearby_sharing_api"],
-)
-
-cc_binary(
-    name = "nearby_sharing_api_shared",
-    linkshared = True,
-    srcs = [
-        "nearby_sharing_api.cc",
-        "nearby_sharing_api.h",
-    ],
-    visibility = ["//visibility:public"],
-    linkopts = [
-        "-Wl,--exclude-libs,ALL",
-    ],
-    deps = [
-        "//internal/platform:base",
-        ":linux_sharing_platform",
-        "//internal/base:file_path",
-        "//internal/platform/implementation:platform",
-        "//internal/platform/implementation/linux",
-        "//internal/platform/implementation/linux:system_clock",
-        "//sharing:attachments",
-        "//sharing:nearby_sharing_service",
-        "//sharing/analytics",
-        "//sharing/local_device_data",
-    ],
-)
-
-cc_binary(
-    name = "nearby_connections_api_shared",
-    linkshared = True,
-    srcs = [
-        "nearby_connections_api.cc",
-        "nearby_connections_api.h",
-    ],
-    visibility = ["//visibility:public"],
-    linkopts = [
-        "-Wl,--exclude-libs,ALL",
-    ],
-    deps = [
-        ":linux_sharing_platform",
-        "//internal/base:file_path",
-        "//internal/platform/implementation:platform",
-        "//internal/platform/implementation/linux",
-        "//sharing/internal/public:nearby_context",
-        "//sharing:nearby_sharing_service",
-    ],
-)
-
-cc_test(
-    name = "nearby_connections_api_test",
-    srcs = ["nearby_connections_api_test.cc"],
-    deps = [
-        ":nearby_connections_api",
-        "@com_google_googletest//:gtest_main",
     ],
 )
