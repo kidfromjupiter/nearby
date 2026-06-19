@@ -31,6 +31,16 @@
 namespace nearby {
 namespace linux {
 namespace {
+
+std::string WrapFrame(absl::string_view payload) {
+  return std::string{
+      static_cast<char>((payload.size() >> 24) & 0xFF),
+      static_cast<char>((payload.size() >> 16) & 0xFF),
+      static_cast<char>((payload.size() >> 8) & 0xFF),
+      static_cast<char>(payload.size() & 0xFF)} +
+         std::string(payload);
+}
+
 class BleL2capSocketTest : public ::testing::Test {
 protected:
 void SetUp() override {
@@ -57,31 +67,32 @@ void SetUp() override {
   std::unique_ptr<BleL2capSocket> socket_;
 };
 TEST_F(BleL2capSocketTest, ReturnsInputAndOutputStreams) {
-  InputStream& input = socket_->GetInputStream();
-  OutputStream& output = socket_->GetOutputStream();
+  nearby::InputStream& input = socket_->GetInputStream();
+  nearby::OutputStream& output = socket_->GetOutputStream();
 
   EXPECT_NE(&input, nullptr);
   EXPECT_NE(&output, nullptr);
 }
 TEST_F(BleL2capSocketTest, ReturnsSameStreamInstancesAcrossCalls) {
-  InputStream& input1 = socket_->GetInputStream();
-  InputStream& input2 = socket_->GetInputStream();
+  nearby::InputStream& input1 = socket_->GetInputStream();
+  nearby::InputStream& input2 = socket_->GetInputStream();
 
-  OutputStream& output1 = socket_->GetOutputStream();
-  OutputStream& output2 = socket_->GetOutputStream();
+  nearby::OutputStream& output1 = socket_->GetOutputStream();
+  nearby::OutputStream& output2 = socket_->GetOutputStream();
 
   EXPECT_EQ(&input1, &input2);
   EXPECT_EQ(&output1, &output2);
 }
 TEST_F(BleL2capSocketTest, ReadReceivesExactBytesFromPeer) {
   std::string message = "hello into l2cap socket";
+  std::string framed_message = WrapFrame(message);
 
   ASSERT_EQ(
-      write(peer_fd_, message.data(), message.size()),
-      static_cast<ssize_t>(message.size())
+      write(peer_fd_, framed_message.data(), framed_message.size()),
+      static_cast<ssize_t>(framed_message.size())
   );
 
-  InputStream& input = socket_->GetInputStream();
+  nearby::InputStream& input = socket_->GetInputStream();
 
   std::vector<char> buffer(message.size());
   auto out = input.Read(buffer.size()).GetResult();
@@ -98,31 +109,33 @@ TEST_F(BleL2capSocketTest, ReadReceivesExactBytesFromPeer) {
 }
 TEST_F(BleL2capSocketTest, WriteSendsExactBytesToPeer) {
   std::string message = "hello from l2cap socket";
+  std::string framed_message = WrapFrame(message);
 
-  OutputStream& output = socket_->GetOutputStream();
+  nearby::OutputStream& output = socket_->GetOutputStream();
 
   EXPECT_EQ(output.Write(message).value, Exception::kSuccess);
 
-  std::vector<char> received(message.size());
+  std::vector<char> received(framed_message.size());
 
   ssize_t n = read(peer_fd_, received.data(), received.size());
 
-  ASSERT_EQ(n, static_cast<ssize_t>(message.size()));
+  ASSERT_EQ(n, static_cast<ssize_t>(framed_message.size()));
 
   EXPECT_EQ(
       std::string(received.begin(), received.end()),
-      message
+      framed_message
   );
 }
 TEST_F(BleL2capSocketTest, SkipSkipsBytesFromPeer) {
   std::string message = "hello there";
+  std::string framed_message = WrapFrame(message);
 
   ASSERT_EQ(
-      write(peer_fd_, message.data(), message.size()),
-      static_cast<ssize_t>(message.size())
+      write(peer_fd_, framed_message.data(), framed_message.size()),
+      static_cast<ssize_t>(framed_message.size())
   );
 
-  InputStream& input = socket_->GetInputStream();
+  nearby::InputStream& input = socket_->GetInputStream();
 
   EXPECT_EQ(input.Skip(6).result(), 6);
 
@@ -131,6 +144,26 @@ TEST_F(BleL2capSocketTest, SkipSkipsBytesFromPeer) {
 }
 TEST_F(BleL2capSocketTest, CloseReturnsSuccess) {
   EXPECT_EQ(socket_->Close().value, Exception::kSuccess);
+}
+
+TEST(BleL2capSocketSeqpacketTest, ReadReceivesHeaderAndPayloadFromOnePacket) {
+  int fds[2]{-1, -1};
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds), 0);
+
+  auto socket = std::make_unique<BleL2capSocket>(fds[0], 1);
+  int peer_fd = fds[1];
+
+  std::string message = "\x03";
+  std::string framed_message = WrapFrame(message);
+
+  ASSERT_EQ(write(peer_fd, framed_message.data(), framed_message.size()),
+            static_cast<ssize_t>(framed_message.size()));
+
+  auto out = socket->GetInputStream().Read(1).GetResult();
+  EXPECT_EQ(out, ByteArray(message));
+
+  socket->Close();
+  close(peer_fd);
 }
 }  // namespace
 }  // namespace linux

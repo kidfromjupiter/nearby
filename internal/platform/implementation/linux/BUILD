@@ -196,6 +196,7 @@ cc_library(
         "ble_v2_server_socket.cc",
         "ble_v2_socket.cc",
         "ble_l2cap_server_socket.cc",
+        "ble_l2cap_socket.cc",
         "bluetooth_adapter.cc",
         "bluetooth_bluez_profile.cc",
         "bluetooth_classic_device.cc",

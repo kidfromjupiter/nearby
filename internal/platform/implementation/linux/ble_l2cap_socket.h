@@ -17,7 +17,7 @@
 
 #include "dbus.h"
 
-#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,21 +28,63 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/ble.h"
-
 #include "internal/platform/implementation/linux/stream.h"
+
 namespace nearby {
 namespace linux {
 
 class BleL2capSocket;
 
+class BleL2capInputStream : public nearby::InputStream {
+ public:
+  BleL2capInputStream(sdbus::UnixFd fd) : stream_(fd) {}
+
+  ExceptionOr<ByteArray> Read(std::int64_t size) override;
+  Exception Close() override {
+    if (closed_) {
+      return {Exception::kSuccess};
+    }
+    closed_ = true;
+    return stream_.Close();
+  }
+
+ private:
+  linux::InputStream stream_;
+  std::string wire_buffer_;
+  std::string pending_;
+  bool closed_ = false;
+};
+
+class BleL2capOutputStream : public nearby::OutputStream {
+ public:
+  BleL2capOutputStream(sdbus::UnixFd fd) : stream_(fd) {}
+
+  Exception Write(absl::string_view data) override;
+  Exception Flush() override;
+  Exception Close() override {
+    if (closed_) {
+      return {Exception::kSuccess};
+    }
+    closed_ = true;
+    return stream_.Close();
+  }
+
+ private:
+  linux::OutputStream stream_;
+  bool closed_ = false;
+};
+
 class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
   BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
                  std::string service_id = "")
-      : fd_(sdbus::UnixFd(fd)), output_stream_(fd_), input_stream_(fd_) {};
+      : fd_(sdbus::UnixFd(fd)),
+        output_stream_(fd_),
+        input_stream_(fd_),
+        peripheral_id_(peripheral_id) {};
 
-  InputStream& GetInputStream() override { return input_stream_; }
-  OutputStream& GetOutputStream() override { return output_stream_; }
+  nearby::InputStream& GetInputStream() override { return input_stream_; }
+  nearby::OutputStream& GetOutputStream() override { return output_stream_; }
   Exception Close() override {
     input_stream_.Close();
     output_stream_.Close();
@@ -55,8 +97,8 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
 
  private:
   sdbus::UnixFd fd_;
-  OutputStream output_stream_;
-  InputStream input_stream_;
+  BleL2capOutputStream output_stream_;
+  BleL2capInputStream input_stream_;
   api::ble::BlePeripheral::UniqueId peripheral_id_;
 };
 

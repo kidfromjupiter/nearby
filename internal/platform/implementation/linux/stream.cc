@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <cstdint>
 
+#include "absl/strings/escaping.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/linux/stream.h"
@@ -63,8 +64,7 @@ ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
     }
 
     if (pfd.revents & (POLLIN | POLLHUP)) {
-      ssize_t bytes_read =
-          recv(fd_->get(), buffer.data(), buffer.size(), 0);
+      ssize_t bytes_read = recv(fd_->get(), buffer.data(), buffer.size(), 0);
 
       if (bytes_read > 0) {
         buffer.resize(static_cast<std::size_t>(bytes_read));
@@ -117,8 +117,7 @@ Exception OutputStream::Write(absl::string_view data) {
     } while (poll_result < 0 && errno == EINTR);
 
     if (poll_result < 0) {
-      LOG(ERROR) << __func__
-                 << ": poll failed: " << std::strerror(errno);
+      LOG(ERROR) << __func__ << ": poll failed: " << std::strerror(errno);
       return {Exception::kIo};
     }
 
@@ -132,11 +131,7 @@ Exception OutputStream::Write(absl::string_view data) {
       continue;
     }
 
-    ssize_t n = send(
-        fd,
-        data.data() + sent,
-        data.size() - sent,
-        MSG_NOSIGNAL);
+    ssize_t n = send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
 
     if (n > 0) {
       sent += static_cast<size_t>(n);
@@ -158,21 +153,22 @@ Exception OutputStream::Write(absl::string_view data) {
       continue;
     }
 
-    LOG(ERROR) << __func__
-               << ": error writing to fd: " << std::strerror(errno);
+    LOG(ERROR) << __func__ << ": error writing to fd: " << std::strerror(errno);
     return {Exception::kIo};
   }
 
   return {Exception::kSuccess};
 }
 
-Exception OutputStream::Flush() { return Exception{Exception::kSuccess}; }
+Exception OutputStream::Flush() {
+  return Exception{Exception::kSuccess};
+}
 
 Exception OutputStream::Close() {
   if (!fd_->isValid()) return Exception{Exception::kIo};
 
   auto ret = close(fd_->get()) < 0 ? Exception{Exception::kIo}
-                                  : Exception{Exception::kSuccess};
+                                   : Exception{Exception::kSuccess};
   fd_.reset();
   return ret;
 }
