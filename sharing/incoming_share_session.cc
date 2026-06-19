@@ -34,11 +34,7 @@
 #include "sharing/attachment_container.h"
 #include "sharing/constants.h"
 #include "sharing/file_attachment.h"
-#if defined(__linux__)
-#include "sharing/linux/stubs/sync_manager.h"
-#else
 #include "location/nearby/sharing/lib/sync/sync_manager.h"
-#endif
 #include "sharing/internal/public/logging.h"
 #include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_manager.h"

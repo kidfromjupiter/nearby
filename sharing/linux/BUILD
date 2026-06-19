@@ -71,6 +71,29 @@ cc_binary(
     ]
 )
 
+cc_binary(
+    name = "nearby_sharing_cli",
+    srcs = ["nearby_sharing_cli.cc"],
+    deps = [
+        ":linux_sharing_platform",
+        "//connections/implementation/flags:connections_flags",
+        "//internal/base:file_path",
+        "//internal/flags:nearby_flags",
+        "//proto:sharing_enums_cc_proto",
+        "//sharing:attachments",
+        "//sharing/flags/generated:generated_flags",
+        "//sharing:nearby_sharing_service",
+        "//sharing:transfer_metadata",
+        "//sharing:types",
+        "//sharing/analytics",
+        "//sharing/common:enum",
+        "//sharing/proto:enums_cc_proto",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
+    ],
+)
+
 cc_library(
     name = "linux_sharing_platform",
     srcs = [
