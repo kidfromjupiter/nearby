@@ -67,7 +67,6 @@ ExceptionOr<ByteArray> BleL2capInputStream::Read(std::int64_t size) {
   if (size <= 0) {
     return ExceptionOr<ByteArray>(ByteArray(std::string()));
   }
-  LOG(INFO) << __func__ << ": trying to read " << size << " payload bytes";
 
   while (pending_.empty()) {
     ExceptionOr<ByteArray> packet = stream_.Read(kMaxFrameSize);
