@@ -95,12 +95,6 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 > Issues that break core functionality. These should be addressed immediately.
 
 - [x] ~**Merge latest upstream changes**~
-- [ ] **Moving away from google's own implementation of QuickShare**
-
-    Till now, we've relied upon a few compatibility stubs here and there to get the sharing library to a buildable state. Going forward it's increasinly unlikely that will remain the case. I am seeing much more activity in that portion of the repo from google's side. It seems to me as an outsider, that they are trying to abstract away the closed source certificates and account logic. Which is appreciated of course, but this breaks all my compatibility shims :(
-
-    So I'll need to avoid touching the turbulent `sharing/` directory till it becomes stable enough. In the meantime, I'll probably need to access the sharing functionality using interfaces/adapters
-  
 
 - [ ] **Bluetooth classic bandwidth**
   
