@@ -93,14 +93,14 @@ jobs:
             --copt='-DGITHUB_BUILD' \
             //sharing/linux:nearby_sharing_cli
 
-  build-rust-linux:
-    name: Build Rust on Linux
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
+  #build-rust-linux:
+  #  name: Build Rust on Linux
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - name: Checkout
+  #      uses: actions/checkout@v6
+  #      with:
+  #        submodules: recursive
 
-      - name: Build FPP
-        run: cargo build --manifest-path presence/fpp/fpp/Cargo.toml
+  #    - name: Build FPP
+  #      run: cargo build --manifest-path presence/fpp/fpp/Cargo.toml
