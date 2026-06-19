@@ -69,14 +69,8 @@ jobs:
       - name: Build Connections
         run: |
           bazel build \
-            --check_visibility=false \
-            --spawn_strategy=standalone \
-            --cxxopt=-std=c++20 \
-            --host_cxxopt=-std=c++20 \
             --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
             --copt='-DGITHUB_BUILD' \
-            --copt='-fvisibility=hidden' \
-            --cxxopt='-fvisibility-inlines-hidden' \
             //connections:core
 
       # - name: Build Presence
@@ -92,18 +86,12 @@ jobs:
       #       --cxxopt='-fvisibility-inlines-hidden' \
       #       //presence
 
-      - name: Build Nearby Sharing Linux shared API
+      - name: Build Nearby Sharing Linux 
         run: |
           bazel build \
-            --check_visibility=false \
-            --spawn_strategy=standalone \
-            --cxxopt=-std=c++20 \
-            --host_cxxopt=-std=c++20 \
             --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
             --copt='-DGITHUB_BUILD' \
-            --copt='-fvisibility=hidden' \
-            --cxxopt='-fvisibility-inlines-hidden' \
-            //sharing/linux:nearby_sharing_api_shared
+            //sharing/linux:nearby_sharing_cli
 
   build-rust-linux:
     name: Build Rust on Linux
