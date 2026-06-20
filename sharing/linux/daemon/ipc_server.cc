@@ -158,3 +158,43 @@ void IPCServer::StartEventLoop() {
 
   Stop();
 }
+
+void IPCServer::DispatchOne(const std::string& line) {
+  auto space = line.find(' ');
+
+  std::string command =
+      space == std::string::npos ? line : line.substr(0, space);
+
+  std::string_view args;
+  if (space != std::string::npos) {
+    args = std::string_view(line).substr(space + 1);
+  }
+
+  Handler handler;
+
+  {
+    absl::MutexLock lock(lock_);
+
+    auto it = handlers_.find(command);
+    if (it == handlers_.end()) {
+      std::cout << "Unknown command: " << command << "\n";
+      return;
+    }
+
+    handler = it->second;
+  }
+
+  handler(args);
+}
+void IPCServer::DispatchLoop() {
+  while (running_.load()) {
+    std::string line = Read();
+
+    if (line.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+
+    DispatchOne(line);
+  }
+}

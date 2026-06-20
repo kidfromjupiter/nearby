@@ -14,6 +14,7 @@ cc_test(
 cc_library(
   name = "ipc_server",
   hdrs = ["ipc_server.h"],
+  srcs = ["ipc_server.cc"],
   deps = [
         "@com_google_absl//absl/synchronization",
   ],

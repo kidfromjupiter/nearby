@@ -18,27 +18,29 @@ class IPCServer {
 
   ~IPCServer() { Stop(); }
   void Stop();
-  void InitialiseSock();
-  void Recv();
   void StartEventLoop();
-  std::string Read();
+  using Handler = std::function<void(std::string_view args)>;
+
+  void RegisterHandler(std::string command, Handler handler) {
+    absl::MutexLock lock(lock_);
+    handlers_[std::move(command)] = std::move(handler);
+  }
+
+  void DispatchLoop();
 
  private:
-  FRIEND_TEST(IPCServerEventLoopTest, ClientCanConnectSendAndServerCanRead);
-  FRIEND_TEST(IPCServerEventLoopTest, ServerCanReadMultipleCommands);
-  FRIEND_TEST(IPCServerEventLoopTest, PartialCommandIsBufferedUntilDelimiter);
-  FRIEND_TEST(IPCServerEventLoopTest, LargeCommandAcrossMultipleRecvCalls);
-  FRIEND_TEST(IPCServerEventLoopTest, MultipleCommandsSplitAcrossSends);
-  FRIEND_TEST(IPCServerEventLoopTest, ClientDisconnectDoesNotCrashServer);
-  FRIEND_TEST(IPCServerEventLoopTest, ClientCanReconnectAfterDisconnect);
-  FRIEND_TEST(IPCServerEventLoopTest, StopEndsEventLoopThread);
-  FRIEND_TEST(IPCServerEventLoopTest, StopWhileClientConnected);
-  FRIEND_TEST(IPCServerEventLoopTest, StaleSocketPathIsCleanedUp);
+  friend class IPCServerTest;
+
+  void DispatchOne(const std::string& line);
+  void InitialiseSock();
+  void Recv();
+  std::string Read();
 
   int sock_fd_ = -1;
   int client_fd_ = -1;
   sockaddr_un addr{};
   std::string read_buf;
   absl::Mutex lock_;
+  std::unordered_map<std::string, Handler> handlers_;
   std::atomic<bool> running_{false};
 };
