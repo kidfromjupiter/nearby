@@ -25,8 +25,8 @@ refresh_compile_commands(
     # For example, specify a dict of targets and any flags required to build.
     targets = {
         ":fast_init": "",
-        ":nearby_connections_manager": "",
         ":nearby_sharing_cli": "",
+        "//sharing/linux/tui:tui": "",
     },
     # No need to add flags already in .bazelrc. They're automatically picked up.
     # If you don't need flags, a list of targets is also okay, as is a single target string.
@@ -59,18 +59,6 @@ cc_binary(
     deps = [":fast_init"],
 )
 
-cc_binary(
-    name = "nearby_connections",
-    srcs = [
-        "nearby_connections.cc",
-    ],
-    deps = [
-      ":nearby_connections_manager",
-      ":fast_init",
-      "//connections:core",
-      "//internal/platform/implementation/linux:linux"
-    ]
-)
 
 cc_binary(
     name = "nearby_sharing_cli",
