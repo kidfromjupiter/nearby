@@ -86,8 +86,6 @@ Wiki isn't built yet. Best place to consult would be the Github actions and work
 
 ## TODO
 
-> **Development is paused until my next break (around mid-June.)**
-
 ---
 
 ### 🔴 P0 - Critical / Core Functionality
