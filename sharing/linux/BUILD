@@ -107,7 +107,7 @@ cc_library(
         "platform/platform_util.cc",
         "platform/platform_util.h",
     ],
-    hdrs = ["platform/linux_sharing_platform.h"],
+    hdrs = ["platform/linux_sharing_platform.h", "nearby_noop_analytics_recorder.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":fast_init",
