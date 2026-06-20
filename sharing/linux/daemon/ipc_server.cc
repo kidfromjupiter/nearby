@@ -1,8 +1,21 @@
 #include "ipc_server.h"
-#include <thread>
+
 #include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <thread>
+
+namespace {
+
+nlohmann::json CommandResult(std::string command, bool ok,
+                             std::string message) {
+  return nlohmann::json{{"event", "command_result"},
+                        {"command", std::move(command)},
+                        {"ok", ok},
+                        {"message", std::move(message)}};
+}
+
+}  // namespace
 
 std::string IPCServer::Read() {
   std::string cmd;
@@ -21,16 +34,19 @@ std::string IPCServer::Read() {
 void IPCServer::Stop() {
   running_.store(false);
 
-  if (client_fd_ >= 0) {
-    shutdown(client_fd_, SHUT_RDWR);
-    close(client_fd_);
-    client_fd_ = -1;
-  }
+  {
+    absl::MutexLock write_lock(write_lock_);
+    if (client_fd_ >= 0) {
+      shutdown(client_fd_, SHUT_RDWR);
+      close(client_fd_);
+      client_fd_ = -1;
+    }
 
-  if (sock_fd_ >= 0) {
-    shutdown(sock_fd_, SHUT_RDWR);
-    close(sock_fd_);
-    sock_fd_ = -1;
+    if (sock_fd_ >= 0) {
+      shutdown(sock_fd_, SHUT_RDWR);
+      close(sock_fd_);
+      sock_fd_ = -1;
+    }
   }
 
   unlink(SOCK_PATH.data());
@@ -116,6 +132,7 @@ void IPCServer::Recv() {
 }
 
 void IPCServer::StartEventLoop() {
+  started_.store(true);
   running_.store(true);
 
   InitialiseSock();
@@ -146,29 +163,72 @@ void IPCServer::StartEventLoop() {
       break;
     }
 
-    client_fd_ = accepted_fd;
+    {
+      absl::MutexLock write_lock(write_lock_);
+      client_fd_ = accepted_fd;
+    }
 
     Recv();
 
-    if (client_fd_ >= 0) {
-      close(client_fd_);
-      client_fd_ = -1;
+    {
+      absl::MutexLock write_lock(write_lock_);
+      if (client_fd_ >= 0) {
+        close(client_fd_);
+        client_fd_ = -1;
+      }
     }
   }
 
   Stop();
 }
 
-void IPCServer::DispatchOne(const std::string& line) {
-  auto space = line.find(' ');
-
-  std::string command =
-      space == std::string::npos ? line : line.substr(0, space);
-
-  std::string_view args;
-  if (space != std::string::npos) {
-    args = std::string_view(line).substr(space + 1);
+bool IPCServer::SendLine(std::string_view line) {
+  absl::MutexLock write_lock(write_lock_);
+  if (client_fd_ < 0) {
+    return false;
   }
+
+  std::string data(line);
+  if (data.empty() || data.back() != '\n') {
+    data.push_back('\n');
+  }
+
+  size_t total_sent = 0;
+  while (total_sent < data.size()) {
+    ssize_t sent =
+        send(client_fd_, data.data() + total_sent, data.size() - total_sent, 0);
+    if (sent > 0) {
+      total_sent += static_cast<size_t>(sent);
+      continue;
+    }
+    if (sent < 0 && errno == EINTR) {
+      continue;
+    }
+    return false;
+  }
+
+  return true;
+}
+
+bool IPCServer::SendJson(const nlohmann::json& message) {
+  return SendLine(message.dump());
+}
+
+void IPCServer::DispatchOne(const std::string& line) {
+  nlohmann::json request;
+  try {
+    request = nlohmann::json::parse(line);
+  } catch (const nlohmann::json::exception& e) {
+    SendJson(CommandResult("", false, std::string("malformed JSON: ") + e.what()));
+    return;
+  }
+
+  if (!request.is_object() || !request.contains("command") ||
+      !request["command"].is_string()) {
+    SendJson(CommandResult("", false, "missing string field: command"));
+    return;
+  }
+  std::string command = request["command"].get<std::string>();
 
   Handler handler;
 
@@ -177,20 +237,23 @@ void IPCServer::DispatchOne(const std::string& line) {
 
     auto it = handlers_.find(command);
     if (it == handlers_.end()) {
-      std::cout << "Unknown command: " << command << "\n";
+      SendJson(CommandResult(command, false, "unknown command"));
       return;
     }
 
     handler = it->second;
   }
 
-  handler(args);
+  handler(request);
 }
 void IPCServer::DispatchLoop() {
-  while (running_.load()) {
+  while (true) {
     std::string line = Read();
 
     if (line.empty()) {
+      if (!running_.load() && started_.load()) {
+        return;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }

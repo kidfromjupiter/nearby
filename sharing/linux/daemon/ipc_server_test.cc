@@ -33,6 +33,7 @@ class IPCServerTest : public ::testing::Test {
 
   static void SetRunning(IPCServer& server, bool running) {
     server.running_.store(running);
+    server.started_.store(true);
   }
 
   static bool IsRunning(IPCServer& server) {
@@ -322,11 +323,12 @@ TEST_F(IPCServerTest, DispatchOneCallsRegisteredHandler) {
 
   bool called = false;
 
-  server.RegisterHandler("PING", [&](std::string_view args) {
+  server.RegisterHandler("PING", [&](const nlohmann::json& request) {
+    EXPECT_EQ(request.value("command", ""), "PING");
     called = true;
   });
 
-  DispatchOne(server, "PING");
+  DispatchOne(server, R"({"command":"PING"})");
 
   EXPECT_TRUE(called);
 }
@@ -336,11 +338,11 @@ TEST_F(IPCServerTest, DispatchOnePassesArguments) {
 
   std::string received_args;
 
-  server.RegisterHandler("ECHO", [&](std::string_view args) {
-    received_args = std::string(args);
+  server.RegisterHandler("ECHO", [&](const nlohmann::json& request) {
+    received_args = request.value("args", "");
   });
 
-  DispatchOne(server, "ECHO hello world");
+  DispatchOne(server, R"({"command":"ECHO","args":"hello world"})");
 
   EXPECT_EQ(received_args, "hello world");
 }
@@ -350,11 +352,11 @@ TEST_F(IPCServerTest, DispatchOneHandlesCommandWithoutArgs) {
 
   std::string received_args = "not empty";
 
-  server.RegisterHandler("PING", [&](std::string_view args) {
-    received_args = std::string(args);
+  server.RegisterHandler("PING", [&](const nlohmann::json& request) {
+    received_args = request.value("args", "");
   });
 
-  DispatchOne(server, "PING");
+  DispatchOne(server, R"({"command":"PING"})");
 
   EXPECT_EQ(received_args, "");
 }
@@ -364,11 +366,11 @@ TEST_F(IPCServerTest, DispatchOneIgnoresUnknownCommand) {
 
   bool called = false;
 
-  server.RegisterHandler("PING", [&](std::string_view args) {
+  server.RegisterHandler("PING", [&](const nlohmann::json& request) {
     called = true;
   });
 
-  DispatchOne(server, "UNKNOWN something");
+  DispatchOne(server, R"({"command":"UNKNOWN","args":"something"})");
 
   EXPECT_FALSE(called);
 }
@@ -379,12 +381,13 @@ TEST_F(IPCServerTest, DispatchLoopDispatchesBufferedCommand) {
   std::atomic<bool> called{false};
   std::string received_args;
 
-  server.RegisterHandler("ECHO", [&](std::string_view args) {
-    received_args = std::string(args);
+  server.RegisterHandler("ECHO", [&](const nlohmann::json& request) {
+    received_args = request.value("args", "");
     called.store(true);
   });
 
-  SetReadBuffer(server, "ECHO hello\n");
+  SetReadBuffer(server, R"({"command":"ECHO","args":"hello"})"
+                            "\n");
   SetRunning(server, true);
 
   std::thread dispatch_thread([&server]() {
@@ -408,8 +411,8 @@ TEST_F(IPCServerTest, SocketCommandReachesRegisteredHandler) {
   std::atomic<bool> called{false};
   std::string received_args;
 
-  server.RegisterHandler("ECHO", [&](std::string_view args) {
-    received_args = std::string(args);
+  server.RegisterHandler("ECHO", [&](const nlohmann::json& request) {
+    received_args = request.value("args", "");
     called.store(true);
   });
 
@@ -424,7 +427,8 @@ TEST_F(IPCServerTest, SocketCommandReachesRegisteredHandler) {
     server.DispatchLoop();
   });
 
-  SendAll(client_fd, "ECHO from socket\n");
+  SendAll(client_fd, R"({"command":"ECHO","args":"from socket"})"
+                     "\n");
 
   ASSERT_TRUE(WaitUntilTrue([&]() {
     return called.load();
