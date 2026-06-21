@@ -25,8 +25,8 @@ Element ShareTarget(std::string device_name, ShareTargetType device_type) {
              {icon, separatorLight() | dim,
               paragraph(device_name) | color(Palette::secondary) | bold | center
 
-             }) |
-         size(WIDTH, EQUAL, 14) | border;
+             }) |bgcolor(Palette::surface)|
+         size(WIDTH, EQUAL, 14) | borderStyled(Palette::border);
 };
 
 }  // namespace nearby::sharing::linux_tui

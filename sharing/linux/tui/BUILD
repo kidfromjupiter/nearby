@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
@@ -48,6 +49,31 @@ cc_library(
   name = "page",
   hdrs = [
     "page.h",
+  ],
+)
+
+cc_library(
+  name = "ipc_client",
+  srcs = [
+    "ipc_client.cc",
+  ],
+  hdrs = [
+    "ipc_client.h",
+  ],
+  deps = [
+    "@nlohmann_json//:json",
+  ],
+)
+
+cc_test(
+  name = "ipc_client_test",
+  srcs = [
+    "ipc_client_test.cc",
+  ],
+  deps = [
+    ":ipc_client",
+    "@com_google_googletest//:gtest_main",
+    "@nlohmann_json//:json",
   ],
 )
 

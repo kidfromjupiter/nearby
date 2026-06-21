@@ -2,6 +2,8 @@
 
 #include <unistd.h>
 
+#include <string>
+
 #include "ftxui/component/component.hpp"
 #include "sharing/linux/tui/ui/home_screen.h"
 
@@ -33,6 +35,12 @@ int TuiApp::Run() {
             selected_file_ = path;
             current_page_ = Page::Sharing;
           },
+      .incoming_share_device_name = incoming_share_device_name_,
+      .incoming_share_device_type = incoming_share_device_type_,
+      .on_incoming_share_accept =
+          [this]() { current_page_ = Page::FilePicker; },
+      .on_incoming_share_decline =
+          [this]() { current_page_ = Page::FilePicker; },
   });
 
   auto app =
@@ -48,10 +56,16 @@ bool TuiApp::HandleEvent(Event event) {
     return true;
   }
 
-  if (event == Event::Backspace && current_page_ == Page::Sharing) {
-    current_page_ = Page::FilePicker;
-    selected_file_.clear();
-    return true;
+  if (event == Event::Backspace) {
+    if (current_page_ == Page::Sharing) {
+      current_page_ = Page::FilePicker;
+      selected_file_.clear();
+      return true;
+    }
+    if (current_page_ == Page::IncomingShare) {
+      current_page_ = Page::FilePicker;
+      return true;
+    }
   }
 
   return false;

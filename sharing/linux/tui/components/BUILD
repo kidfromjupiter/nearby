@@ -35,6 +35,22 @@ cc_library(
     ":icons",
   ],
 )
+
+cc_library(
+  name = "incoming_share_card",
+  srcs = [
+    "incoming_share_card.cc",
+  ],
+  hdrs = [
+    "incoming_share_card.h",
+  ],
+  deps = [
+    ":share_target",
+    "//sharing/linux/tui:palette",
+    "@ftxui//:ftxui",
+  ],
+)
+
 cc_library(
   name = "file_picker_card",
   srcs = [

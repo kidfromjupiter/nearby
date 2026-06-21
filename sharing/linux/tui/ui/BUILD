@@ -56,6 +56,7 @@ cc_library(
     ":file_selected_screen",
     ":home_header",
     ":sidebar",
+    "//sharing/linux/tui/components:incoming_share_card",
     "//sharing/linux/tui:file_picker",
     "//sharing/linux/tui:page",
     "//sharing/linux/tui:palette",

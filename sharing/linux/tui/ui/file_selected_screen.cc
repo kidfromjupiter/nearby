@@ -1,6 +1,6 @@
 #include "sharing/linux/tui/ui/file_selected_screen.h"
-#include "sharing/linux/tui/components/share_target.h"
 
+#include "sharing/linux/tui/components/share_target.h"
 #include "sharing/linux/tui/palette.h"
 
 namespace nearby::sharing::linux_tui {
@@ -10,20 +10,28 @@ Element FileSelectedScreen(const std::string& selected_file) {
   FlexboxConfig config;
   config.direction = FlexboxConfig::Direction::Row;
   config.wrap = FlexboxConfig::Wrap::Wrap;
-  config.gap_x = 2;
+  config.gap_x = 1;
   config.gap_y = 1;
   return vbox({
-            flexbox({
-                  ShareTarget("Lasan's A55", ShareTargetType::kPhone),
-                  ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
-                  ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
-                  ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
-                  ShareTarget("Lasan's S9+", ShareTargetType::kTablet),
-                  ShareTarget("Lasan's S9+", ShareTargetType::kTablet),
+             hbox(
+                 {filler(),
+                  flexbox(
+                      {
+                          ShareTarget("Lasan's A55", ShareTargetType::kPhone),
+                          ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
+                          ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
+                          ShareTarget("lasan-laptop", ShareTargetType::kLaptop),
+                          ShareTarget("Lasan's S9+", ShareTargetType::kTablet),
+                          ShareTarget("Lasan's S9+", ShareTargetType::kTablet),
 
-                }, config) | flex
+                      },
+                      config) |
+                      flex
+
+                 }),
+             filler(),
          }) |
-         borderStyled(Palette::primary) | flex;
+         flex;
 }
 
 }  // namespace nearby::sharing::linux_tui
