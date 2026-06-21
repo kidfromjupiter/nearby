@@ -10,7 +10,7 @@ cc_library(
   ],
   deps = [
     "@ftxui//:ftxui",
-    "//sharing/linux/tui/components:brand"
+    "//sharing/linux/tui/components:icons"
   ],
 )
 
@@ -24,7 +24,7 @@ cc_library(
   ],
   deps = [
     "//sharing/linux/tui:palette",
-    "//sharing/linux/tui/components:file_icon",
+    "//sharing/linux/tui/components:icons",
     "@ftxui//:ftxui",
   ],
 )
@@ -39,6 +39,7 @@ cc_library(
   ],
   deps = [
     "//sharing/linux/tui:palette",
+    "//sharing/linux/tui/components:share_target",
     "@ftxui//:ftxui",
   ],
 )
