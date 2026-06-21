@@ -9,61 +9,59 @@
 #include "sharing/linux/tui/palette.h"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
-ftxui::Component FilePickerCard(FilePickerCardOptions options) {
-  auto picker_box = std::make_shared<ftxui::Box>();
+Component FilePickerCard(FilePickerCardOptions options) {
+  auto picker_box = std::make_shared<Box>();
   auto hovered = std::make_shared<bool>(false);
 
-  auto card = ftxui::Renderer([picker_box, hovered] {
+  auto card = Renderer([picker_box, hovered] {
     auto picker_card =
-        ftxui::vbox({
-            FileIcon(FileIconSize::Large) | ftxui::color(Palette::secondary),
-            ftxui::separatorEmpty(),
-            ftxui::text("Select file to share") | ftxui::bold | ftxui::center,
+        vbox({
+            FileIcon(FileIconSize::Large) | color(Palette::secondary),
+            separatorEmpty(),
+            text("Select file to share") | bold | center,
         }) |
-        ftxui::borderStyled(*hovered ? Palette::primary : Palette::secondary) |
-        ftxui::size(ftxui::WIDTH, ftxui::GREATER_THAN, 33) |
-        ftxui::size(ftxui::HEIGHT, ftxui::EQUAL, 13) |
-        ftxui::reflect(*picker_box);
+        borderStyled(*hovered ? Palette::primary : Palette::secondary) |
+        size(WIDTH, GREATER_THAN, 33) | size(HEIGHT, EQUAL, 13) |
+        reflect(*picker_box);
 
-    return ftxui::vbox({
-               ftxui::filler(),
-               ftxui::hbox({
-                   ftxui::filler(),
+    return vbox({
+               filler(),
+               hbox({
+                   filler(),
                    picker_card,
-                   ftxui::filler(),
+                   filler(),
                }),
-               ftxui::filler(),
+               filler(),
            }) |
-           ftxui::flex;
+           flex;
   });
 
-  return ftxui::CatchEvent(
-      card, [picker_box, hovered, options](ftxui::Event event) {
-        if (!event.is_mouse()) {
-          return false;
-        }
+  return CatchEvent(card, [picker_box, hovered, options](Event event) {
+    if (!event.is_mouse()) {
+      return false;
+    }
 
-        auto mouse = event.mouse();
-        bool inside_picker =
-            mouse.x >= picker_box->x_min && mouse.x <= picker_box->x_max &&
-            mouse.y >= picker_box->y_min && mouse.y <= picker_box->y_max;
+    auto mouse = event.mouse();
+    bool inside_picker =
+        mouse.x >= picker_box->x_min && mouse.x <= picker_box->x_max &&
+        mouse.y >= picker_box->y_min && mouse.y <= picker_box->y_max;
 
-        *hovered = inside_picker;
+    *hovered = inside_picker;
 
-        if (!inside_picker || mouse.button != ftxui::Mouse::Left ||
-            mouse.motion != ftxui::Mouse::Pressed ||
-            options.file_picker == nullptr) {
-          return false;
-        }
+    if (!inside_picker || mouse.button != Mouse::Left ||
+        mouse.motion != Mouse::Pressed || options.file_picker == nullptr) {
+      return false;
+    }
 
-        std::string path = options.file_picker->PickFile();
-        if (!path.empty() && options.on_file_selected) {
-          options.on_file_selected(path);
-        }
+    std::string path = options.file_picker->PickFile();
+    if (!path.empty() && options.on_file_selected) {
+      options.on_file_selected(path);
+    }
 
-        return true;
-      });
+    return true;
+  });
 }
 
 }  // namespace nearby::sharing::linux_tui

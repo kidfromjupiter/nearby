@@ -7,6 +7,7 @@
 #include <string>
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
 class TuiApp {
  public:
@@ -15,9 +16,9 @@ class TuiApp {
   int Run();
 
  private:
-  bool HandleEvent(ftxui::Event event);
+  bool HandleEvent(Event event);
 
-  ftxui::ScreenInteractive screen_;
+  ScreenInteractive screen_;
   ZenityFilePicker file_picker_;
   Page current_page_ = Page::FilePicker;
   std::string hostname_;

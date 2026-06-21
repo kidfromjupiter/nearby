@@ -5,7 +5,8 @@
 #include "ftxui/dom/elements.hpp"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
-ftxui::Element FileSelectedScreen(const std::string& selected_file);
+Element FileSelectedScreen(const std::string& selected_file);
 
 }  // namespace nearby::sharing::linux_tui

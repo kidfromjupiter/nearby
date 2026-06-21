@@ -6,6 +6,7 @@
 #include "sharing/linux/tui/ui/home_screen.h"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 namespace {
 
 std::string GetHostname() {
@@ -16,7 +17,7 @@ std::string GetHostname() {
 
 }  // namespace
 
-TuiApp::TuiApp() : screen_(ftxui::ScreenInteractive::Fullscreen()) {
+TuiApp::TuiApp() : screen_(ScreenInteractive::Fullscreen()) {
   hostname_ = GetHostname();
   screen_.TrackMouse(true);
 }
@@ -34,20 +35,20 @@ int TuiApp::Run() {
           },
   });
 
-  auto app = ftxui::CatchEvent(
-      component, [this](ftxui::Event event) { return HandleEvent(event); });
+  auto app =
+      CatchEvent(component, [this](Event event) { return HandleEvent(event); });
 
   screen_.Loop(app);
   return 0;
 }
 
-bool TuiApp::HandleEvent(ftxui::Event event) {
-  if (event == ftxui::Event::Character('q') || event == ftxui::Event::Escape) {
+bool TuiApp::HandleEvent(Event event) {
+  if (event == Event::Character('q') || event == Event::Escape) {
     screen_.ExitLoopClosure()();
     return true;
   }
 
-  if (event == ftxui::Event::Backspace && current_page_ == Page::Sharing) {
+  if (event == Event::Backspace && current_page_ == Page::Sharing) {
     current_page_ = Page::FilePicker;
     selected_file_.clear();
     return true;

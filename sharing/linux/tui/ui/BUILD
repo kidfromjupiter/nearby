@@ -10,6 +10,7 @@ cc_library(
   ],
   deps = [
     "@ftxui//:ftxui",
+    "//sharing/linux/tui/components:brand"
   ],
 )
 

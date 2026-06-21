@@ -1,28 +1,29 @@
 #include "sharing/linux/tui/components/file_icon.h"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
-ftxui::Element FileIcon(FileIconSize size) {
+Element FileIcon(FileIconSize size) {
   if (size == FileIconSize::Small) {
-    return ftxui::vbox({
-        ftxui::text("    ______ ") | ftxui::center,
-        ftxui::text("   / |   | ") | ftxui::center,
-        ftxui::text("  /__|   | ") | ftxui::center,
-        ftxui::text(" | ----- | ") | ftxui::center,
-        ftxui::text(" | ----- | ") | ftxui::center,
-        ftxui::text(" |_______| ") | ftxui::center,
+    return vbox({
+        text("    ______ ") | center,
+        text("   / |   | ") | center,
+        text("  /__|   | ") | center,
+        text(" | ----- | ") | center,
+        text(" | ----- | ") | center,
+        text(" |_______| ") | center,
     });
   }
 
-  return ftxui::vbox({
-      ftxui::text("    __________ ") | ftxui::center,
-      ftxui::text("   / |       | ") | ftxui::center,
-      ftxui::text("  /__|       | ") | ftxui::center,
-      ftxui::text(" | --------- | ") | ftxui::center,
-      ftxui::text(" | --------- | ") | ftxui::center,
-      ftxui::text(" | --------- | ") | ftxui::center,
-      ftxui::text(" | --------- | ") | ftxui::center,
-      ftxui::text(" |___________| ") | ftxui::center,
+  return vbox({
+      text("    __________ ") | center,
+      text("   / |       | ") | center,
+      text("  /__|       | ") | center,
+      text(" | --------- | ") | center,
+      text(" | --------- | ") | center,
+      text(" | --------- | ") | center,
+      text(" | --------- | ") | center,
+      text(" |___________| ") | center,
   });
 }
 

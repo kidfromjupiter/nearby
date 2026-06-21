@@ -3,7 +3,8 @@
 #include "ftxui/dom/elements.hpp"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
-ftxui::Element Brand();
+Element Brand();
 
 }  // namespace nearby::sharing::linux_tui

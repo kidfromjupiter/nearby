@@ -8,6 +8,7 @@
 #include "sharing/linux/tui/page.h"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
 struct HomeScreenOptions {
   std::string hostname;
@@ -17,6 +18,6 @@ struct HomeScreenOptions {
   std::function<void(std::string)> on_file_selected;
 };
 
-ftxui::Component HomeScreen(HomeScreenOptions options);
+Component HomeScreen(HomeScreenOptions options);
 
 }  // namespace nearby::sharing::linux_tui

@@ -3,12 +3,13 @@
 #include "ftxui/dom/elements.hpp"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
 enum class FileIconSize {
   Large,
   Small,
 };
 
-ftxui::Element FileIcon(FileIconSize size);
+Element FileIcon(FileIconSize size);
 
 }  // namespace nearby::sharing::linux_tui

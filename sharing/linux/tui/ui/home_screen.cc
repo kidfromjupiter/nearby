@@ -8,13 +8,14 @@
 #include "sharing/linux/tui/ui/sidebar.h"
 
 namespace nearby::sharing::linux_tui {
+using namespace ftxui;
 
-ftxui::Component HomeScreen(HomeScreenOptions options) {
+Component HomeScreen(HomeScreenOptions options) {
   auto file_picker_card =
       FilePickerCard({.file_picker = options.file_picker,
                       .on_file_selected = options.on_file_selected});
 
-  return ftxui::Renderer(file_picker_card, [file_picker_card, options] {
+  return Renderer(file_picker_card, [file_picker_card, options] {
     const std::string selected_file =
         options.selected_file == nullptr ? "" : *options.selected_file;
     const Page current_page = options.current_page == nullptr
@@ -25,18 +26,17 @@ ftxui::Component HomeScreen(HomeScreenOptions options) {
                           ? file_picker_card->Render()
                           : FileSelectedScreen(selected_file);
 
-    return ftxui::vbox({
-               HomeHeader() | ftxui::color(Palette::accent),
-               ftxui::separator(),
-               ftxui::hbox({
+    return vbox({
+               HomeHeader() | color(Palette::accent),
+               separator(),
+               hbox({
                    Sidebar({.hostname = options.hostname,
                             .selected_file = selected_file}),
-                   main_panel | ftxui::flex,
-               }) | ftxui::flex,
+                   main_panel | flex,
+               }) | flex,
            }) |
-           ftxui::bgcolor(Palette::base) |
-           ftxui::size(ftxui::WIDTH, ftxui::GREATER_THAN, 80) |
-           ftxui::size(ftxui::HEIGHT, ftxui::GREATER_THAN, 24);
+           bgcolor(Palette::base) | size(WIDTH, GREATER_THAN, 80) |
+           size(HEIGHT, GREATER_THAN, 24);
   });
 }
 
