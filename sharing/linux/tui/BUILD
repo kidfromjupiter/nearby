@@ -1,4 +1,5 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
@@ -21,6 +22,49 @@ cc_binary(
   name = "tui",
   srcs = [
     "main.cc",
+  ],
+  deps = [
+    ":app",
+  ]
+)
+
+cc_library(
+  name = "app",
+  srcs = [
+    "app.cc",
+  ],
+  hdrs = [
+    "app.h",
+  ],
+  deps = [
+    ":file_picker",
+    ":page",
+    "//sharing/linux/tui/ui:home_screen",
+    "@ftxui//:ftxui",
+  ],
+)
+
+cc_library(
+  name = "page",
+  hdrs = [
+    "page.h",
+  ],
+)
+
+cc_library(
+  name = "file_picker",
+  srcs = [
+    "file_picker.cc",
+  ],
+  hdrs = [
+    "file_picker.h",
+  ],
+)
+
+cc_library(
+  name = "palette",
+  hdrs = [
+    "palette.h",
   ],
   deps = [
     "@ftxui//:ftxui",
