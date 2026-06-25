@@ -95,9 +95,13 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
     MutexLock lock(&reader_mutex_);
 
     ExceptionOr<std::int32_t> read_int;
+    // currently there's not way to have both kRefactorBleL2cap flag working AND 
+    // have mediums other than ble_l2cap working. upstream may change this in the future
+    //
+    // So we have to explicitly add a condition to skip this pathway when medium is l2cap
     if (NearbyFlags::GetInstance().GetBoolFlag(
             config_package_nearby::nearby_connections_feature::
-                kRefactorBleL2cap)) {
+                kRefactorBleL2cap) && GetMedium() == BLE_L2CAP) {
       ExceptionOr<ByteArray> read_control_block_bytes = DispatchPacket();
       if (!read_control_block_bytes.ok()) {
         LOG(WARNING) << __func__ << ": Failed to dispatch packet: "
