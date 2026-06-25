@@ -8,14 +8,14 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
+
+#include <sdbus-c++/sdbus-c++.h>
 
 #include "absl/time/time.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/flags/nearby_flags.h"
 #include "sharing/flags/generated/nearby_sharing_feature_flags.h"
-#include "sharing/linux/daemon/daemon_service.h"
-#include "sharing/linux/daemon/ipc_server.h"
+#include "sharing/linux/daemon/nearby_sharing_dbus_service.h"
 #include "sharing/linux/nearby_noop_analytics_recorder.h"
 #include "sharing/linux/platform/linux_sharing_platform.h"
 #include "sharing/nearby_sharing_service.h"
@@ -27,13 +27,13 @@ namespace nearby::sharing::linux {
 namespace {
 
 std::atomic<bool> g_interrupted = false;
-IPCServer* g_ipc_server = nullptr;
+sdbus::IConnection* g_bus = nullptr;
 
 void HandleSignal(int signal) {
   static_cast<void>(signal);
   g_interrupted = true;
-  if (g_ipc_server != nullptr) {
-    g_ipc_server->Stop();
+  if (g_bus != nullptr) {
+    g_bus->leaveEventLoop();
   }
 }
 
@@ -140,35 +140,26 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  IPCServer ipc_server;
-  nearby::sharing::linux::g_ipc_server = &ipc_server;
-  nearby::sharing::linux::DaemonService daemon(
-      *service, [&](const nlohmann::json& event) { ipc_server.SendJson(event); });
+  auto bus = sdbus::createSessionBusConnection(
+      sdbus::ServiceName("com.google.nearby.sharing"));
+  nearby::sharing::linux::g_bus = bus.get();
+  auto object = sdbus::createObject(
+      *bus, sdbus::ObjectPath("/com/google/nearby/sharing"));
+  nearby::sharing::linux::NearbySharingDbusService dbus_service(
+      *object, *service, [&bus]() { bus->leaveEventLoop(); });
+  dbus_service.EmitStatusChanged();
 
-  const std::string commands[] = {
-      "status",        "start_receive", "stop_receive", "start_discovery",
-      "stop_discovery", "send_file",     "accept",       "reject",
-      "cancel",        "shutdown",
-  };
-  for (const std::string& command : commands) {
-    ipc_server.RegisterHandler(command, [&](const nlohmann::json& request) {
-      nlohmann::json result = daemon.HandleCommand(request);
-      ipc_server.SendJson(result);
-      if (request.value("command", "") == "shutdown") {
-        ipc_server.Stop();
-      }
-    });
+  try {
+    bus->enterEventLoop();
+  } catch (const sdbus::Error& error) {
+    std::cerr << "D-Bus event loop failed: " << error.getName() << ": "
+              << error.getMessage() << std::endl;
+    dbus_service.ShutdownService();
+    nearby::sharing::linux::g_bus = nullptr;
+    return 1;
   }
 
-  std::thread server_thread([&ipc_server]() { ipc_server.StartEventLoop(); });
-  std::thread dispatch_thread([&ipc_server]() { ipc_server.DispatchLoop(); });
-
-  server_thread.join();
-  ipc_server.Stop();
-  if (dispatch_thread.joinable()) {
-    dispatch_thread.join();
-  }
-  daemon.Shutdown();
-  nearby::sharing::linux::g_ipc_server = nullptr;
+  dbus_service.ShutdownService();
+  nearby::sharing::linux::g_bus = nullptr;
   return nearby::sharing::linux::g_interrupted ? 130 : 0;
 }
