@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unistd.h>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
@@ -37,7 +38,7 @@ class BleL2capSocket;
 
 class BleL2capInputStream : public nearby::InputStream {
  public:
-  BleL2capInputStream(sdbus::UnixFd fd) : stream_(fd) {}
+  explicit BleL2capInputStream(int fd) : stream_(fd) {}
 
   ExceptionOr<ByteArray> Read(std::int64_t size) override;
   Exception Close() override {
@@ -57,7 +58,7 @@ class BleL2capInputStream : public nearby::InputStream {
 
 class BleL2capOutputStream : public nearby::OutputStream {
  public:
-  BleL2capOutputStream(sdbus::UnixFd fd) : stream_(fd) {}
+  explicit BleL2capOutputStream(int fd) : stream_(fd) {}
 
   Exception Write(absl::string_view data) override;
   Exception Flush() override;
@@ -78,7 +79,7 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
   BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
                  std::string service_id = "")
-      : fd_(sdbus::UnixFd(fd)),
+      : fd_(fd),
         output_stream_(fd_),
         input_stream_(fd_),
         peripheral_id_(peripheral_id) {};
@@ -88,6 +89,10 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   Exception Close() override {
     input_stream_.Close();
     output_stream_.Close();
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
 
     return Exception{Exception::kSuccess};
   };
@@ -96,7 +101,7 @@ class BleL2capSocket final : public api::ble::BleL2capSocket {
   }
 
  private:
-  sdbus::UnixFd fd_;
+  int fd_;
   BleL2capOutputStream output_stream_;
   BleL2capInputStream input_stream_;
   api::ble::BlePeripheral::UniqueId peripheral_id_;

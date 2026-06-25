@@ -21,6 +21,7 @@
 
 #include <sdbus-c++/Types.h>
 #include <sys/poll.h>
+#include <unistd.h>
 #include <systemd/sd-bus.h>
 
 #include "absl/synchronization/mutex.h"
@@ -38,20 +39,27 @@ class BluetoothSocket final : public api::BluetoothSocket {
  public:
   BluetoothSocket(std::shared_ptr<BluetoothDevice> device,
                   sdbus::UnixFd fd)
-      :fd_(fd), device_(std::move(device)), output_stream_(fd_), input_stream_(fd_) {}
+      : fd_(fd.release()),
+        device_(std::move(device)),
+        output_stream_(fd_),
+        input_stream_(fd_) {}
 
   InputStream &GetInputStream() override { return input_stream_; }
   OutputStream &GetOutputStream() override { return output_stream_; }
   Exception Close() override {
     input_stream_.Close();
     output_stream_.Close();
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
 
     return Exception{Exception::kSuccess};
   }
   api::BluetoothDevice *GetRemoteDevice() override { return device_.get(); };
 
  private:
-  sdbus::UnixFd fd_;
+  int fd_;
   std::shared_ptr<BluetoothDevice> device_;
   OutputStream output_stream_;
   InputStream input_stream_;

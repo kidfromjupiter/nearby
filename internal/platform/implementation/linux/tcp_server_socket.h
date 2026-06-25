@@ -18,9 +18,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <functional>
-
-#include <sdbus-c++/Types.h>
+#include <unistd.h>
 
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/linux/stream.h"
@@ -30,8 +31,8 @@ namespace nearby {
 namespace linux {
 class TCPSocket {
  public:
-  explicit TCPSocket(const sdbus::UnixFd& fd)
-      : closed_(false), output_stream_(fd), input_stream_(fd) {}
+  explicit TCPSocket(int fd)
+      : fd_(fd), closed_(false), output_stream_(fd), input_stream_(fd) {}
 
   static std::optional<TCPSocket> Connect(const std::string& ip_address,
                                           int port) {
@@ -54,10 +55,11 @@ class TCPSocket {
     if (ret < 0) {
       LOG(ERROR) << __func__ << ": Error connecting to socket: "
                          << std::strerror(errno);
+      close(sock);
       return std::nullopt;
     }
 
-    return TCPSocket(sdbus::UnixFd(sock));
+    return TCPSocket(sock);
   }
 
   InputStream& GetInputStream() { return input_stream_; }
@@ -69,11 +71,16 @@ class TCPSocket {
     closed_ = true;
     input_stream_.Close();
     output_stream_.Close();
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
 
     return {Exception::kSuccess};
   };
 
  private:
+  int fd_;
   bool closed_;
 
   OutputStream output_stream_;
@@ -125,19 +132,23 @@ class TCPServerSocket {
     socklen_t len = sizeof(addr);
 
     auto conn =
-        accept(fd_.get(), reinterpret_cast<struct sockaddr*>(&addr), &len);
+        accept(fd_, reinterpret_cast<struct sockaddr*>(&addr), &len);
     if (conn < 0) {
       LOG(ERROR) << __func__
                          << ": Error accepting incoming connections on socket "
-                         << fd_.get() << ": " << std::strerror(errno);
+                         << fd_ << ": " << std::strerror(errno);
       return std::nullopt;
     }
 
-    return TCPSocket(sdbus::UnixFd(conn));
+    return TCPSocket(conn);
   };
 
   Exception Close() {
-    int fd = fd_.release();
+    if (fd_ < 0) {
+      return {Exception::kSuccess};
+    }
+    int fd = fd_;
+    fd_ = -1;
     shutdown(fd, SHUT_RDWR);
     auto ret = close(fd);
     if (ret < 0) {
@@ -153,11 +164,11 @@ class TCPServerSocket {
     struct sockaddr_in sin;
     socklen_t len = sizeof(sin);
     auto ret =
-        getsockname(fd_.get(), reinterpret_cast<struct sockaddr*>(&sin), &len);
+        getsockname(fd_, reinterpret_cast<struct sockaddr*>(&sin), &len);
     if (ret < 0) {
       LOG(ERROR) << __func__
                          << ": Error getting information for socket "
-                         << fd_.get() << ": " << std::strerror(errno);
+                         << fd_ << ": " << std::strerror(errno);
       return 0;
     }
 
@@ -165,7 +176,7 @@ class TCPServerSocket {
   }
 
  private:
-  sdbus::UnixFd fd_;
+  int fd_;
 };
 }  // namespace linux
 }  // namespace nearby

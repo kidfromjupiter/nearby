@@ -18,12 +18,14 @@
 #include "internal/platform/implementation/linux/stream.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 
+#include <unistd.h>
+
 namespace nearby {
 namespace linux {
 class WifiHotspotSocket : public api::WifiHotspotSocket {
  public:
   explicit WifiHotspotSocket(int connection_fd)
-      : fd_(sdbus::UnixFd(connection_fd)),
+      : fd_(connection_fd),
         output_stream_(fd_),
         input_stream_(fd_) {}
 
@@ -32,12 +34,16 @@ class WifiHotspotSocket : public api::WifiHotspotSocket {
   Exception Close() override {
     input_stream_.Close();
     output_stream_.Close();
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
 
     return Exception{Exception::kSuccess};
   };
 
  private:
-  sdbus::UnixFd fd_;
+  int fd_;
   OutputStream output_stream_;
   InputStream input_stream_;
 };

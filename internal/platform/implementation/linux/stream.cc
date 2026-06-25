@@ -15,10 +15,9 @@
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <unistd.h>
-#include <array>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 
 #include "absl/strings/escaping.h"
 #include "internal/platform/byte_array.h"
@@ -34,7 +33,7 @@ ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
     return ExceptionOr<ByteArray>(ByteArray(std::string()));
   }
 
-  if (!fd_ || !fd_->isValid()) {
+  if (closed_ || fd_ < 0) {
     return {Exception::kIo};
   }
 
@@ -43,7 +42,7 @@ ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
 
   while (true) {
     pollfd pfd{};
-    pfd.fd = fd_->get();
+    pfd.fd = fd_;
     pfd.events = POLLIN;
 
     int poll_result = poll(&pfd, 1, -1);
@@ -64,7 +63,7 @@ ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
     }
 
     if (pfd.revents & (POLLIN | POLLHUP)) {
-      ssize_t bytes_read = recv(fd_->get(), buffer.data(), buffer.size(), 0);
+      ssize_t bytes_read = recv(fd_, buffer.data(), buffer.size(), 0);
 
       if (bytes_read > 0) {
         buffer.resize(static_cast<std::size_t>(bytes_read));
@@ -93,17 +92,18 @@ ExceptionOr<ByteArray> InputStream::Read(std::int64_t size) {
 }
 
 Exception InputStream::Close() {
-  if (!fd_->isValid()) return Exception{Exception::kIo};
-  fd_.reset();
-  return {};
+  if (closed_ || fd_ < 0) return Exception{Exception::kSuccess};
+  closed_ = true;
+  shutdown(fd_, SHUT_RD);
+  return Exception{Exception::kSuccess};
 }
 
 Exception OutputStream::Write(absl::string_view data) {
-  if (!fd_ || !fd_->isValid()) {
+  if (closed_ || fd_ < 0) {
     return {Exception::kIo};
   }
 
-  const int fd = fd_->get();
+  const int fd = fd_;
   size_t sent = 0;
 
   while (sent < data.size()) {
@@ -165,12 +165,10 @@ Exception OutputStream::Flush() {
 }
 
 Exception OutputStream::Close() {
-  if (!fd_->isValid()) return Exception{Exception::kIo};
-
-  auto ret = close(fd_->get()) < 0 ? Exception{Exception::kIo}
-                                   : Exception{Exception::kSuccess};
-  fd_.reset();
-  return ret;
+  if (closed_ || fd_ < 0) return Exception{Exception::kSuccess};
+  closed_ = true;
+  shutdown(fd_, SHUT_WR);
+  return Exception{Exception::kSuccess};
 }
 
 }  // namespace linux
