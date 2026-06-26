@@ -25,11 +25,17 @@ genrule(
     srcs = [
         "resources.qrc",
         "main.qml",
+        "AppContent.qml",
         "Drop.qml",
         "Sidebar.qml",
+        "ShareTarget.qml",
+        "Targets.qml",
         "googlesans_var.ttf",
         "icons/file.svg",
-        "icons/up_file.svg"
+        "icons/laptop.svg",
+        "icons/smartphone.svg",
+        "icons/tablet.svg",
+        "icons/up_file.svg",
     ],
     outs = ["qrc_resources.cpp"],
     cmd = "/usr/lib64/qt6/libexec/rcc $(location resources.qrc) -o $(location qrc_resources.cpp)",

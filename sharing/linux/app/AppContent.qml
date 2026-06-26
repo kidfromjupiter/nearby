@@ -12,7 +12,7 @@ RowLayout {
         id: contentStack
         Layout.fillWidth: true
         Layout.fillHeight: true
-        currentIndex: 1
+        currentIndex: 2
 
         Drop {}
 
@@ -21,18 +21,15 @@ RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Targets{}
-
+            Targets {}
         }
-        Rectangle {
-            color: "transparent"
-
-            Text {
-                text: "User Profile Management"
-                anchors.centerIn: parent
-                font.pointSize: 22
-                color: "#333333"
-            }
+        IncomingShare {
+            filename: "VacationPhoto_2026.jpg"
+            targetname: "Lasan's A55"
+            progressValue: 0.64
+            statusText: "Receiving 1 of 1 items"
+            transferring: true
         }
+
     }
 }

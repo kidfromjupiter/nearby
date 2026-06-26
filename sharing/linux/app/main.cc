@@ -58,8 +58,8 @@ bool ReloadInnerContent(QQmlApplicationEngine& engine) {
   return QMetaObject::invokeMethod(root, "reloadInnerContent");
 }
 
-bool CanReloadInnerContent(const QFileInfo& changed_file) {
-  return changed_file.fileName() == QStringLiteral("AppContent.qml");
+bool RequiresFullReload(const QFileInfo& changed_file) {
+  return changed_file.fileName() == QStringLiteral("main.qml");
 }
 
 }  // namespace
@@ -101,9 +101,7 @@ int main(int argc, char* argv[]) {
       WatchQmlFiles(watcher, qml_source_dir);
       const QFileInfo changed_file(changed_path);
 
-      if (changed_file.fileName() == QStringLiteral("main.qml") ||
-          !CanReloadInnerContent(changed_file) ||
-          engine.rootObjects().isEmpty()) {
+      if (RequiresFullReload(changed_file) || engine.rootObjects().isEmpty()) {
         fullReload();
         return;
       }

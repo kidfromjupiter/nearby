@@ -12,6 +12,5 @@
     <file>icons/tablet.svg</file>
     <file>icons/laptop.svg</file>
     <file>icons/smartphone.svg</file>
-
 </qresource>
 </RCC>
