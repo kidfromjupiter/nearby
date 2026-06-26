@@ -17,15 +17,11 @@ class TuiApp {
   int Run();
 
  private:
-  bool HandleEvent(Event event);
 
   ScreenInteractive screen_;
   ZenityFilePicker file_picker_;
-  Page current_page_ = Page::FilePicker;
   std::string hostname_;
   std::string selected_file_;
-  std::string incoming_share_device_name_ = "Lasan's A55";
-  ShareTargetType incoming_share_device_type_ = ShareTargetType::kPhone;
 };
 
 }  // namespace nearby::sharing::linux_tui

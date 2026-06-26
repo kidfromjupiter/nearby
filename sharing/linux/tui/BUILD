@@ -25,7 +25,22 @@ cc_binary(
     "main.cc",
   ],
   deps = [
-    ":app",
+    #":app",
+    "nearby_sharing_dbus_client"
+  ]
+)
+
+cc_library(
+  name ="nearby_sharing_dbus_client",
+  hdrs = [
+    'nearby_sharing_dbus_client.h'
+  ],
+  srcs = [
+    'nearby_sharing_dbus_client.cc'
+  ],
+  deps = [
+   "//sharing/linux/daemon:nearby_sharing_daemon",
+    "@sdbus_cpp",
   ]
 )
 

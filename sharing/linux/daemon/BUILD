@@ -19,11 +19,19 @@ cc_binary(
 )
 
 cc_library(
+    name = "nearby_sharing_dbus_client_glue",
+    hdrs = ["nearby_sharing_client.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@sdbus_cpp"],
+)
+
+cc_library(
     name = "nearby_sharing_dbus_service",
     srcs = ["nearby_sharing_dbus_service.cc"],
     hdrs = [
         "nearby_sharing_dbus_service.h",
         "nearby_sharing_server.h",
+        "nearby_sharing_client.h",
     ],
     deps = [
         "//internal/base:file_path",
