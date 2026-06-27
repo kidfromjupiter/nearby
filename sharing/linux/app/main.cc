@@ -7,6 +7,8 @@
 #include <QObject>
 #include <QTimer>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include "backend.h"
 
 namespace {
 
@@ -129,7 +131,11 @@ int main(int argc, char* argv[]) {
 
     return app.exec();
   }
+  // 1. Create the backend instance in C++
+  Backend backend;
 
+  // 2. Inject it into the QML root context
+  engine.rootContext()->setContextProperty("backend", &backend);
   // Loaded via the qrc scheme since it's compiled into the binary
   const QUrl url(QStringLiteral("qrc:/main.qml"));
 

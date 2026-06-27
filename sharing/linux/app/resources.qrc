@@ -5,6 +5,7 @@
     <file>Sidebar.qml</file>
     <file>Drop.qml</file>
     <file>ShareTarget.qml</file>
+    <file>IncomingShare.qml</file>
     <file>Targets.qml</file>
     <file>googlesans_var.ttf</file>
     <file>icons/file.svg</file>

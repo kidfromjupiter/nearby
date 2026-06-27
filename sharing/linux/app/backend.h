@@ -11,13 +11,15 @@
 #include <QString>
 #include <QVariantList>
 
+#include "QtQmlIntegration/qqmlintegration.h"
+#include "qtmetamacros.h"
 #include "sharing/linux/app/nearby_sharing_dbus_client.h"
 
 class Backend
     : public QObject,
       public nearby::sharing::linux::app::NearbySharingDbusClient::Observer {
   Q_OBJECT
-
+  QML_ELEMENT
   Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
   Q_PROPERTY(bool receiveRegistered READ receiveRegistered NOTIFY statusChanged)
   Q_PROPERTY(
@@ -81,9 +83,10 @@ class Backend
       const std::function<std::tuple<bool, std::string>()>& operation);
   void SetStatusText(const QString& text);
 
-  int counter_ = 0;
   QString status_text_;
   Status status_;
   std::map<int64_t, ShareTarget> targets_;
   std::unique_ptr<Client> client_;
+  Transfer current_transfer_;
+  bool is_incoming_transfer_ = false;
 };

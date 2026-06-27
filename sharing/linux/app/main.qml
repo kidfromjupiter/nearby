@@ -9,6 +9,7 @@ Window {
     title: qsTr("QuickShare")
     color: "#DCF5FF"
 
+
     FontLoader {
         id: googlesans
         source: "qrc:/googlesans_var.ttf"

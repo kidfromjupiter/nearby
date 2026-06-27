@@ -1,6 +1,5 @@
-load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_qt//:qt.bzl", "qt_cc_binary", "qt_cc_library", "qt_resource_via_qrc")
 
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
@@ -19,17 +18,17 @@ refresh_compile_commands(
     # And if you're working on a header-only library, specify a test or binary target that compiles it.
 )
 
-# 1. Compile QML files into a C++ source file using Qt's Resource Compiler (rcc)
-genrule(
-    name = "qrc_generation",
-    srcs = [
-        "resources.qrc",
+qt_resource_via_qrc(
+    name = "app_resources",
+    qrc_file = "resources.qrc",
+    files = [
         "main.qml",
         "AppContent.qml",
         "Drop.qml",
         "Sidebar.qml",
         "ShareTarget.qml",
         "Targets.qml",
+        "IncomingShare.qml",
         "googlesans_var.ttf",
         "icons/file.svg",
         "icons/laptop.svg",
@@ -37,44 +36,38 @@ genrule(
         "icons/tablet.svg",
         "icons/up_file.svg",
     ],
-    outs = ["qrc_resources.cpp"],
-    cmd = "/usr/lib64/qt6/libexec/rcc $(location resources.qrc) -o $(location qrc_resources.cpp)",
 )
 
-# 2. MOC generation for backend.h
-genrule(
-    name = "moc_backend",
-    srcs = ["backend.h"],
-    outs = ["moc_backend.cpp"],
-    cmd = "/usr/lib64/qt6/libexec/moc $(location backend.h) -o $(location moc_backend.cpp) ",
-)
-
-cc_binary(
-    name = "app",
-    srcs = [
-        "backend.cc",
-        "main.cc",
-        "backend.h",
-        ":qrc_generation",  # Include the generated QRC file
-        ":moc_backend",
-    ],
-    copts = [
-        # Base Qt6 directory
-        "-I/usr/include/qt6",
-        # Individual module directories required for QGuiApplication and QQmlApplicationEngine
-        "-I/usr/include/qt6/QtCore",
-        "-I/usr/include/qt6/QtGui",
-        "-I/usr/include/qt6/QtQml",
-        "-I/usr/include/qt6/QtQuick",
-    ],
-    linkopts = [
-        "-lQt6Core",
-        "-lQt6Gui",
-        "-lQt6Qml",
-        "-lQt6Quick",
-    ],
+qt_cc_library(
+    name = "backend",
+    srcs = ["backend.cc"],
+    hdrs = ["backend.h"],
     deps = [
         ":nearby_sharing_dbus_client",
+        "@rules_qt//:qt_core",
+        "@rules_qt//:qt_hdrs",
+        "@rules_qt//:qt_qml",
+        "@rules_qt//:qt_qml_meta",
+    ],
+)
+
+qt_cc_binary(
+    name = "app",
+    srcs = ["main.cc"],
+    deps = [
+        ":app_resources",
+        ":backend",
+        "@rules_qt//:qt_core",
+        "@rules_qt//:qt_gui",
+        "@rules_qt//:qt_hdrs",
+        "@rules_qt//:qt_opengl",
+        "@rules_qt//:qt_qml",
+        "@rules_qt//:qt_qml_meta",
+        "@rules_qt//:qt_qml_workerscript",
+        "@rules_qt//:qt_quick",
+        "@rules_qt//:qt_quick_controls2",
+        "@rules_qt//:qt_quick_layouts",
+        "@rules_qt//:qt_quick_shapes",
     ],
 )
 

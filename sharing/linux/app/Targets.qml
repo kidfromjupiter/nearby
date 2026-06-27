@@ -7,7 +7,7 @@ Row {
     spacing: 10
 
     Repeater {
-        model: ["Lasan's A55", "Lasan's Tab S9+", "lasan-laptop", "Somethign else"]
+        model: backend.targets
 
         // Your original delegate structure
         Rectangle {
@@ -23,11 +23,10 @@ Row {
                 anchors.right: parent.right
                 spacing: 5
 
-                ShareTarget{
+                ShareTarget {
                   progressValue: 0.7
 
                 }
-
             }
         }
     }
