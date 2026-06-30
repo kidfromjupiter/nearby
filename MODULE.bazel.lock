@@ -154,8 +154,8 @@
     "https://bcr.bazel.build/modules/rules_java/8.3.2/MODULE.bazel": "7336d5511ad5af0b8615fdc7477535a2e4e723a357b6713af439fe8cf0195017",
     "https://bcr.bazel.build/modules/rules_java/8.5.1/MODULE.bazel": "d8a9e38cc5228881f7055a6079f6f7821a073df3744d441978e7a43e20226939",
     "https://bcr.bazel.build/modules/rules_java/8.6.1/MODULE.bazel": "f4808e2ab5b0197f094cabce9f4b006a27766beb6a9975931da07099560ca9c2",
-    "https://bcr.bazel.build/modules/rules_java/9.0.3/MODULE.bazel": "1f98ed015f7e744a745e0df6e898a7c5e83562d6b759dfd475c76456dda5ccea",
-    "https://bcr.bazel.build/modules/rules_java/9.0.3/source.json": "b038c0c07e12e658135bbc32cc1a2ded6e33785105c9d41958014c592de4593e",
+    "https://bcr.bazel.build/modules/rules_java/9.1.0/MODULE.bazel": "ee63f27e36a3fada80342869361182f120a9819c74320e8e65b1e04ba0cd7a9d",
+    "https://bcr.bazel.build/modules/rules_java/9.1.0/source.json": "da589573c1dee2c9ac4a568b301269a2e8191110ff0345c1a959fa7ea6c4dfd6",
     "https://bcr.bazel.build/modules/rules_jvm_external/4.4.2/MODULE.bazel": "a56b85e418c83eb1839819f0b515c431010160383306d13ec21959ac412d2fe7",
     "https://bcr.bazel.build/modules/rules_jvm_external/5.1/MODULE.bazel": "33f6f999e03183f7d088c9be518a63467dfd0be94a11d0055fe2d210f89aa909",
     "https://bcr.bazel.build/modules/rules_jvm_external/5.2/MODULE.bazel": "d9351ba35217ad0de03816ef3ed63f89d411349353077348a45348b096615036",
@@ -193,6 +193,8 @@
     "https://bcr.bazel.build/modules/rules_python/1.7.0/MODULE.bazel": "d01f995ecd137abf30238ad9ce97f8fc3ac57289c8b24bd0bf53324d937a14f8",
     "https://bcr.bazel.build/modules/rules_python/2.0.1/MODULE.bazel": "294fbfe4dc3b24a925172e5487e1e8d3c2927cf4fba1eaddd7bad0ce50701da1",
     "https://bcr.bazel.build/modules/rules_python/2.0.1/source.json": "f2bacc75d3fc496dfd3e6a5986200b10e70169aaaf4ee5f1cea573c8d347e7c4",
+    "https://bcr.bazel.build/modules/rules_qt/0.0.6/MODULE.bazel": "09cb849f32c9ac2938a7096224a144f7932028e3166c29ded3465691e1311946",
+    "https://bcr.bazel.build/modules/rules_qt/0.0.6/source.json": "52749cf46b3acd342c2ce46c4ee181f7a943de347eb8b058ff163e1024408162",
     "https://bcr.bazel.build/modules/rules_rust/0.68.1/MODULE.bazel": "8d3332ef4079673385eb81f8bd68b012decc04ac00c9d5a01a40eff90301732c",
     "https://bcr.bazel.build/modules/rules_rust/0.68.1/source.json": "3378e746f81b62457fdfd37391244fa8ff075ba85c05931ee4f3a20ac1efe963",
     "https://bcr.bazel.build/modules/rules_shell/0.2.0/MODULE.bazel": "fda8a652ab3c7d8fee214de05e7a9916d8b28082234e8d2c0094505c5268ed3c",
@@ -222,7 +224,7 @@
   "moduleExtensions": {
     "@@rules_kotlin+//src/main/starlark/core/repositories:bzlmod_setup.bzl%rules_kotlin_extensions": {
       "general": {
-        "bzlTransitiveDigest": "ABI1D/sbS1ovwaW/kHDoj8nnXjQ0oKU9fzmzEG4iT8o=",
+        "bzlTransitiveDigest": "Ga4z8lQy1YQ5rAMy+dOl0dqcCEBnYNCXku8x3YQmDZI=",
         "usagesDigest": "QI2z8ZUR+mqtbwsf2fLqYdJAkPOHdOV+tF2yVAUgRzw=",
         "recordedInputs": [
           "REPO_MAPPING:rules_kotlin+,bazel_tools bazel_tools"
@@ -302,6 +304,49 @@
                 ]
               },
               "toolchain_target_settings": {}
+            }
+          }
+        }
+      }
+    },
+    "@@rules_qt+//extension:qt.bzl%fetch": {
+      "general": {
+        "bzlTransitiveDigest": "+wmXAn/rrcsNKiW6OUivYSeVfd3AXW5c+xNYlBdh9q4=",
+        "usagesDigest": "auA61WJmCe5oSTNXyylRfl0UXq4bzk5bNKFXIoW1/mI=",
+        "recordedInputs": [
+          "REPO_MAPPING:,rules_qt rules_qt+",
+          "REPO_MAPPING:rules_qt+,bazel_skylib bazel_skylib+",
+          "REPO_MAPPING:rules_qt+,rules_qt rules_qt+"
+        ],
+        "generatedRepoSpecs": {
+          "qt_linux_x86_64": {
+            "repoRuleId": "@@rules_qt+//extension:download_qt.bzl%download_qt",
+            "attributes": {
+              "version": "6.8.3",
+              "os": "linux",
+              "target_sdk": "desktop",
+              "build_file": "@@rules_qt+//extension:qt/6.8.3/linux_x86_64.BUILD",
+              "windows_architecture": ""
+            }
+          },
+          "qt_windows_x86_64": {
+            "repoRuleId": "@@rules_qt+//extension:download_qt.bzl%download_qt",
+            "attributes": {
+              "version": "6.8.3",
+              "os": "windows",
+              "target_sdk": "desktop",
+              "build_file": "@@rules_qt+//extension:qt/6.8.3/windows_x86_64.BUILD",
+              "windows_architecture": "win64_msvc2022"
+            }
+          },
+          "qt_mac_aarch64": {
+            "repoRuleId": "@@rules_qt+//extension:download_qt.bzl%download_qt",
+            "attributes": {
+              "version": "6.8.3",
+              "os": "macos",
+              "target_sdk": "desktop",
+              "build_file": "@@rules_qt+//extension:qt/6.8.3/mac_aarch64.BUILD",
+              "windows_architecture": ""
             }
           }
         }

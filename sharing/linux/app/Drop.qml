@@ -2,11 +2,38 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Shapes
+import QtQuick.Dialogs
+import QtCore
 
 Rectangle {
+    signal fileSelected(string filePath)
+
     id: dropZone
     color: "transparent"
-
+    FileDialog {
+        id: fileDialog
+        title: "Please choose a file"
+        currentFolder: Qt.resolvedUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
+        
+        // Optional: Filter for specific files (e.g., images, PDFs)
+        nameFilters: ["All files (*)"]
+        
+        // Handle the selected file
+        onAccepted: {
+            fileSelected(fileDialog.selectedFile)
+            // Your logic to process/upload the file goes here
+        }
+        onRejected: {
+            console.log("File picker canceled")
+        }
+    }
+    MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor // Changes cursor to a hand on hover
+            onClicked: {
+                fileDialog.open() // Opens the native OS file picker
+            }
+        }
     //signal fileDropped(string path)
     DropArea {
         anchors.fill: parent
@@ -15,12 +42,13 @@ Rectangle {
             dropText.text = "Drag and drop files to share";
             dropZone.color = "transparent";
         }
+        onEntered: k => { console.log("Entered")}
 
         // The action: What happens when the user releases the item here
 
         onDropped: drop => {
 
-                drop.acceptProposedAction();
+            drop.acceptProposedAction();
             if (drop.hasUrls) {
               console.log(drop.urls[0].toString());
               for (let i of drop.formats){
@@ -50,6 +78,16 @@ Rectangle {
             font.pointSize: 18
             color: "#333333"
         }
+        Text {
+            id: subText
+            text: "Click to open file picker"
+            font.pointSize: 12
+            color: "gray"
+            horizontalAlignment: Text.AlignHCenter
+            Layout.fillWidth: true
+        }
+
+
     }
     Canvas {
         id: dashedBorderCanvas

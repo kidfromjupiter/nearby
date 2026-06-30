@@ -8,7 +8,11 @@ Rectangle {
     Layout.fillHeight: true
     Layout.preferredWidth: 300
 
+    property string pendingPath: ""
+
     color: "#CBF0FF"
+
+    signal cancelPendingShareRequested()
 
     ColumnLayout {
         anchors.margins: 20
@@ -65,6 +69,7 @@ Rectangle {
         }
 
         Rectangle {
+            visible: pendingPath.length != 0
             Layout.preferredHeight: 350
             Layout.fillWidth: true
             border.color: "#91C8DE"
@@ -98,13 +103,14 @@ Rectangle {
                     Layout.fillWidth: true
                     color: "gray"
                     wrapMode: Text.WordWrap
-                    text: "/home/lasan/test/this/is/a/very/long/file/path/file.pp"
+                    text: decodeURIComponent(pendingPath).replace("file://", "")
                     horizontalAlignment: Text.AlignHCenter
                 }
                 Button {
                     id: cancelbutton
                     Layout.fillWidth: true
                     text: "Cancel"
+                    onClicked: sidebar.cancelPendingShareRequested()
                     contentItem: Text {
                         text: cancelbutton.text
                         font.pointSize: 14
