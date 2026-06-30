@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "."
 
 Rectangle {
     id: rootItem
@@ -12,24 +13,15 @@ Rectangle {
     // --- CUSTOM ARGUMENTS (PROPERTIES) ---
     property string deviceName: "Unknown Device"
     property string iconSource: "qrc:icons/smartphone.svg"
-    property string shareTargetId: "1"
-
-    signal clickShareTarget()
-
-    MouseArea {
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: {
-          rootItem.clickShareTarget(rootItem.shareTargetId)
-      }
-    }
+    property var shareTargetId: 0
+    property bool hovered: targetMouseArea.containsMouse
 
     ColumnLayout {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: 5
+
 
         // --- ICON CONTAINER ---
         Item {
@@ -38,12 +30,20 @@ Rectangle {
             implicitHeight: 60
             Layout.alignment: Qt.AlignHCenter
 
+
             // Icon Circle Background
             Rectangle {
                 id: iconCircle
                 anchors.fill: parent
-                color: "#6EA7B6"
+                color: rootItem.hovered ? "#195871" : "#6EA7B6"
                 radius: width / 2
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 80
+                        easing.type: Easing.OutQuad
+                    }
+                }
 
                 Button {
                     id: iconButton
@@ -59,6 +59,16 @@ Rectangle {
                     }
                 }
             }
+
+            MouseArea {
+                id: targetMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    EventBus.shareTargetSelected(rootItem.shareTargetId);
+                }
+            }
         }
 
         // --- TEXT COMPONENT ---
@@ -67,7 +77,15 @@ Rectangle {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            color: "#1A1C1E" // Using the text charcoal color from your palette
+            color: rootItem.hovered ? "#06384C" : "#1A1C1E"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 120
+                    easing.type: Easing.OutQuad
+                }
+            }
         }
     }
+
 }

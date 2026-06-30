@@ -1,10 +1,13 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource prefix="/">
     <file>main.qml</file>
+    <file>qmldir</file>
     <file>AppContent.qml</file>
+    <file>EventBus.qml</file>
     <file>Sidebar.qml</file>
     <file>Drop.qml</file>
     <file>ShareTarget.qml</file>
+    <file>SearchingDevices.qml</file>
     <file>IncomingShare.qml</file>
     <file>Targets.qml</file>
     <file>googlesans_var.ttf</file>

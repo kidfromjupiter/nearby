@@ -1,3 +1,9 @@
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+
+#include <memory>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
@@ -5,6 +11,7 @@
 #include <QApplication>
 #include <QMetaObject>
 #include <QObject>
+#include <QSocketNotifier>
 #include <QTimer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -17,6 +24,15 @@ constexpr char kQmlHotReloadEnv[] = "NEARBY_QML_HOT_RELOAD";
 constexpr char kQmlSourceDirEnv[] = "NEARBY_QML_SOURCE_DIR";
 constexpr char kDefaultQmlSourceDir[] =
     "/home/lasan/Dev/nearby_latest/sharing/linux/app";
+
+int g_signal_pipe[2] = {-1, -1};
+
+void HandleTerminationSignal(int signal) {
+  const char value = static_cast<char>(signal);
+  if (g_signal_pipe[1] != -1) {
+    static_cast<void>(write(g_signal_pipe[1], &value, sizeof(value)));
+  }
+}
 
 bool IsHotReloadEnabled() {
   const QByteArray value = qgetenv(kQmlHotReloadEnv);
@@ -65,12 +81,56 @@ bool RequiresFullReload(const QFileInfo& changed_file) {
   return changed_file.fileName() == QStringLiteral("main.qml");
 }
 
+void InstallTerminationCleanup(QApplication& app, Backend& backend) {
+  auto cleanup_done = std::make_shared<bool>(false);
+  const auto cleanup = [&backend, cleanup_done]() {
+    if (*cleanup_done) {
+      return;
+    }
+    *cleanup_done = true;
+    backend.stopDiscovery();
+    backend.stopReceive();
+  };
+
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, cleanup);
+
+  if (pipe(g_signal_pipe) != 0) {
+    return;
+  }
+  fcntl(g_signal_pipe[0], F_SETFL,
+        fcntl(g_signal_pipe[0], F_GETFL, 0) | O_NONBLOCK);
+  fcntl(g_signal_pipe[1], F_SETFL,
+        fcntl(g_signal_pipe[1], F_GETFL, 0) | O_NONBLOCK);
+
+  auto* notifier = new QSocketNotifier(g_signal_pipe[0],
+                                       QSocketNotifier::Read, &app);
+  QObject::connect(notifier, &QSocketNotifier::activated, &app,
+                   [&app, notifier, cleanup](int socket) {
+                     notifier->setEnabled(false);
+                     char buffer[32];
+                     while (read(socket, buffer, sizeof(buffer)) > 0) {
+                     }
+                     cleanup();
+                     app.quit();
+                   });
+
+  struct sigaction action {};
+  action.sa_handler = HandleTerminationSignal;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+  sigaction(SIGINT, &action, nullptr);
+  sigaction(SIGTERM, &action, nullptr);
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
   QApplication app(argc, argv);
 
   QQmlApplicationEngine engine;
+  Backend backend;
+  InstallTerminationCleanup(app, backend);
+
   const int fontId = QFontDatabase::addApplicationFont(":/googlesans_var.ttf");
 
   if (fontId != -1) {
@@ -83,6 +143,8 @@ int main(int argc, char* argv[]) {
   }
 
   if (IsHotReloadEnabled()) {
+    engine.rootContext()->setContextProperty("backend", &backend);
+
     const QDir qml_source_dir = QmlSourceDir();
     const QUrl source_url =
         QUrl::fromLocalFile(qml_source_dir.absoluteFilePath("main.qml"));
@@ -132,10 +194,7 @@ int main(int argc, char* argv[]) {
 
     return app.exec();
   }
-  // 1. Create the backend instance in C++
-  Backend backend;
 
-  // 2. Inject it into the QML root context
   engine.rootContext()->setContextProperty("backend", &backend);
   // Loaded via the qrc scheme since it's compiled into the binary
   const QUrl url(QStringLiteral("qrc:/main.qml"));

@@ -12,22 +12,27 @@ Row {
         id: dummyTargets
 
         ListElement {
+            targetId: 1
             deviceName: "Lasan's Pixel"
             type: 1
         }
         ListElement {
+            targetId: 2
             deviceName: "Work Laptop"
             type: 2
         }
         ListElement {
+            targetId: 3
             deviceName: "Kitchen Tablet"
             type: 3
         }
         ListElement {
+            targetId: 4
             deviceName: "A55"
             type: 1
         }
         ListElement {
+            targetId: 5
             deviceName: "Long Device Name For Wrapping"
             type: 2
         }
@@ -48,6 +53,7 @@ Row {
                 spacing: 5
 
                 ShareTarget {
+                    shareTargetId: shareTargetsRow.useDummyTargets ? model.targetId : model.id
                     deviceName: model.deviceName
                     iconSource: {
                         if (model.type === 2)

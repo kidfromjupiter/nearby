@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Shapes
+import "."
 
 Rectangle {
     id: sidebar
@@ -11,8 +12,6 @@ Rectangle {
     property string pendingPath: ""
 
     color: "#CBF0FF"
-
-    signal cancelPendingShareRequested()
 
     ColumnLayout {
         anchors.margins: 20
@@ -110,7 +109,7 @@ Rectangle {
                     id: cancelbutton
                     Layout.fillWidth: true
                     text: "Cancel"
-                    onClicked: sidebar.cancelPendingShareRequested()
+                    onClicked: EventBus.cancelPendingShareRequested()
                     contentItem: Text {
                         text: cancelbutton.text
                         font.pointSize: 14

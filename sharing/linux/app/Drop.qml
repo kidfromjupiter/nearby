@@ -4,10 +4,10 @@ import QtQuick.Controls
 import QtQuick.Shapes
 import Qt.labs.platform as Platform
 import QtCore
+import "."
 
 Rectangle {
     id: dropZone
-    signal fileSelected(string filePath)
     color: "transparent"
     Platform.FileDialog {
         id: fileDialog
@@ -17,13 +17,12 @@ Rectangle {
         nameFilters: ["All files (*)"]
 
         onAccepted: {
-            fileSelected(fileDialog.file);
+            EventBus.fileSelected(fileDialog.file);
         }
         onRejected: {
             console.log("File picker canceled");
         }
     }
-    //signal fileDropped(string path)
     DropArea {
         anchors.fill: parent
 

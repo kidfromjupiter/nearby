@@ -23,10 +23,13 @@ qt_resource_via_qrc(
     qrc_file = "resources.qrc",
     files = [
         "main.qml",
+        "qmldir",
         "AppContent.qml",
+        "EventBus.qml",
         "Drop.qml",
         "Sidebar.qml",
         "ShareTarget.qml",
+        "SearchingDevices.qml",
         "Targets.qml",
         "IncomingShare.qml",
         "googlesans_var.ttf",
