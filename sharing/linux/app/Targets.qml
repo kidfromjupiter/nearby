@@ -6,7 +6,7 @@ Row {
     id: shareTargetsRow
     spacing: 10
 
-    property bool useDummyTargets: true
+    property bool useDummyTargets: false
 
     ListModel {
         id: dummyTargets
@@ -53,7 +53,7 @@ Row {
                 spacing: 5
 
                 ShareTarget {
-                    shareTargetId: shareTargetsRow.useDummyTargets ? model.targetId : model.id
+                    shareTargetId: model.targetId
                     deviceName: model.deviceName
                     iconSource: {
                         if (model.type === 2)

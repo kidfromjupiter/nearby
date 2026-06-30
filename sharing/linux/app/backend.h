@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -42,11 +43,68 @@ class ShareTargetModel : public QAbstractListModel {
   void ApplyTarget(const ShareTarget& target);
   void RemoveTarget(int64_t target_id);
   void ResetTargets(const std::vector<ShareTarget>& targets);
+  std::optional<ShareTarget> FindTarget(int64_t target_id) const;
 
  private:
   int IndexOf(int64_t target_id) const;
 
   std::vector<ShareTarget> targets_;
+};
+
+class ShareTransferModel : public QAbstractListModel {
+  Q_OBJECT
+
+ public:
+  using ShareTarget = nearby::sharing::linux::app::ShareTarget;
+  using Transfer = nearby::sharing::linux::app::Transfer;
+
+  enum Role {
+    IdRole = Qt::UserRole + 1,
+    DirectionRole,
+    DeviceNameRole,
+    TypeRole,
+    StatusRole,
+    ProgressRole,
+    TransferredBytesRole,
+    TotalBytesRole,
+    TransferSpeedRole,
+    EstimatedTimeRemainingRole,
+    TotalAttachmentsCountRole,
+    TransferredAttachmentsCountRole,
+    IsFinalStatusRole,
+    HasTargetRole,
+    HasTransferRole,
+    AwaitingLocalConfirmationRole,
+    LocalPathRole,
+  };
+
+  explicit ShareTransferModel(QObject* parent = nullptr);
+
+  int rowCount(const QModelIndex& parent = QModelIndex()) const override;
+  QVariant data(const QModelIndex& index, int role) const override;
+  QHash<int, QByteArray> roleNames() const override;
+
+  void ApplyTarget(const ShareTarget& target);
+  void ApplyTransfer(const QString& direction, const ShareTarget& target,
+                     const Transfer& transfer);
+  void PrepareOutgoingTransfer(int64_t target_id, const QString& local_path,
+                               const std::optional<ShareTarget>& target);
+  void RemoveTransfer(int64_t target_id);
+
+ private:
+  struct Row {
+    int64_t id = 0;
+    QString direction;
+    std::optional<ShareTarget> target;
+    std::optional<Transfer> transfer;
+    QString local_path;
+  };
+
+  int IndexOf(int64_t target_id) const;
+  QVariant DataForRow(const Row& row, int role) const;
+  void EmitRowChanged(int row);
+
+  std::vector<Row> transfers_;
 };
 
 class Backend
@@ -61,6 +119,7 @@ class Backend
   Q_PROPERTY(bool scanning READ scanning NOTIFY statusChanged)
   Q_PROPERTY(bool transferring READ transferring NOTIFY statusChanged)
   Q_PROPERTY(QAbstractListModel* targets READ targets CONSTANT)
+  Q_PROPERTY(QAbstractListModel* transfers READ transfers CONSTANT)
 
  public:
   explicit Backend(QObject* parent = nullptr);
@@ -72,12 +131,15 @@ class Backend
   bool scanning() const { return status_.is_scanning; }
   bool transferring() const { return status_.is_transferring; }
   QAbstractListModel* targets() { return &targets_; }
+  QAbstractListModel* transfers() { return &transfers_; }
 
   Q_INVOKABLE void startReceive();
   Q_INVOKABLE void stopReceive();
   Q_INVOKABLE void startDiscovery();
   Q_INVOKABLE void stopDiscovery();
   Q_INVOKABLE void sendFile(qint64 share_target_id, const QString& path);
+  Q_INVOKABLE void prepareOutgoingTransfer(qint64 share_target_id,
+                                           const QString& path);
   Q_INVOKABLE void accept(qint64 share_target_id);
   Q_INVOKABLE void reject(qint64 share_target_id);
   Q_INVOKABLE void cancel(qint64 share_target_id);
@@ -119,6 +181,7 @@ class Backend
   QString status_text_;
   Status status_;
   ShareTargetModel targets_;
+  ShareTransferModel transfers_;
   std::unique_ptr<Client> client_;
   bool is_incoming_transfer_ = false;
 };

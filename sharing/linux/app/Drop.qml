@@ -40,6 +40,7 @@ Rectangle {
             drop.acceptProposedAction();
             if (drop.hasUrls) {
                 console.log(drop.urls[0].toString());
+                EventBus.fileSelected(drop.urls[0].toString());
                 for (let i of drop.formats) {
                     console.log(i);
                 }
