@@ -9,10 +9,7 @@ Row {
     Repeater {
         model: backend.targets
 
-        // Your original delegate structure
         Rectangle {
-            // Note: You must give the Rectangle an explicit size
-            // so the Row knows how to position them.
             width: 100
             height: 130
             color: "transparent"
@@ -24,8 +21,14 @@ Row {
                 spacing: 5
 
                 ShareTarget {
-                  progressValue: 0.7
-
+                    deviceName: model.deviceName
+                    iconSource: {
+                        if (model.type === 2)
+                            return "qrc:icons/laptop.svg"
+                        if (model.type === 3)
+                            return "qrc:icons/tablet.svg"
+                        return "qrc:icons/smartphone.svg"
+                    }
                 }
             }
         }

@@ -6,12 +6,10 @@ import QtQuick.Shapes
 Rectangle {
     id: dropZone
     color: "transparent"
+
+    //signal fileDropped(string path)
     DropArea {
         anchors.fill: parent
-        // Visual feedback: Change color when an item is hovered over it
-        onEntered: drag => {
-            dropZone.color = "#91C8DE";
-        }
 
         onExited: {
             dropText.text = "Drag and drop files to share";
@@ -19,15 +17,17 @@ Rectangle {
         }
 
         // The action: What happens when the user releases the item here
+
         onDropped: drop => {
-            dropZone.color = "#98FB98"; // Success Mint Green
-            dropText.text = "Dropped: " + drop.source.objectName;
 
-            // Snap the dragged item exactly to the center of the drop zone
-            drop.source.x = dropZone.x + (dropZone.width - drop.source.width) / 2;
-            drop.source.y = dropZone.y + (dropZone.height - drop.source.height) / 2;
+                drop.acceptProposedAction();
+            if (drop.hasUrls) {
+              console.log(drop.urls[0].toString());
+              for (let i of drop.formats){
+                console.log(i)
+              }
 
-            drop.accept(); // Tell Qt the drop event was handled successfully
+            }
         }
     }
     ColumnLayout {

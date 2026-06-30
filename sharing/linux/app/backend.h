@@ -2,18 +2,52 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
+#include <QAbstractListModel>
 #include <QObject>
 #include <QString>
-#include <QVariantList>
 
 #include "QtQmlIntegration/qqmlintegration.h"
 #include "qtmetamacros.h"
 #include "sharing/linux/app/nearby_sharing_dbus_client.h"
+
+class ShareTargetModel : public QAbstractListModel {
+  Q_OBJECT
+
+ public:
+  using ShareTarget = nearby::sharing::linux::app::ShareTarget;
+
+  enum Role {
+    IdRole = Qt::UserRole + 1,
+    DeviceNameRole,
+    TypeRole,
+    IsIncomingRole,
+    IsKnownRole,
+    DeviceIdRole,
+    ForSelfShareRole,
+    VendorIdRole,
+    ReceiveDisabledRole,
+  };
+
+  explicit ShareTargetModel(QObject* parent = nullptr);
+
+  int rowCount(const QModelIndex& parent = QModelIndex()) const override;
+  QVariant data(const QModelIndex& index, int role) const override;
+  QHash<int, QByteArray> roleNames() const override;
+
+  void ApplyTarget(const ShareTarget& target);
+  void RemoveTarget(int64_t target_id);
+  void ResetTargets(const std::vector<ShareTarget>& targets);
+
+ private:
+  int IndexOf(int64_t target_id) const;
+
+  std::vector<ShareTarget> targets_;
+};
 
 class Backend
     : public QObject,
@@ -26,7 +60,7 @@ class Backend
       bool discoveryRegistered READ discoveryRegistered NOTIFY statusChanged)
   Q_PROPERTY(bool scanning READ scanning NOTIFY statusChanged)
   Q_PROPERTY(bool transferring READ transferring NOTIFY statusChanged)
-  Q_PROPERTY(QVariantList targets READ targets NOTIFY targetsChanged)
+  Q_PROPERTY(QAbstractListModel* targets READ targets CONSTANT)
 
  public:
   explicit Backend(QObject* parent = nullptr);
@@ -37,7 +71,7 @@ class Backend
   bool discoveryRegistered() const { return status_.discovery_registered; }
   bool scanning() const { return status_.is_scanning; }
   bool transferring() const { return status_.is_transferring; }
-  QVariantList targets() const;
+  QAbstractListModel* targets() { return &targets_; }
 
   Q_INVOKABLE void startReceive();
   Q_INVOKABLE void stopReceive();
@@ -51,7 +85,6 @@ class Backend
  signals:
   void statusTextChanged();
   void statusChanged();
-  void targetsChanged();
   void incomingTransfer(qint64 share_target_id, QString device_name,
                         QString status);
   void transferUpdate(qint64 share_target_id, QString device_name,
@@ -85,8 +118,7 @@ class Backend
 
   QString status_text_;
   Status status_;
-  std::map<int64_t, ShareTarget> targets_;
+  ShareTargetModel targets_;
   std::unique_ptr<Client> client_;
-  Transfer current_transfer_;
   bool is_incoming_transfer_ = false;
 };

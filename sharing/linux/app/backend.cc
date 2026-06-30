@@ -4,7 +4,6 @@
 #include <utility>
 
 #include <QMetaObject>
-#include <QVariantMap>
 #include <sdbus-c++/sdbus-c++.h>
 
 namespace {
@@ -13,24 +12,108 @@ QString ToQString(const std::string& value) {
   return QString::fromStdString(value);
 }
 
-QVariantMap ToVariantMap(
-    const nearby::sharing::linux::app::ShareTarget& target) {
-  QVariantMap map;
-  map.insert("id", QVariant::fromValue<qint64>(target.id));
-  map.insert("deviceName", ToQString(target.device_name));
-  map.insert("type", target.type);
-  map.insert("isIncoming", target.is_incoming);
-  map.insert("isKnown", target.is_known);
-  map.insert("deviceId", ToQString(target.device_id));
-  map.insert("forSelfShare", target.for_self_share);
-  map.insert("vendorId", target.vendor_id);
-  map.insert("receiveDisabled", target.receive_disabled);
-  return map;
-}
-
 }  // namespace
 
-Backend::Backend(QObject* parent) : QObject(parent) {
+ShareTargetModel::ShareTargetModel(QObject* parent)
+    : QAbstractListModel(parent) {}
+
+int ShareTargetModel::rowCount(const QModelIndex& parent) const {
+  if (parent.isValid()) {
+    return 0;
+  }
+  return static_cast<int>(targets_.size());
+}
+
+QVariant ShareTargetModel::data(const QModelIndex& index, int role) const {
+  if (!index.isValid() || index.row() < 0 ||
+      index.row() >= static_cast<int>(targets_.size())) {
+    return {};
+  }
+
+  const ShareTarget& target = targets_[index.row()];
+  switch (role) {
+    case IdRole:
+      return QVariant::fromValue<qint64>(target.id);
+    case DeviceNameRole:
+      return ToQString(target.device_name);
+    case TypeRole:
+      return target.type;
+    case IsIncomingRole:
+      return target.is_incoming;
+    case IsKnownRole:
+      return target.is_known;
+    case DeviceIdRole:
+      return ToQString(target.device_id);
+    case ForSelfShareRole:
+      return target.for_self_share;
+    case VendorIdRole:
+      return target.vendor_id;
+    case ReceiveDisabledRole:
+      return target.receive_disabled;
+    default:
+      return {};
+  }
+}
+
+QHash<int, QByteArray> ShareTargetModel::roleNames() const {
+  return {
+      {IdRole, "id"},
+      {DeviceNameRole, "deviceName"},
+      {TypeRole, "type"},
+      {IsIncomingRole, "isIncoming"},
+      {IsKnownRole, "isKnown"},
+      {DeviceIdRole, "deviceId"},
+      {ForSelfShareRole, "forSelfShare"},
+      {VendorIdRole, "vendorId"},
+      {ReceiveDisabledRole, "receiveDisabled"},
+  };
+}
+
+void ShareTargetModel::ApplyTarget(const ShareTarget& target) {
+  const int row = IndexOf(target.id);
+  if (row < 0) {
+    const int insert_row = static_cast<int>(targets_.size());
+    beginInsertRows(QModelIndex(), insert_row, insert_row);
+    targets_.push_back(target);
+    endInsertRows();
+    return;
+  }
+
+  targets_[row] = target;
+  const QModelIndex changed_index = index(row);
+  emit dataChanged(changed_index, changed_index,
+                   {IdRole, DeviceNameRole, TypeRole, IsIncomingRole,
+                    IsKnownRole, DeviceIdRole, ForSelfShareRole, VendorIdRole,
+                    ReceiveDisabledRole});
+}
+
+void ShareTargetModel::RemoveTarget(int64_t target_id) {
+  const int row = IndexOf(target_id);
+  if (row < 0) {
+    return;
+  }
+
+  beginRemoveRows(QModelIndex(), row, row);
+  targets_.erase(targets_.begin() + row);
+  endRemoveRows();
+}
+
+void ShareTargetModel::ResetTargets(const std::vector<ShareTarget>& targets) {
+  beginResetModel();
+  targets_ = targets;
+  endResetModel();
+}
+
+int ShareTargetModel::IndexOf(int64_t target_id) const {
+  for (int i = 0; i < static_cast<int>(targets_.size()); ++i) {
+    if (targets_[i].id == target_id) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+Backend::Backend(QObject* parent) : QObject(parent), targets_(this) {
   try {
     client_ = std::make_unique<Client>(this);
     SetStatusText(QStringLiteral("Connected to nearby sharing daemon"));
@@ -41,14 +124,6 @@ Backend::Backend(QObject* parent) : QObject(parent) {
 }
 
 Backend::~Backend() = default;
-
-QVariantList Backend::targets() const {
-  QVariantList list;
-  for (const auto& [id, target] : targets_) {
-    list.push_back(ToVariantMap(target));
-  }
-  return list;
-}
 
 void Backend::startReceive() {
   RunCommand(QStringLiteral("Start receive"),
@@ -141,23 +216,17 @@ void Backend::OnStatusChanged(const Status& status) {
 }
 
 void Backend::ApplyTarget(const ShareTarget& target) {
-  targets_[target.id] = target;
-  emit targetsChanged();
+  targets_.ApplyTarget(target);
 }
 
 void Backend::RemoveTarget(const ShareTarget& target) {
-  targets_.erase(target.id);
-  emit targetsChanged();
+  targets_.RemoveTarget(target.id);
 }
 
 void Backend::ApplyStatus(const Status& status) {
   status_ = status;
-  targets_.clear();
-  for (const auto& target : status.targets) {
-    targets_[target.id] = target;
-  }
+  targets_.ResetTargets(status.targets);
   emit statusChanged();
-  emit targetsChanged();
 }
 
 void Backend::ApplyCommandResult(const QString& command,
