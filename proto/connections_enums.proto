@@ -110,9 +110,10 @@ enum WifiDirectAuthType {
   // WifiDirect type that uses ssid/password for authentication. Android
   // supports this type, but Windows does not.
   WIFI_DIRECT_WITH_PASSWORD = 1;
-  // WifiDirect type that uses service_name/pin for authentication. Android
-  // and Windows both support this type.
-  WIFI_DIRECT_WITH_PIN = 2;
+  // WifiDirect type that uses device_name for discovery and connect.
+  // Android and Windows both support this type.
+  WIFI_DIRECT_WITH_PIN = 2 [deprecated = true];
+  WIFI_DIRECT_WITH_DEVICE_NAME = 3;
 }
 // LINT.ThenChange(//depot/google3/third_party/nearby/connections/implementation/proto/offline_wire_formats.proto)
 
@@ -1447,6 +1448,11 @@ enum OperationResultCode {
   DCT_ERROR_UPGRADE_HIGH_SPEED_MEDIUM_FAILED_HOST_NETWORK_NOT_AVAILABLE = 5058;
   // Failed to upgrade to high speed medium because no incoming HTTP connection
   DCT_ERROR_UPGRADE_HIGH_SPEED_MEDIUM_FAILED_NO_INCOMING_HTTP_CONNECTION = 5059;
+  // Failed to upgrade to high speed medium because there is no USB device
+  // connected
+  DCT_ERROR_UPGRADE_HIGH_SPEED_MEDIUM_FAILED_USB_NO_CONNECTED_DEVICE = 5060;
+  // Failed to upgrade to high speed medium because the upgrade is interrupted
+  DCT_ERROR_UPGRADE_HIGH_SPEED_MEDIUM_FAILED_INTERRUPTED = 5061;
 }
 
 enum StopAdvertisingReason {

@@ -18,69 +18,6 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 licenses(["notice"])
 
 cc_library(
-    name = "auth_status",
-    hdrs = ["auth_status.h"],
-    visibility = [
-        "//internal/auth:__pkg__",
-        "//internal/platform/implementation:__subpackages__",
-        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
-    ],
-)
-
-cc_library(
-    name = "account_info",
-    hdrs = ["account_info.h"],
-    visibility = [
-        "//internal/auth:__pkg__",
-        "//internal/platform/implementation:__subpackages__",
-        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
-    ],
-)
-
-cc_library(
-    name = "account_manager",
-    hdrs = ["account_manager.h"],
-    visibility = [
-        "//internal/account:__pkg__",
-        "//internal/platform:__pkg__",
-        "//internal/platform/implementation:__subpackages__",
-        "//internal/test:__subpackages__",
-        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
-        "//location/nearby/sharing/lib:__subpackages__",
-        "//location/nearby/sharing/sdk/quick_share_server:__pkg__",
-        "//sharing:__subpackages__",
-    ],
-    deps = [
-        ":account_info",
-        ":signin_attempt",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
-    ],
-)
-
-cc_library(
-    name = "signin_attempt",
-    hdrs = ["signin_attempt.h"],
-    visibility = [
-        "//internal/account:__pkg__",
-        "//internal/auth:__pkg__",
-        "//internal/platform/implementation:__subpackages__",
-        "//internal/test:__subpackages__",
-        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
-        "//location/nearby/sharing/sdk/quick_share_server:__pkg__",
-        "//sharing:__subpackages__",
-    ],
-    deps = [
-        ":account_info",
-        ":auth_status",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/strings:string_view",
-    ],
-)
-
-cc_library(
     name = "types",
     hdrs = [
         "atomic_boolean.h",
@@ -112,11 +49,12 @@ cc_library(
         "//internal/test:__subpackages__",
         "//location/nearby/analytics/cpp:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
-        "//presence:__subpackages__",
         "//sharing:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/crypto_cros",
         "//internal/platform:base",
         "//internal/platform:mac_address",
@@ -150,6 +88,26 @@ cc_library(
 )
 
 cc_library(
+    name = "webrtc_platform",
+    hdrs = [
+        "webrtc.h",
+        "webrtc_platform.h",
+    ],
+    compatible_with = ["//buildenv/target:non_prod"],
+    visibility = [
+        "//:__subpackages__",
+    ],
+    deps = [
+        "//connections/implementation/proto:offline_wire_formats_cc_proto",
+        "//internal/platform:base",
+        "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
+        "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
     name = "comm",
     hdrs = [
         "app_lifecycle_monitor.h",
@@ -162,30 +120,28 @@ cc_library(
         "http_loader.h",
         "psk_info.h",
         "upgrade_address_info.h",
-        "webrtc.h",
         "wifi.h",
         "wifi_direct.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
     ],
-    copts = ["-DNO_WEBRTC"],
     visibility = [
         "//connections/implementation:__subpackages__",
         "//internal/network:__subpackages__",
         "//internal/platform:__pkg__",
         "//internal/platform/implementation:__subpackages__",
-        "//presence:__subpackages__",
-        "//presence/implementation:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
+        "//third_party/nearby/presence/implementation:__subpackages__",
     ],
     deps = [
-        "//connections/implementation/proto:offline_wire_formats_cc_proto",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:mac_address",
         "//internal/platform:uuid",
         "//internal/proto:credential_cc_proto",
         "//internal/proto:local_credential_cc_proto",
-        # TODO: Support WebRTC
+        # "//third_party/webrtc/files/stable/webrtc/api:create_peerconnection_factory",  # buildcleaner: keep
+        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:any_invocable",
@@ -194,7 +150,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -203,7 +158,6 @@ cc_library(
     hdrs = [
         "platform.h",
     ],
-    defines = ["NO_WEBRTC"],
     visibility = [
         "//connections/implementation:__subpackages__",
         "//internal:__subpackages__",
@@ -213,6 +167,7 @@ cc_library(
         "//location/nearby/analytics/cpp:__subpackages__",
         "//location/nearby/apps/better_together/plugins/preferences_native:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
+        "//sharing/internal/impl/common:__subpackages__",
     ],
     deps = [
         ":comm",
@@ -229,6 +184,8 @@ cc_library(
     tags = ["keep_dep"],  # Prevent build_cleaner from removing the dependency.
     visibility = [
         "//:__subpackages__",
+        "//location/nearby/analytics/cpp:__subpackages__",
+        "//location/nearby/cpp:__subpackages__",
         "//location/nearby/sharing/lib:__subpackages__",
     ],
     deps = [
@@ -254,6 +211,19 @@ cc_test(
     shard_count = 8,
     deps = [
         ":wifi_utils",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "device_info_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["device_info_test.cc"],
+    deps = [
+        ":types",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",

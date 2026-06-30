@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<node name="/com/google/nearby/sharing">
+    <!--
+      D-Bus contract for the Linux Nearby Sharing daemon.
+
+      The daemon internally exposes a socket-based JSON IPC model with:
+      - commands: start_receive, stop_receive, start_discovery,
+        stop_discovery, send_file, accept, reject, cancel, shutdown
+      - events: target_discovered, target_updated, target_lost,
+        incoming_transfer, transfer_update, status_changed
+
+      This interface preserves that surface with typed D-Bus methods and
+      signals. Flexible payloads that were JSON objects are represented as
+      a{sv} dictionaries so the daemon can expose the same field set without
+      forcing a brittle fixed struct encoding for optional values.
+
+      Common dictionary payloads:
+      - share_target a{sv}
+          id                          x
+          device_name                 s
+          type                        i
+          is_incoming                 b
+          is_known                    b
+          device_id                   s
+          for_self_share              b
+          vendor_id                   i
+          receive_disabled            b
+      - transfer a{sv}
+          status                                      s
+          progress                                    i
+          transferred_bytes                           x
+          total_bytes                                 x
+          transfer_speed                              x
+          estimated_time_remaining                    x
+          total_attachments_count                     i
+          transferred_attachments_count               i
+          is_final_status                             b
+          is_self_share                               b
+          binding_id                                  s
+          token                                       s   (optional)
+          in_progress_attachment_id                   x   (optional)
+          in_progress_attachment_transferred_bytes    x   (optional)
+          in_progress_attachment_total_bytes          x   (optional)
+      - status a{sv}
+          receive_registered          b
+          discovery_registered        b
+          is_transferring             b
+          is_scanning                 b
+          bluetooth_present           b
+          bluetooth_powered           b
+          lan_connected               b
+          targets                     aa{sv}
+    -->
+    <interface name="com.google.nearby.sharing">
+        <method name="StartReceive">
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="StopReceive">
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="StartDiscovery">
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="StopDiscovery">
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="SendFile">
+            <arg name="share_target_id" type="x" direction="in"/>
+            <arg name="path" type="s" direction="in"/>
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="Accept">
+            <arg name="share_target_id" type="x" direction="in"/>
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="Reject">
+            <arg name="share_target_id" type="x" direction="in"/>
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="Cancel">
+            <arg name="share_target_id" type="x" direction="in"/>
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <method name="Shutdown">
+            <arg name="ok" type="b" direction="out"/>
+            <arg name="message" type="s" direction="out"/>
+        </method>
+
+        <signal name="TargetDiscovered">
+            <arg name="share_target" type="a{sv}"/>
+        </signal>
+
+        <signal name="TargetUpdated">
+            <arg name="share_target" type="a{sv}"/>
+        </signal>
+
+        <signal name="TargetLost">
+            <arg name="share_target" type="a{sv}"/>
+        </signal>
+
+        <signal name="IncomingTransfer">
+            <arg name="direction" type="s"/>
+            <arg name="share_target" type="a{sv}"/>
+            <arg name="transfer" type="a{sv}"/>
+        </signal>
+
+        <signal name="TransferUpdate">
+            <arg name="direction" type="s"/>
+            <arg name="share_target" type="a{sv}"/>
+            <arg name="transfer" type="a{sv}"/>
+        </signal>
+
+        <signal name="StatusChanged">
+            <arg name="status" type="a{sv}"/>
+        </signal>
+    </interface>
+</node>

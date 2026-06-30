@@ -93,7 +93,7 @@ api::DeviceInfo::DeviceType DeviceInfo::GetDeviceType() const {
 }
 
 
-std::optional<FilePath> DeviceInfo::GetDownloadPath() const {
+FilePath DeviceInfo::GetDownloadPath() const {
   char *dir = getenv("XDG_DOWNLOAD_DIR");
   if (dir == nullptr) {
     return FilePath("/tmp");
@@ -101,7 +101,7 @@ std::optional<FilePath> DeviceInfo::GetDownloadPath() const {
   return  FilePath(std::string(dir));
 }
 
-std::optional<FilePath> DeviceInfo::GetLocalAppDataPath() const {
+FilePath DeviceInfo::GetLocalAppDataPath(FilePath sub_path) const {
   char *dir = getenv("XDG_CONFIG_HOME");
   if (dir == nullptr) {
     return FilePath("/tmp");
@@ -109,7 +109,7 @@ std::optional<FilePath> DeviceInfo::GetLocalAppDataPath() const {
   return FilePath(std::string((std::filesystem::path(std::string(dir)) / "Google Nearby")));
 }
 
-std::optional<FilePath> DeviceInfo::GetTemporaryPath() const {
+FilePath DeviceInfo::GetTemporaryPath() const {
   char *dir = getenv("XDG_RUNTIME_PATH");
   if (dir == nullptr) {
     return FilePath("/tmp");
@@ -117,7 +117,7 @@ std::optional<FilePath> DeviceInfo::GetTemporaryPath() const {
   return FilePath(std::string(std::filesystem::path(std::string(dir)) / "Google Nearby"));
 }
 
-std::optional<FilePath> DeviceInfo::GetLogPath() const {
+FilePath DeviceInfo::GetLogPath() const {
   char *dir = getenv("XDG_STATE_HOME");
   if (dir == nullptr) {
     return FilePath("/tmp");
@@ -125,13 +125,6 @@ std::optional<FilePath> DeviceInfo::GetLogPath() const {
   return FilePath(std::string(std::filesystem::path(std::string(dir)) / "Google Nearby" / "logs"));
 }
 
-std::optional<FilePath> DeviceInfo::GetCrashDumpPath() const {
-  char *dir = getenv("XDG_STATE_HOME");
-  if (dir == nullptr) {
-    return FilePath("/tmp");
-  }
-  return FilePath(std::string(std::filesystem::path(std::string(dir)) / "Google Nearby" / "crashes"));
-}
 
 bool DeviceInfo::IsScreenLocked() const {
   try {

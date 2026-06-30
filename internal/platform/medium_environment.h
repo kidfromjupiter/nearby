@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,9 +37,7 @@
 #include "internal/platform/runnable.h"
 #include "internal/platform/uuid.h"
 #include "internal/test/fake_clock.h"
-#ifndef NO_WEBRTC
 #include "internal/platform/implementation/webrtc.h"
-#endif
 #include "internal/platform/byte_array.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/wifi_direct.h"
@@ -79,12 +78,10 @@ class MediumEnvironment {
   using BluetoothDiscoveryCallback =
       api::BluetoothClassicMedium::DiscoveryCallback;
   using BleScanCallback = api::ble::BleMedium::ScanningCallback;
-#ifndef NO_WEBRTC
   using OnSignalingMessageCallback =
       api::WebRtcSignalingMessenger::OnSignalingMessageCallback;
   using OnSignalingCompleteCallback =
       api::WebRtcSignalingMessenger::OnSignalingCompleteCallback;
-#endif
   using WifiLanDiscoveredServiceCallback =
       api::WifiLanMedium::DiscoveredServiceCallback;
   using AwdlDiscoveredServiceCallback =
@@ -162,8 +159,7 @@ class MediumEnvironment {
   // Returns a Bluetooth Device object matching given mac address to nullptr.
   api::BluetoothDevice* FindBluetoothDevice(MacAddress mac_address);
 
-  const EnvironmentConfig& GetEnvironmentConfig();
-#ifndef NO_WEBRTC
+  EnvironmentConfig GetEnvironmentConfig();
   // Registers |message_callback| to receive messages sent to device with id
   // |self_id|, and |complete_callback| to notify when signaling is complete.
   void RegisterWebRtcSignalingMessenger(
@@ -180,7 +176,6 @@ class MediumEnvironment {
 
   // Simulates sending an "signaling complete" signal to the WebRTC medium.
   void SendWebRtcSignalingComplete(absl::string_view peer_id, bool success);
-#endif
   // Used to set if WebRtcMedium should use a valid peer connection or nullptr
   // in tests.
   void SetUseValidPeerConnection(bool use_valid_peer_connection);
@@ -295,7 +290,7 @@ class MediumEnvironment {
 
   // Returns WifiDirect medium that matches ssid or IP address with the role of
   // the Medium. Returns nullptr if not found.
-  api::WifiDirectMedium* GetWifiDirectMedium(absl::string_view service_name,
+  api::WifiDirectMedium* GetWifiDirectMedium(absl::string_view device_name,
                                              absl::string_view ip_address);
 
   // Updates credential and Medium role(GO or GC) to indicate the current
@@ -334,7 +329,11 @@ class MediumEnvironment {
 
   void SetFeatureFlags(const FeatureFlags::Flags& flags);
 
-  std::optional<FakeClock*> GetSimulatedClock();
+  absl::Time Now();
+  void FastForward(absl::Duration duration);
+  void AddSimulatedClockObserver(const std::string& name,
+                                 std::function<void()> observer);
+  void RemoveSimulatedClockObserver(const std::string& name);
 
   api::ble::BleMedium* FindBleMedium(api::ble::BlePeripheral::UniqueId id);
 
@@ -492,7 +491,6 @@ class MediumEnvironment {
   absl::flat_hash_map<api::ble::BleMedium*, BleMediumContext> ble_mediums_;
   absl::flat_hash_map<api::BluetoothDevice*, BluetoothPairingContext>
       devices_pairing_contexts_;
-#ifndef NO_WEBRTC
   // Maps peer id to callback for receiving signaling messages.
   absl::flat_hash_map<std::string, OnSignalingMessageCallback>
       webrtc_signaling_message_callback_;
@@ -500,7 +498,6 @@ class MediumEnvironment {
   // Maps peer id to callback for signaling complete events.
   absl::flat_hash_map<std::string, OnSignalingCompleteCallback>
       webrtc_signaling_complete_callback_;
-#endif
 
   absl::flat_hash_map<api::WifiLanMedium*, WifiLanMediumContext>
       wifi_lan_mediums_;
@@ -516,7 +513,7 @@ class MediumEnvironment {
 
   bool use_valid_peer_connection_ = true;
   absl::Duration peer_connection_latency_ = absl::ZeroDuration();
-  std::unique_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
+  std::shared_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
   ObserverList<api::BluetoothClassicMedium::Observer> observers_;
   bool ble_extended_advertisements_available_ = false;
 };

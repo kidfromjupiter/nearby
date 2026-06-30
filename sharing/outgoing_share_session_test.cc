@@ -22,20 +22,23 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/analytics/cpp/logging/mock_event_logger.h"
+#include "location/nearby/analytics/cpp/logging/sharing_log_matchers.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.pb.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.proto.static_reflection.h"
+#include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
+#include "net/proto2/contrib/parse_proto/parse_text_proto.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "internal/analytics/mock_event_logger.h"
-#include "internal/analytics/sharing_log_matchers.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
 #include "internal/network/url.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
-#include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/test_util.h"
 #include "sharing/common/nearby_share_enums.h"
@@ -45,10 +48,8 @@
 #include "sharing/nearby_connection_impl.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/paired_key_verification_runner.h"
-#include "sharing/proto/analytics/nearby_sharing_log.pb.h"
-#include "sharing/proto/analytics/nearby_sharing_log.proto.static_reflection.h"
 #include "sharing/proto/wire_format.pb.h"
+#include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
 #include "sharing/text_attachment.h"
 #include "sharing/transfer_metadata.h"
@@ -61,10 +62,11 @@ namespace {
 using ::location::nearby::proto::sharing::EstablishConnectionStatus;
 using ::location::nearby::proto::sharing::EventCategory;
 using ::location::nearby::proto::sharing::EventType;
-using ::location::nearby::proto::sharing::OSType;
 using ::nearby::analytics::HasCategory;
 using ::nearby::analytics::HasEventType;
 using ::nearby::sharing::analytics::proto::SharingLog;
+using ::nearby::sharing::service::proto::BindingRequest;
+using ::nearby::sharing::service::proto::BindingResponse;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
 using ::nearby::sharing::service::proto::Frame;
 using ::nearby::sharing::service::proto::IntroductionFrame;
@@ -73,6 +75,7 @@ using ::nearby::sharing::service::proto::WifiCredentials;
 using ::testing::_;
 using ::testing::AllOf;
 using ::testing::Eq;
+using ::protobuf_matchers::EqualsProto;
 using ::testing::InSequence;
 using ::testing::IsEmpty;
 using ::testing::IsFalse;
@@ -159,8 +162,8 @@ class OutgoingShareSessionTest : public ::testing::Test {
   FakeClock fake_clock_;
   FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
   nearby::analytics::MockEventLogger mock_event_logger_;
-  analytics::AnalyticsRecorder analytics_recorder_{/*vendor_id=*/0,
-                                                   &mock_event_logger_};
+  analytics::AnalyticsRecorderImpl analytics_recorder_{/*vendor_id=*/0,
+                                                       &mock_event_logger_};
   ShareTarget share_target_;
   MockFunction<void(OutgoingShareSession&, const TransferMetadata&)>
       transfer_metadata_callback_;
@@ -507,7 +510,7 @@ TEST_F(OutgoingShareSessionTest, SendIntroductionTimeoutCancelled) {
               Call(_, HasStatus(TransferMetadata::Status::kInProgress)));
 
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, response);
   EXPECT_THAT(status.has_value(), IsFalse());
 
   fake_clock_.FastForward(absl::Seconds(60));
@@ -517,9 +520,9 @@ TEST_F(OutgoingShareSessionTest, SendIntroductionTimeoutCancelled) {
 }
 
 TEST_F(OutgoingShareSessionTest, AcceptTransferNotConnected) {
-  EXPECT_THAT(
-      session_.AcceptTransfer([](std::optional<ConnectionResponseFrame>) {}),
-      IsFalse());
+  EXPECT_THAT(session_.AcceptTransfer(
+                  [](bool, std::optional<ConnectionResponseFrame>) {}),
+              IsFalse());
 }
 
 TEST_F(OutgoingShareSessionTest, AcceptTransferNotReady) {
@@ -527,9 +530,9 @@ TEST_F(OutgoingShareSessionTest, AcceptTransferNotReady) {
   session_.set_session_id(1234);
   ConnectionSuccess(&connection);
 
-  EXPECT_THAT(
-      session_.AcceptTransfer([](std::optional<ConnectionResponseFrame>) {}),
-      IsFalse());
+  EXPECT_THAT(session_.AcceptTransfer(
+                  [](bool, std::optional<ConnectionResponseFrame>) {}),
+              IsFalse());
 }
 
 TEST_F(OutgoingShareSessionTest, AcceptTransferSuccess) {
@@ -553,12 +556,12 @@ TEST_F(OutgoingShareSessionTest, AcceptTransferSuccess) {
       Call(_, HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance)));
 
   bool connection_response_received = false;
-  EXPECT_THAT(
-      session_.AcceptTransfer([&connection_response_received](
-                                  std::optional<ConnectionResponseFrame>) {
-        connection_response_received = true;
-      }),
-      IsTrue());
+  EXPECT_THAT(session_.AcceptTransfer(
+                  [&connection_response_received](
+                      bool, std::optional<ConnectionResponseFrame>) {
+                    connection_response_received = true;
+                  }),
+              IsTrue());
 
   // Send response frame
   nearby::sharing::service::proto::Frame frame =
@@ -575,19 +578,28 @@ TEST_F(OutgoingShareSessionTest, AcceptTransferSuccess) {
   EXPECT_THAT(connection_response_received, IsTrue());
 }
 
-TEST_F(OutgoingShareSessionTest, HandleConnectionResponseEmptyResponse) {
+TEST_F(OutgoingShareSessionTest, HandleConnectionResponseEmptyResponseFailed) {
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(std::nullopt);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, std::nullopt);
 
   ASSERT_THAT(status.has_value(), IsTrue());
   EXPECT_THAT(status.value(), Eq(TransferMetadata::Status::kFailed));
+}
+
+TEST_F(OutgoingShareSessionTest,
+       HandleConnectionResponseEmptyResponseTimedOut) {
+  std::optional<TransferMetadata::Status> status =
+      session_.HandleConnectionResponse(/*is_timeout=*/true, std::nullopt);
+
+  ASSERT_THAT(status.has_value(), IsTrue());
+  EXPECT_THAT(status.value(), Eq(TransferMetadata::Status::kTimedOut));
 }
 
 TEST_F(OutgoingShareSessionTest, HandleConnectionResponseRejectResponse) {
   ConnectionResponseFrame response;
   response.set_status(ConnectionResponseFrame::REJECT);
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, response);
 
   ASSERT_THAT(status.has_value(), IsTrue());
   EXPECT_THAT(status.value(), Eq(TransferMetadata::Status::kRejected));
@@ -598,7 +610,7 @@ TEST_F(OutgoingShareSessionTest,
   ConnectionResponseFrame response;
   response.set_status(ConnectionResponseFrame::NOT_ENOUGH_SPACE);
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, response);
 
   ASSERT_THAT(status.has_value(), IsTrue());
   EXPECT_THAT(status.value(), Eq(TransferMetadata::Status::kNotEnoughSpace));
@@ -609,7 +621,7 @@ TEST_F(OutgoingShareSessionTest,
   ConnectionResponseFrame response;
   response.set_status(ConnectionResponseFrame::UNSUPPORTED_ATTACHMENT_TYPE);
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, response);
 
   ASSERT_THAT(status.has_value(), IsTrue());
   EXPECT_THAT(status.value(),
@@ -620,7 +632,7 @@ TEST_F(OutgoingShareSessionTest, HandleConnectionResponseTimeoutResponse) {
   ConnectionResponseFrame response;
   response.set_status(ConnectionResponseFrame::TIMED_OUT);
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/true, response);
 
   ASSERT_THAT(status.has_value(), IsTrue());
   EXPECT_THAT(status.value(), Eq(TransferMetadata::Status::kTimedOut));
@@ -636,7 +648,7 @@ TEST_F(OutgoingShareSessionTest, HandleConnectionResponseAcceptResponse) {
               Call(_, HasStatus(TransferMetadata::Status::kInProgress)));
 
   std::optional<TransferMetadata::Status> status =
-      session_.HandleConnectionResponse(response);
+      session_.HandleConnectionResponse(/*is_timeout=*/false, response);
 
   ASSERT_THAT(status.has_value(), IsFalse());
 }
@@ -909,5 +921,193 @@ TEST_F(OutgoingShareSessionTest,
   EXPECT_TRUE(session_.certificate().has_value());
   EXPECT_THAT(session_.endpoint_id(), Eq(endpoint_id_org));
 }
+
+TEST_F(OutgoingShareSessionTest, StartPeerBindingSuccess) {
+  session_.set_session_id(1234);
+  session_.set_session_usage(ShareSessionUsage::kPairing);
+  NearbyConnectionImpl connection(device_info_);
+  ConnectionSuccess(&connection);
+  Frame expected_binding_request_frame =
+      proto2::contrib::parse_proto::ParseTextProtoOrDie(
+          R"pb(
+            version: V1
+            v1 {
+              type: BINDINGS
+              bindings {
+                binding_request {
+                  binding_id: "test_binding_id"
+                  type: FILESYNC
+                }
+              }
+            }
+          )pb");
+  std::vector<uint8_t> frame_data;
+  connections_manager_.set_send_payload_callback(
+      [&](std::unique_ptr<Payload> payload,
+          std::weak_ptr<NearbyConnectionsManager::PayloadStatusListener>
+              listener) {
+        frame_data = std::move(payload->content.bytes_payload.bytes);
+      });
+  EXPECT_CALL(
+      transfer_metadata_callback_,
+      Call(_,
+           AllOf(HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance),
+                 HasUsage(ShareSessionUsage::kPairing))));
+
+  BindingResponse::Status binding_response_status = BindingResponse::FAILURE;
+  session_.StartPeerBinding("test_binding_id", BindingRequest::FILESYNC,
+                            [&binding_response_status](
+                                BindingResponse::Status status) {
+                              binding_response_status = status;
+                            });
+
+  Frame frame;
+  ASSERT_THAT(frame.ParseFromArray(frame_data.data(), frame_data.size()),
+              IsTrue());
+  EXPECT_THAT(frame, EqualsProto(expected_binding_request_frame));
+
+  // Send response frame
+  nearby::sharing::service::proto::Frame response_frame =
+     proto2::contrib::parse_proto::ParseTextProtoOrDie(
+      R"pb(
+        version: V1
+        v1 {
+          type: BINDINGS
+          bindings {
+            binding_response {
+              status: SUCCESS
+            }
+          }
+        }
+      )pb"
+     );
+  std::vector<uint8_t> data;
+  data.resize(response_frame.ByteSizeLong());
+  EXPECT_THAT(response_frame.SerializeToArray(data.data(), data.size()),
+              IsTrue());
+  connection.WriteMessage(std::move(data));
+
+  EXPECT_THAT(binding_response_status, Eq(BindingResponse::SUCCESS));
+}
+
+TEST_F(OutgoingShareSessionTest, StartPeerBindingTimeout) {
+  session_.set_session_id(1234);
+  session_.set_session_usage(ShareSessionUsage::kPairing);
+  NearbyConnectionImpl connection(device_info_);
+  ConnectionSuccess(&connection);
+  Frame expected_binding_request_frame =
+      proto2::contrib::parse_proto::ParseTextProtoOrDie(
+          R"pb(
+            version: V1
+            v1 {
+              type: BINDINGS
+              bindings {
+                binding_request {
+                  binding_id: "test_binding_id"
+                  type: FILESYNC
+                }
+              }
+            }
+          )pb");
+  std::vector<uint8_t> frame_data;
+  connections_manager_.set_send_payload_callback(
+      [&](std::unique_ptr<Payload> payload,
+          std::weak_ptr<NearbyConnectionsManager::PayloadStatusListener>
+              listener) {
+        frame_data = std::move(payload->content.bytes_payload.bytes);
+      });
+  EXPECT_CALL(
+      transfer_metadata_callback_,
+      Call(_,
+           AllOf(HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance),
+                 HasUsage(ShareSessionUsage::kPairing))));
+
+  BindingResponse::Status binding_response_status = BindingResponse::FAILURE;
+  session_.StartPeerBinding("test_binding_id", BindingRequest::FILESYNC,
+                            [&binding_response_status](
+                                BindingResponse::Status status) {
+                              binding_response_status = status;
+                            });
+
+  Frame frame;
+  ASSERT_THAT(frame.ParseFromArray(frame_data.data(), frame_data.size()),
+              IsTrue());
+  EXPECT_THAT(frame, EqualsProto(expected_binding_request_frame));
+
+  // Fast forward to the disconnection timeout.
+  fake_clock_.FastForward(absl::Seconds(60));
+  fake_task_runner_.SyncWithTimeout(absl::Milliseconds(100));
+
+  EXPECT_THAT(binding_response_status, Eq(BindingResponse::FAILURE));
+}
+
+TEST_F(OutgoingShareSessionTest, StartPeerBindingFailure) {
+  session_.set_session_id(1234);
+  session_.set_session_usage(ShareSessionUsage::kPairing);
+  NearbyConnectionImpl connection(device_info_);
+  ConnectionSuccess(&connection);
+  Frame expected_binding_request_frame =
+      proto2::contrib::parse_proto::ParseTextProtoOrDie(
+          R"pb(
+            version: V1
+            v1 {
+              type: BINDINGS
+              bindings {
+                binding_request {
+                  binding_id: "test_binding_id"
+                  type: FILESYNC
+                }
+              }
+            }
+          )pb");
+  std::vector<uint8_t> frame_data;
+  connections_manager_.set_send_payload_callback(
+      [&](std::unique_ptr<Payload> payload,
+          std::weak_ptr<NearbyConnectionsManager::PayloadStatusListener>
+              listener) {
+        frame_data = std::move(payload->content.bytes_payload.bytes);
+      });
+  EXPECT_CALL(
+      transfer_metadata_callback_,
+      Call(_,
+           AllOf(HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance),
+                 HasUsage(ShareSessionUsage::kPairing))));
+
+  BindingResponse::Status binding_response_status = BindingResponse::FAILURE;
+  session_.StartPeerBinding("test_binding_id", BindingRequest::FILESYNC,
+                            [&binding_response_status](
+                                BindingResponse::Status status) {
+                              binding_response_status = status;
+                            });
+
+  Frame frame;
+  ASSERT_THAT(frame.ParseFromArray(frame_data.data(), frame_data.size()),
+              IsTrue());
+  EXPECT_THAT(frame, EqualsProto(expected_binding_request_frame));
+
+  // Send response frame
+  nearby::sharing::service::proto::Frame response_frame =
+     proto2::contrib::parse_proto::ParseTextProtoOrDie(
+      R"pb(
+        version: V1
+        v1 {
+          type: BINDINGS
+          bindings {
+            binding_response {
+              status: FAILURE
+            }
+          }
+        }
+      )pb"
+     );
+  std::vector<uint8_t> data;
+  data.resize(response_frame.ByteSizeLong());
+  EXPECT_THAT(response_frame.SerializeToArray(data.data(), data.size()),
+              IsTrue());
+  connection.WriteMessage(std::move(data));
+
+  EXPECT_THAT(binding_response_status, Eq(BindingResponse::FAILURE));
+}
+
 }  // namespace
 }  // namespace nearby::sharing

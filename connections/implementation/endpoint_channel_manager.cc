@@ -29,10 +29,7 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace nearby {
-namespace connections {
-using ::location::nearby::analytics::proto::ConnectionsLog;
-
+namespace nearby::connections {
 namespace {
 const absl::Duration kDataTransferDelay = absl::Milliseconds(500);
 }
@@ -46,7 +43,7 @@ EndpointChannelManager::~EndpointChannelManager() {
 
 void EndpointChannelManager::RegisterChannelForEndpoint(
     ClientProxy* client, const std::string& endpoint_id,
-    std::unique_ptr<EndpointChannel> channel) {
+    std::shared_ptr<EndpointChannel> channel) {
   MutexLock lock(&mutex_);
 
   LOG(INFO) << "EndpointChannelManager registered channel of type "
@@ -59,7 +56,7 @@ void EndpointChannelManager::RegisterChannelForEndpoint(
 
 void EndpointChannelManager::ReplaceChannelForEndpoint(
     ClientProxy* client, const std::string& endpoint_id,
-    std::unique_ptr<EndpointChannel> channel, bool enable_encryption) {
+    std::shared_ptr<EndpointChannel> channel, bool enable_encryption) {
   MutexLock lock(&mutex_);
   if (client->IsSafeToDisconnectEnabled(endpoint_id) &&
       channel_state_.IsWaitingForSafeToDisconnectTimeout(endpoint_id)) {
@@ -106,7 +103,7 @@ std::shared_ptr<EndpointChannel> EndpointChannelManager::GetChannelForEndpoint(
 
 void EndpointChannelManager::SetActiveEndpointChannel(
     ClientProxy* client, const std::string& endpoint_id,
-    std::unique_ptr<EndpointChannel> channel, bool enable_encryption) {
+    std::shared_ptr<EndpointChannel> channel, bool enable_encryption) {
   // Update the channel first, then encrypt this new channel, if
   // crypto context is present.
   channel->SetAnalyticsRecorder(&client->GetAnalyticsRecorder(), endpoint_id);
@@ -183,13 +180,13 @@ void EndpointChannelManager::ChannelState::DestroyAll() {
   for (auto& item : endpoints_) {
     RemoveEndpoint(item.first, DisconnectionReason::SHUTDOWN,
                    /* safe_to_disconnect_enabled */ false,
-                   ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+                   SafeDisconnectionResult::kSafeDisconnection);
   }
   endpoints_.clear();
 }
 
 void EndpointChannelManager::ChannelState::UpdateChannelForEndpoint(
-    const std::string& endpoint_id, std::unique_ptr<EndpointChannel> channel) {
+    const std::string& endpoint_id, std::shared_ptr<EndpointChannel> channel) {
   // Create EndpointData instance, if necessary, and populate channel.
   endpoints_[endpoint_id].channel = std::move(channel);
 }
@@ -365,5 +362,4 @@ bool EndpointChannelManager::UnregisterChannelForEndpoint(
   return true;
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

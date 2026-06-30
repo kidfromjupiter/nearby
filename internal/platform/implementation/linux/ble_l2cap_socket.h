@@ -17,11 +17,11 @@
 
 #include "dbus.h"
 
-
-#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unistd.h>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
@@ -29,70 +29,81 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/input_stream.h"
-#include "internal/platform/output_stream.h"
+#include "internal/platform/implementation/linux/stream.h"
 
 namespace nearby {
 namespace linux {
 
-// TODO: use linux stream instead of bespoke l2cap input/output stream
-
 class BleL2capSocket;
 
-class BleL2capInputStream final : public InputStream {
+class BleL2capInputStream : public nearby::InputStream {
  public:
-  explicit BleL2capInputStream(std::shared_ptr<sdbus::UnixFd> fd_raw_): fd_raw_(std::move(fd_raw_)) {};
-  ~BleL2capInputStream() override;
+  explicit BleL2capInputStream(int fd) : stream_(fd) {}
 
   ExceptionOr<ByteArray> Read(std::int64_t size) override;
-  Exception Close() override;
+  Exception Close() override {
+    if (closed_) {
+      return {Exception::kSuccess};
+    }
+    closed_ = true;
+    return stream_.Close();
+  }
 
-private:
-  std::shared_ptr<sdbus::UnixFd> fd_raw_;
+ private:
+  linux::InputStream stream_;
+  std::string wire_buffer_;
+  std::string pending_;
+  bool closed_ = false;
 };
 
-class BleL2capOutputStream final : public OutputStream {
-public:
-  explicit BleL2capOutputStream(std::shared_ptr<sdbus::UnixFd> fd_raw_): fd_raw_(std::move(fd_raw_)) {};
-  ~BleL2capOutputStream() override;
+class BleL2capOutputStream : public nearby::OutputStream {
+ public:
+  explicit BleL2capOutputStream(int fd) : stream_(fd) {}
 
   Exception Write(absl::string_view data) override;
-  Exception Flush() override { return {Exception::kSuccess}; }
-  Exception Close() override;
+  Exception Flush() override;
+  Exception Close() override {
+    if (closed_) {
+      return {Exception::kSuccess};
+    }
+    closed_ = true;
+    return stream_.Close();
+  }
 
-private:
-  std::shared_ptr<sdbus::UnixFd> fd_raw_;
-
+ private:
+  linux::OutputStream stream_;
+  bool closed_ = false;
 };
 
 class BleL2capSocket final : public api::ble::BleL2capSocket {
  public:
-
   BleL2capSocket(int fd, api::ble::BlePeripheral::UniqueId peripheral_id,
-                 std::string service_id = "");
-  ~BleL2capSocket() override;
+                 std::string service_id = "")
+      : fd_(fd),
+        output_stream_(fd_),
+        input_stream_(fd_),
+        peripheral_id_(peripheral_id) {};
 
-  InputStream& GetInputStream() override { return *input_stream_; }
-  OutputStream& GetOutputStream() override { return *output_stream_; }
-  Exception Close() override ABSL_LOCKS_EXCLUDED(mutex_);
-  void SetCloseNotifier(absl::AnyInvocable<void()> notifier) override
-      ABSL_LOCKS_EXCLUDED(mutex_);
+  nearby::InputStream& GetInputStream() override { return input_stream_; }
+  nearby::OutputStream& GetOutputStream() override { return output_stream_; }
+  Exception Close() override {
+    input_stream_.Close();
+    output_stream_.Close();
+    if (fd_ >= 0) {
+      close(fd_);
+      fd_ = -1;
+    }
+
+    return Exception{Exception::kSuccess};
+  };
   api::ble::BlePeripheral::UniqueId GetRemotePeripheralId() override {
     return peripheral_id_;
   }
 
-  bool IsClosed() const ABSL_LOCKS_EXCLUDED(mutex_);
-
  private:
-  friend class BleL2capInputStream;
-  friend class BleL2capOutputStream;
-
-  mutable absl::Mutex mutex_;
-  mutable absl::Mutex io_mutex_;
-  bool closed_ ABSL_GUARDED_BY(mutex_) = false;
-  std::shared_ptr<sdbus::UnixFd > fd_ ;
-  std::unique_ptr<BleL2capInputStream> input_stream_;
-  std::unique_ptr<BleL2capOutputStream> output_stream_;
+  int fd_;
+  BleL2capOutputStream output_stream_;
+  BleL2capInputStream input_stream_;
   api::ble::BlePeripheral::UniqueId peripheral_id_;
 };
 

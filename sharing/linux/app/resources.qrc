@@ -1,0 +1,17 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+    <file>main.qml</file>
+    <file>AppContent.qml</file>
+    <file>Sidebar.qml</file>
+    <file>Drop.qml</file>
+    <file>ShareTarget.qml</file>
+    <file>IncomingShare.qml</file>
+    <file>Targets.qml</file>
+    <file>googlesans_var.ttf</file>
+    <file>icons/file.svg</file>
+    <file>icons/up_file.svg</file>
+    <file>icons/tablet.svg</file>
+    <file>icons/laptop.svg</file>
+    <file>icons/smartphone.svg</file>
+</qresource>
+</RCC>

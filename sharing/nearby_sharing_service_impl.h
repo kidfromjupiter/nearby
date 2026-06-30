@@ -27,16 +27,19 @@
 #include <tuple>
 #include <vector>
 
+#include "location/nearby/sharing/lib/account/account_manager.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "internal/platform/clock.h"
-#include "internal/platform/device_info.h"
-#include "internal/platform/implementation/account_manager.h"
+#include "internal/platform/implementation/device_info.h"
 #include "internal/platform/task_runner.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/advertisement.h"
@@ -74,16 +77,8 @@
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
 #include "sharing/wrapped_share_target_discovered_callback.h"
-#if defined(__linux__)
-#include "sharing/linux/stubs/sharing_rpc_client.h"
-#include "sharing/linux/stubs/sync_manager.h"
-#else
-#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
-#include "location/nearby/sharing/lib/sync/sync_manager.h"
-#endif
 
 namespace nearby::sharing {
-class NearbyShareContactManager;
 
 namespace NearbySharingServiceUnitTests {
 class NearbySharingServiceImplTest_CreateShareTarget_Test;
@@ -95,7 +90,7 @@ class NearbySharingServiceImpl
     : public NearbySharingService,
       public NearbyShareSettings::Observer,
       public NearbyShareCertificateManager::Observer,
-      public ::nearby::AccountManager::Observer,
+      public AccountManager::Observer,
       public NearbyFastInitiation::Observer,
       public sharing::api::BluetoothAdapter::Observer,
       public NearbyConnectionsManager::IncomingConnectionListener,
@@ -111,9 +106,7 @@ class NearbySharingServiceImpl
       nearby::sharing::api::SharingPlatform& sharing_platform,
       nearby::sharing::api::IdentityRpcClient* absl_nonnull
           nearby_identity_client,
-      nearby::sharing::api::SharingRpcClient* absl_nonnull nearby_share_client,
       std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
-      std::unique_ptr<NearbyShareContactManager> contact_manager,
       analytics::AnalyticsRecorder* analytics_recorder,
       bool supports_file_sync);
   ~NearbySharingServiceImpl() override;
@@ -128,19 +121,19 @@ class NearbySharingServiceImpl
       ShareTargetDiscoveredCallback* discovery_callback, SendSurfaceState state,
       Advertisement::BlockedVendorId blocked_vendor_id,
       bool disable_wifi_hotspot,
-      std::function<void(StatusCodes)> status_codes_callback) override;
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
   void UnregisterSendSurface(
       TransferUpdateCallback* transfer_callback,
-      std::function<void(StatusCodes)> status_codes_callback) override;
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
   void RegisterReceiveSurface(
       TransferUpdateCallback* transfer_callback, ReceiveSurfaceState state,
       Advertisement::BlockedVendorId vendor_id,
-      std::function<void(StatusCodes)> status_codes_callback) override;
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
   void UnregisterReceiveSurface(
       TransferUpdateCallback* transfer_callback,
-      std::function<void(StatusCodes)> status_codes_callback) override;
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
   void ClearForegroundReceiveSurfaces(
-      std::function<void(StatusCodes)> status_codes_callback) override;
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
   bool IsTransferring() const override;
   bool IsScanning() const override;
   bool IsBluetoothPresent() const override;
@@ -161,12 +154,14 @@ class NearbySharingServiceImpl
   void Cancel(int64_t share_target_id,
               std::function<void(StatusCodes status_codes)>
                   status_codes_callback) override;
+  void InitiatePairing(int64_t share_target_id,
+                       service::proto::BindingRequest::Type binding_type,
+                       absl::AnyInvocable<void(StatusCodes status_codes) &&>
+                           status_codes_callback) override;
   void SetVisibility(
       proto::DeviceVisibility visibility, absl::Duration expiration,
       absl::AnyInvocable<void(StatusCodes status_code) &&> callback) override;
   NearbyShareSettings* GetSettings() override;
-  NearbyShareLocalDeviceDataManager* GetLocalDeviceDataManager() override;
-  NearbyShareContactManager* GetContactManager() override;
   NearbyShareCertificateManager* GetCertificateManager() override;
   AccountManager* GetAccountManager() override;
   Clock& GetClock() override { return *context_->GetClock(); }
@@ -174,6 +169,13 @@ class NearbySharingServiceImpl
       uint16_t alternate_service_uuid) override {
     alternate_service_uuid_ = alternate_service_uuid;
   }
+  SyncManager& sync_manager() override { return sync_manager_; }
+  OutgoingTargetsManager& outgoing_targets_manager() override {
+    return outgoing_targets_manager_;
+  }
+  void UpdateBackupSavePath(
+      absl::string_view binding_id, absl::string_view save_path,
+      absl::AnyInvocable<void(StatusCodes)> status_codes_callback) override;
 
   // NearbyConnectionsManager::IncomingConnectionListener:
   void OnIncomingConnection(absl::string_view endpoint_id,
@@ -296,8 +298,8 @@ class NearbySharingServiceImpl
                             absl::string_view endpoint_id,
                             NearbyConnection* connection, Status status);
 
-  void OutgoingSessionConnect(OutgoingShareSession& session,
-                              std::vector<uint8_t> endpoint_info);
+  StatusCodes ConnectOutgoingSessionOnServiceThread(
+      OutgoingShareSession& session);
 
   void Fail(IncomingShareSession& session, TransferMetadata::Status status);
   void OnIncomingAdvertisementDecoded(
@@ -320,6 +322,8 @@ class NearbySharingServiceImpl
       int64_t share_target_id,
       PairedKeyVerificationRunner::PairedKeyVerificationResult result,
       ::location::nearby::proto::sharing::OSType share_target_os_type);
+  void BeginOutgoingTransfer(OutgoingShareSession& session);
+  void BeginOutgoingPairing(OutgoingShareSession& session);
   void OnIncomingSessionFrameRead(
       int64_t share_target_id,
       bool is_timeout,
@@ -328,7 +332,7 @@ class NearbySharingServiceImpl
       IncomingShareSession& session,
       const nearby::sharing::service::proto::IntroductionFrame& frame);
   void OnReceiveConnectionResponse(
-      int64_t share_target_id,
+      int64_t share_target_id, bool is_timeout,
       std::optional<nearby::sharing::service::proto::ConnectionResponseFrame>
           frame);
   void OnStorageCheckCompleted(IncomingShareSession& session);
@@ -402,6 +406,13 @@ class NearbySharingServiceImpl
   bool OutgoingSessionAccept(OutgoingShareSession& session);
   void OnIncomingFilesMetadataUpdated(int64_t share_target_id,
                                       TransferMetadata metadata, bool success);
+  // Called when InitiateBinding rpc returns.
+  void OnInitiateSyncBindingResponse(
+      int64_t share_target_id, absl::StatusOr<std::string> binding_status);
+  // Called when Bindings response frame is received from the peer.
+  void OnPeerSyncBindingComplete(
+      int64_t share_target_id, absl::string_view binding_id,
+      service::proto::BindingResponse::Status status);
 
   // Notify all registered send surfaces of share target state changes.
   void NotifyShareTargetDiscovered(const ShareTarget& share_target);
@@ -414,7 +425,7 @@ class NearbySharingServiceImpl
   // Used to run nearby sharing service APIs.
   std::unique_ptr<TaskRunner> service_thread_;
   Context* const context_;
-  nearby::DeviceInfo& device_info_;
+  nearby::api::DeviceInfo& device_info_;
   nearby::sharing::api::PreferenceManager& preference_manager_;
   AccountManager& account_manager_;
   // Used to create analytics events.
@@ -423,10 +434,9 @@ class NearbySharingServiceImpl
   const bool supports_file_sync_;
 
   std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager_;
-  nearby::sharing::api::SharingRpcClient* absl_nonnull const
-      nearby_share_client_;
+  nearby::sharing::api::IdentityRpcClient* absl_nonnull const
+      nearby_identity_client_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> local_device_data_manager_;
-  std::unique_ptr<NearbyShareContactManager> contact_manager_;
   std::unique_ptr<NearbyShareCertificateManager> certificate_manager_;
   std::unique_ptr<NearbyFastInitiation> nearby_fast_initiation_;
 

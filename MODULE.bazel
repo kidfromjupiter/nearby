@@ -11,6 +11,10 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_google
 bazel_dep(name = "boringssl", version = "0.20251124.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 
+# for linux TUI
+# Should update to 7.0.0
+bazel_dep(name = "ftxui", version = "6.1.9")
+
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
@@ -190,10 +194,11 @@ cmake(
         "CMAKE_C_STANDARD": "17",
         "CMAKE_C_STANDARD_REQUIRED": "ON",
         "CMAKE_C_EXTENSIONS": "ON",
+        "CMAKE_INSTALL_LIBDIR": "lib",
     },
     env = {
         # CMake still needs pkg-config to pass its internal configuration checks for systemd
-        "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig",
     },
     # Link the systemd dependency you defined in your WORKSPACE
     deps = ["@libsystemd//:libsystemd"],

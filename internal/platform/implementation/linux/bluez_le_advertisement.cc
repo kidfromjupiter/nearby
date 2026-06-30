@@ -43,14 +43,16 @@ LEAdvertisement::LEAdvertisement(
     std::vector<uint8_t> data_bytes(data.size());
     const auto* bytes = data.data();
 
-    service_uuids_.push_back(uuid_string);
+    if (is_extended_advertisement_){
+      service_uuids_.push_back(uuid_string);
+    }
     // service_uuids_.push_back("0000FE2C-0000-1000-8000-00805F9B34FB");
     // service_uuids_.push_back("0000FE2C-0000-1000-8000-00805F9B34FB");
     for (size_t i = 0; i < data.size(); i++) {
       data_bytes[i] = bytes[i];
     }
-    // LOG(INFO)<< __func__ << ": " << uuid_string;
-    // LOG(INFO)<< __func__ << ": " << BytesToHexString(data_bytes);
+    LOG(INFO)<< __func__ << ": " << uuid_string;
+    LOG(INFO)<< __func__ << ": " << BytesToHexString(data_bytes);
     service_data_.insert({uuid_string, std::move(sdbus::Variant(data_bytes))});
     // service_data_.insert({"0000FE2C-0000-1000-8000-00805F9B34FB", std::move(data_bytes)});
   }

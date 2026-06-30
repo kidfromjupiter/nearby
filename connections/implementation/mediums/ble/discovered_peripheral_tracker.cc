@@ -228,6 +228,7 @@ bool DiscoveredPeripheralTracker::HandleOnLostAdvertisementLocked(
     return false;
   }
 
+  std::vector<BleAdvertisement> advertisements_to_clear;
   for (const auto& hash : on_lost_advertisement->hashes()) {
     for (const auto& it : gatt_advertisement_infos_) {
       if (it.second.instant_on_lost_hash.string_data() == hash) {
@@ -247,29 +248,24 @@ bool DiscoveredPeripheralTracker::HandleOnLostAdvertisementLocked(
           BlePeripheral lost_peripheral = it.second.peripheral;
           lost_peripheral.SetId(ByteArray(gatt_advertisement));
           if (gatt_advertisement.IsValid()) {
-            if (NearbyFlags::GetInstance().GetBoolFlag(
-                    config_package_nearby::nearby_connections_feature::
-                        kEnableScanningForInstantOnLost)) {
-              AddInstantLostAdvertisement(it.second.advertisement_header);
-              discovery_cb_it->second.discovered_peripheral_callback
-                  .instant_lost_cb(lost_peripheral, it.second.service_id,
-                                   gatt_advertisement.GetData(),
-                                   gatt_advertisement.IsFastAdvertisement());
-            } else {
-              discovery_cb_it->second.discovered_peripheral_callback
-                  .peripheral_lost_cb(lost_peripheral, it.second.service_id,
-                                      gatt_advertisement.GetData(),
-                                      gatt_advertisement.IsFastAdvertisement());
-            }
+            AddInstantLostAdvertisement(it.second.advertisement_header);
+            discovery_cb_it->second.discovered_peripheral_callback
+                .instant_lost_cb(lost_peripheral, it.second.service_id,
+                                 gatt_advertisement.GetData(),
+                                 gatt_advertisement.IsFastAdvertisement());
             LOG(INFO) << __func__ << ": OnLost triggered for service_id "
                       << it.second.service_id;
           }
 
-          ClearGattAdvertisement(gatt_advertisement);
+          advertisements_to_clear.push_back(gatt_advertisement);
         }
         break;
       }
     }
+  }
+
+  for (const auto& advertisement : advertisements_to_clear) {
+    ClearGattAdvertisement(advertisement);
   }
   return true;
 }

@@ -19,11 +19,10 @@
 #include <memory>
 #include <vector>
 
+#include "location/nearby/sharing/lib/account/account_manager.h"
 #include "absl/strings/string_view.h"
 #include "internal/base/file_path.h"
-#include "internal/platform/device_info.h"
-#include "internal/platform/implementation/account_manager.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/implementation/device_info.h"
 #include "sharing/internal/api/app_info.h"
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/fast_init_ble_beacon.h"
@@ -64,8 +63,7 @@ class SharingPlatform {
 
   virtual PreferenceManager& GetPreferenceManager() = 0;
   virtual AccountManager& GetAccountManager() = 0;
-  virtual TaskRunner& GetDefaultTaskRunner() = 0;
-  virtual nearby::DeviceInfo& GetDeviceInfo() = 0;
+  virtual nearby::api::DeviceInfo& GetDeviceInfo() = 0;
   virtual std::unique_ptr<PublicCertificateDatabase>
   CreatePublicCertificateDatabase(const FilePath& database_path) = 0;
 

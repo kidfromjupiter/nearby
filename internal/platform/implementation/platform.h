@@ -39,15 +39,10 @@
 #include "internal/platform/implementation/log_message.h"
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/output_file.h"
+#include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/implementation/scheduled_executor.h"
 #include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/timer.h"
-#ifndef NO_WEBRTC
-#include "internal/platform/implementation/webrtc.h"
-#endif
-#ifndef NEARBY_CHROMIUM
-#include "internal/platform/implementation/preferences_manager.h"
-#endif
 #include "internal/platform/implementation/wifi.h"
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
@@ -136,10 +131,6 @@ class ImplementationPlatform {
   static std::unique_ptr<WifiHotspotMedium> CreateWifiHotspotMedium();
   static std::unique_ptr<WifiDirectMedium> CreateWifiDirectMedium();
   static std::unique_ptr<Timer> CreateTimer();
-  static std::unique_ptr<DeviceInfo> CreateDeviceInfo();
-#ifndef NO_WEBRTC
-  static std::unique_ptr<WebRtcMedium> CreateWebRtcMedium();
-#endif
 
 #if defined(NEARBY_CHROMIUM)
   static std::unique_ptr<AppLifecycleMonitor> CreateAppLifecycleMonitor(
@@ -147,11 +138,17 @@ class ImplementationPlatform {
           state_updated_callback) {
     return nullptr;
   }
+  static std::unique_ptr<nearby::api::PreferencesManager>
+  CreatePreferencesManager(absl::string_view path) {
+    return nullptr;
+  }
 #else
   static std::unique_ptr<AppLifecycleMonitor> CreateAppLifecycleMonitor(
       std::function<void(AppLifecycleMonitor::AppLifecycleState)>
           state_updated_callback);
-#endif
+  static std::unique_ptr<nearby::api::PreferencesManager>
+  CreatePreferencesManager(absl::string_view path);
+  static std::unique_ptr<DeviceInfo> CreateDeviceInfo();
 
   // Gets HTTP response from remote server.
   //
@@ -161,15 +158,6 @@ class ImplementationPlatform {
   //         return WebResponse if HTTP status code between 200 and 300.
   //         other cases will return absl Status in error.
   static absl::StatusOr<WebResponse> SendRequest(const WebRequest& request);
-
-#if defined(NEARBY_CHROMIUM)
-  static std::unique_ptr<nearby::api::PreferencesManager>
-  CreatePreferencesManager(absl::string_view path) {
-    return nullptr;
-  }
-#else
-  static std::unique_ptr<nearby::api::PreferencesManager>
-  CreatePreferencesManager(absl::string_view path);
 #endif
 };
 

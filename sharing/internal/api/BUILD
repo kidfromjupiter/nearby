@@ -13,8 +13,26 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 licenses(["notice"])
+
+load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
+refresh_compile_commands(
+    name = "refresh_compile_commands_sharing_platform",
+
+    # Specify the targets of interest.
+    # For example, specify a dict of targets and any flags required to build.
+    targets = {
+        ":platform": "",
+    },
+    # No need to add flags already in .bazelrc. They're automatically picked up.
+    # If you don't need flags, a list of targets is also okay, as is a single target string.
+    # Wildcard patterns, like //... for everything, *are* allowed here, just like a build.
+    # As are additional targets (+) and subtractions (-), like in bazel query https://docs.bazel.build/versions/main/query.html#expressions
+    # And if you're working on a header-only library, specify a test or binary target that compiles it.
+)
 
 cc_library(
     name = "platform",
@@ -31,8 +49,10 @@ cc_library(
         "system_info.h",
     ],
     visibility = [
+        "//internal/account:__pkg__",
         "//location/nearby/analytics/cpp/logging:__pkg__",
         "//location/nearby/cpp/sharing:__subpackages__",
+        "//location/nearby/sharing/lib:__subpackages__",
         "//location/nearby/sharing/sdk/test_client:__pkg__",
         "//sharing:__subpackages__",
     ],
@@ -40,9 +60,10 @@ cc_library(
         "//internal/base:file_path",
         "//internal/platform:mac_address",
         "//internal/platform:types",
-        "//internal/platform/implementation:account_manager",
+        "//internal/platform/implementation:types",
+        "//location/nearby/sharing/lib/account:account_manager",
+        "//location/nearby/sharing/lib/sync:sync_binding_prefs_cc_proto",
         "//sharing/proto:share_cc_proto",
-        "//sharing/proto:wire_format_cc_proto",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
@@ -69,16 +90,10 @@ cc_library(
         "//internal/base:file_path",
         "//internal/platform:mac_address",
         "//internal/platform:types",
-        "//internal/platform/implementation:account_manager",
-        "//sharing/analytics",
-        "//sharing/internal/public:logging",
-        "//sharing/proto:share_cc_proto",
-        "@com_google_absl//absl/base:core_headers",
+        "//internal/platform/implementation:types",
+        "//location/nearby/sharing/lib/account:account_manager",
         "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_for_library_testonly",
     ],

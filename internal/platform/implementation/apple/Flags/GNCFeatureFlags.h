@@ -29,4 +29,16 @@
 /** Checks whether BLE L2CAP refactor is enabled in the Nearby Connections SDK. */
 @property(nonatomic, class, readonly) BOOL refactorBleL2capEnabled;
 
+/** Checks whether shared peripheral manager is enabled in the Nearby Connections SDK. */
+@property(nonatomic, class, readonly) BOOL sharedPeripheralManagerEnabled;
+
+<<<<<<< HEAD
+=======
+/** Checks whether single copy read/write is enabled in the Nearby Connections SDK. */
+@property(nonatomic, class, readonly) BOOL singleCopyEnabled;
+
+/** Checks whether BLE server socket deadlock is fixed in the Nearby Connections SDK. */
+@property(nonatomic, class, readonly) BOOL fixBleServerSocketDeadlockEnabled;
+
+>>>>>>> nearby/main
 @end
