@@ -12,6 +12,18 @@ Rectangle {
     // --- CUSTOM ARGUMENTS (PROPERTIES) ---
     property string deviceName: "Unknown Device"
     property string iconSource: "qrc:icons/smartphone.svg"
+    property string shareTargetId: "1"
+
+    signal clickShareTarget()
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: {
+          rootItem.clickShareTarget(rootItem.shareTargetId)
+      }
+    }
 
     ColumnLayout {
         anchors.top: parent.top

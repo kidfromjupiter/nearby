@@ -6,8 +6,35 @@ Row {
     id: shareTargetsRow
     spacing: 10
 
+    property bool useDummyTargets: true
+
+    ListModel {
+        id: dummyTargets
+
+        ListElement {
+            deviceName: "Lasan's Pixel"
+            type: 1
+        }
+        ListElement {
+            deviceName: "Work Laptop"
+            type: 2
+        }
+        ListElement {
+            deviceName: "Kitchen Tablet"
+            type: 3
+        }
+        ListElement {
+            deviceName: "A55"
+            type: 1
+        }
+        ListElement {
+            deviceName: "Long Device Name For Wrapping"
+            type: 2
+        }
+    }
+
     Repeater {
-        model: backend.targets
+        model: shareTargetsRow.useDummyTargets ? dummyTargets : backend.targets
 
         Rectangle {
             width: 100

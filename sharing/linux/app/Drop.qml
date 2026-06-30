@@ -2,38 +2,27 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Shapes
-import QtQuick.Dialogs
+import Qt.labs.platform as Platform
 import QtCore
 
 Rectangle {
-    signal fileSelected(string filePath)
-
     id: dropZone
+    signal fileSelected(string filePath)
     color: "transparent"
-    FileDialog {
+    Platform.FileDialog {
         id: fileDialog
-        title: "Please choose a file"
-        currentFolder: Qt.resolvedUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
-        
-        // Optional: Filter for specific files (e.g., images, PDFs)
+        title: "Choose file to share"
+        folder: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+
         nameFilters: ["All files (*)"]
-        
-        // Handle the selected file
+
         onAccepted: {
-            fileSelected(fileDialog.selectedFile)
-            // Your logic to process/upload the file goes here
+            fileSelected(fileDialog.file);
         }
         onRejected: {
-            console.log("File picker canceled")
+            console.log("File picker canceled");
         }
     }
-    MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor // Changes cursor to a hand on hover
-            onClicked: {
-                fileDialog.open() // Opens the native OS file picker
-            }
-        }
     //signal fileDropped(string path)
     DropArea {
         anchors.fill: parent
@@ -42,19 +31,19 @@ Rectangle {
             dropText.text = "Drag and drop files to share";
             dropZone.color = "transparent";
         }
-        onEntered: k => { console.log("Entered")}
+        onEntered: k => {
+            console.log("Entered");
+        }
 
         // The action: What happens when the user releases the item here
 
         onDropped: drop => {
-
             drop.acceptProposedAction();
             if (drop.hasUrls) {
-              console.log(drop.urls[0].toString());
-              for (let i of drop.formats){
-                console.log(i)
-              }
-
+                console.log(drop.urls[0].toString());
+                for (let i of drop.formats) {
+                    console.log(i);
+                }
             }
         }
     }
@@ -86,8 +75,14 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             Layout.fillWidth: true
         }
+    }
 
-
+    MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor // Changes cursor to a hand on hover
+        onClicked: {
+            fileDialog.open(); // Opens the native OS file picker
+        }
     }
     Canvas {
         id: dashedBorderCanvas

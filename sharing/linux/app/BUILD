@@ -60,6 +60,7 @@ qt_cc_binary(
         "@rules_qt//:qt_core",
         "@rules_qt//:qt_gui",
         "@rules_qt//:qt_hdrs",
+        "@rules_qt//:qt_labs_platform",
         "@rules_qt//:qt_opengl",
         "@rules_qt//:qt_qml",
         "@rules_qt//:qt_qml_meta",
@@ -68,6 +69,7 @@ qt_cc_binary(
         "@rules_qt//:qt_quick_controls2",
         "@rules_qt//:qt_quick_layouts",
         "@rules_qt//:qt_quick_shapes",
+        "@rules_qt//:qt_widgets",
     ],
 )
 

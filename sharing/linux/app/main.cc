@@ -2,13 +2,14 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QFontDatabase>
-#include <QGuiApplication>
+#include <QApplication>
 #include <QMetaObject>
 #include <QObject>
 #include <QTimer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include "backend.h"
+#include "qobject.h"
 
 namespace {
 
@@ -67,7 +68,7 @@ bool RequiresFullReload(const QFileInfo& changed_file) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  QGuiApplication app(argc, argv);
+  QApplication app(argc, argv);
 
   QQmlApplicationEngine engine;
   const int fontId = QFontDatabase::addApplicationFont(":/googlesans_var.ttf");

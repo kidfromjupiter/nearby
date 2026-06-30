@@ -11,7 +11,7 @@ RowLayout {
     property string pendingPath: ""
     property bool pendingTransfer: false
     property bool incomingShare: false
-    property int currentIndex: 0
+    property int currentIndex: 1
 
     property string filename: "VacationPhoto_2026.jpg"
     property string targetname: "Lasan's A55"
@@ -20,44 +20,43 @@ RowLayout {
     property bool transferring: true
 
     Connections {
-      target: backend
+        target: backend
 
-      function onStatusTextChanged(){
-          console.log(backend.statusText)
-      }
-      function onIncomingTransfer(share_target_id, device_name, status){
-          console.log("Getting incoming share")
-          currentIndex = 2
-          transferring = false
-      }
+        function onStatusTextChanged() {
+            console.log(backend.statusText);
+        }
+        function onIncomingTransfer(share_target_id, device_name, status) {
+            console.log("Getting incoming share");
+            currentIndex = 2;
+            transferring = false;
+        }
     }
     Component.onCompleted: {
-      backend.startReceive()
+        backend.startReceive();
     }
     Component.onDestruction: {
-      backend.stopReceive()
-      backend.stopDiscovery()
+        backend.stopReceive();
+        backend.stopDiscovery();
     }
 
-
-    function cancelPendingShare(){
-       pendingPath = "" 
-      currentIndex = 0
-      backend.stopDiscovery()
-      backend.startReceive()
+    function cancelPendingShare() {
+        pendingPath = "";
+        currentIndex = 0;
+        backend.stopDiscovery();
+        backend.startReceive();
     }
 
-    function startSharing(){
-      backend.stopReceive()
-      backend.startDiscovery()
-      currentIndex = 1
+    function startSharing() {
+        backend.stopReceive();
+        backend.startDiscovery();
+        currentIndex = 1;
     }
 
     Sidebar {
-      pendingPath: top.pendingPath
-      onCancelPendingShareRequested: {
-        top.cancelPendingShare() 
-      }
+        pendingPath: top.pendingPath
+        onCancelPendingShareRequested: {
+            top.cancelPendingShare();
+        }
     }
     StackLayout {
         id: contentStack
@@ -66,10 +65,10 @@ RowLayout {
         currentIndex: top.currentIndex
 
         Drop {
-          onFileSelected: path =>{
-            top.pendingPath = path 
-            startSharing()
-          }
+            onFileSelected: path => {
+                top.pendingPath = path;
+                startSharing();
+            }
         }
 
         Rectangle {
@@ -77,7 +76,84 @@ RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Targets {}
+            Rectangle {
+                id: pulseButton
+                property real pulseSize: Math.min(parent.width, parent.height) * 0.5
+
+                width: pulseSize
+                height: pulseSize
+                radius: pulseSize / 2
+                color: "#bde8f9"
+                anchors.centerIn: parent
+
+                SequentialAnimation {
+                    id: pulseAnimation
+                    loops: Animation.Infinite
+                    running: true
+
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: pulseButton
+                            property: "scale"
+                            from: 1.0
+                            to: 1.5
+                            duration: 1000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            target: pulseButton
+                            property: "opacity"
+                            from: 1.0
+                            to: 0
+                            duration: 1000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: pulseButton
+                            property: "scale"
+                            from: 1.5
+                            to: 1.0
+                            duration: 1000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            target: pulseButton
+                            property: "opacity"
+                            from: 0
+                            to: 1.0
+                            duration: 1000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                width: parent.width - 64
+                spacing: 40
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 10
+
+                    Text {
+                        text: "Searching for devices..."
+                        font.pointSize: 24
+                        font.weight: 600
+                        color: "#377B95"
+                    }
+                }
+
+                Targets {
+                    Layout.alignment: Qt.AlignHCenter
+                }
+            }
         }
 
         IncomingShare {
@@ -87,7 +163,5 @@ RowLayout {
             statusText: top.statusText
             transferring: top.transferring
         }
-
-
     }
 }
