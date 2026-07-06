@@ -307,9 +307,19 @@ std::tuple<bool, std::string> NearbySharingDbusService::SendFile(
 
 std::tuple<bool, std::string> NearbySharingDbusService::Accept(
     const int64_t& share_target_id) {
-  return InvokeStatusCommand([&](auto callback) {
-    service_.Accept(share_target_id, std::move(callback));
-  });
+  LOG(INFO) << "Accept requested for target: " << share_target_id;
+
+  service_.Accept(
+      share_target_id,
+      [this, share_target_id](NearbySharingService::StatusCodes status) {
+        LOG(INFO) << "Accept completed for target " << share_target_id
+                  << " with status: "
+                  << NearbySharingService::StatusCodeToString(status);
+
+        EmitStatusChanged();
+      });
+
+  return {true, "accept requested"};
 }
 
 std::tuple<bool, std::string> NearbySharingDbusService::Reject(

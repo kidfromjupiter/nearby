@@ -19,7 +19,7 @@ RowLayout {
         target: backend
 
         function onStatusTextChanged() {
-            console.log(backend.statusText);
+            console.log("statusTextChanged: " + backend.statusText);
         }
         function onIncomingTransfer(share_target_id, device_name, status) {
             console.log("Getting incoming share");
