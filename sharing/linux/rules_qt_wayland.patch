@@ -1,0 +1,14 @@
+diff --git a/extension/qt_modules.bzl b/extension/qt_modules.bzl
+--- a/extension/qt_modules.bzl
++++ b/extension/qt_modules.bzl
+@@ -268,6 +268,10 @@ QT_MODULES = {
+                 "url": QT_BASE_DOWNLOAD_URL + "linux_x64/desktop/qt6_683/qt6_683/qt.qt6.683.addons.qtquickeffectmaker.linux_gcc_64/6.8.3-0-202503201345qtquickeffectmaker-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64.7z",
+                 "sha256": "940a6675f448ad686be011ac77a10a9a26fa7b3f48c9e71164b725da4b34524a",
+             },
++            "qtwayland": {
++                "url": QT_BASE_DOWNLOAD_URL + "linux_x64/desktop/qt6_683/qt6_683/qt.qt6.683.linux_gcc_64/6.8.3-0-202503201345qtwayland-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64.7z",
++                "sha256": "da40cc32c95aa9bf96fcf3e2bfe19055c93cc1ae297bd7cd3cf532aaef634cff",
++            },
+             "qtwaylandcompositor": {
+                 "url": QT_BASE_DOWNLOAD_URL + "linux_x64/desktop/qt6_683/qt6_683/qt.qt6.683.addons.qtwaylandcompositor.linux_gcc_64/6.8.3-0-202503201345qtwayland-compositor-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64.7z",
+                 "sha256": "60cd5bd4b486d60d44f5bf214c19f8ce13353cb072df38e51dfae3deb8b20995",

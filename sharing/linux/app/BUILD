@@ -68,6 +68,9 @@ qt_cc_library(
 qt_cc_binary(
     name = "app",
     srcs = ["main.cc"],
+    env = {
+        "QT_QPA_PLATFORM": "wayland;xcb",
+    },
     deps = [
         ":app_resources",
         ":backend",

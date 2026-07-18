@@ -13,6 +13,9 @@
 # limitations under the License.
 
 licenses(["notice"])
+
+exports_files(["rules_qt_wayland.patch"])
+
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_cc//cc/private/rules_impl:cc_static_library.bzl", "cc_static_library")
 
