@@ -46,7 +46,17 @@ qt_cc_library(
     srcs = ["backend.cc"],
     hdrs = ["backend.h"],
     deps = [
-        ":nearby_sharing_dbus_client",
+        "//connections/implementation/flags:connections_flags",
+        "//internal/base:file_path",
+        "//internal/flags:nearby_flags",
+        "//sharing:attachments",
+        "//sharing:nearby_sharing_service",
+        "//sharing:transfer_metadata",
+        "//sharing:types",
+        "//sharing/flags/generated:generated_flags",
+        "//sharing/linux:linux_sharing_platform",
+        "//sharing/proto:enums_cc_proto",
+        "@com_google_absl//absl/time",
         "@rules_qt//:qt_core",
         "@rules_qt//:qt_hdrs",
         "@rules_qt//:qt_qml",
@@ -73,15 +83,5 @@ qt_cc_binary(
         "@rules_qt//:qt_quick_layouts",
         "@rules_qt//:qt_quick_shapes",
         "@rules_qt//:qt_widgets",
-    ],
-)
-
-cc_library(
-    name = "nearby_sharing_dbus_client",
-    srcs = ["nearby_sharing_dbus_client.cc"],
-    hdrs = ["nearby_sharing_dbus_client.h"],
-    deps = [
-        "//sharing/linux/daemon:nearby_sharing_dbus_client_glue",
-        "@sdbus_cpp",
     ],
 )

@@ -18,19 +18,11 @@ RowLayout {
     Connections {
         target: backend
 
-        function onStatusTextChanged() {
-            console.log(backend.statusText);
-        }
-        function onIncomingTransfer(share_target_id, device_name, status) {
+        function onIncomingTransfer(share_target_id) {
             console.log("Getting incoming share");
             console.log("selected transfer: " + share_target_id)
             selectedTransferId = share_target_id;
             currentIndex = 2;
-        }
-        function onTransferUpdate(share_target_id, device_name, status, progress) {
-            if (selectedTransferId === share_target_id) {
-                currentIndex = 2;
-            }
         }
     }
 
@@ -47,7 +39,6 @@ RowLayout {
                 return;
             }
             topLayout.selectedTransferId = shareTargetId;
-            backend.prepareOutgoingTransfer(shareTargetId, topLayout.pendingPath);
             backend.sendFile(shareTargetId, topLayout.pendingPath);
             topLayout.currentIndex = 2;
         }
@@ -57,20 +48,14 @@ RowLayout {
         }
     }
 
-    Component.onCompleted: {
-        backend.startReceive();
-    }
-
     function cancelPendingShare() {
         pendingPath = "";
         selectedTransferId = 0;
         currentIndex = 0;
-        backend.stopDiscovery();
         backend.startReceive();
     }
 
     function startSharing() {
-        backend.stopReceive();
         backend.startDiscovery();
         currentIndex = 1;
     }

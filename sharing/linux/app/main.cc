@@ -81,19 +81,7 @@ bool RequiresFullReload(const QFileInfo& changed_file) {
   return changed_file.fileName() == QStringLiteral("main.qml");
 }
 
-void InstallTerminationCleanup(QApplication& app, Backend& backend) {
-  auto cleanup_done = std::make_shared<bool>(false);
-  const auto cleanup = [&backend, cleanup_done]() {
-    if (*cleanup_done) {
-      return;
-    }
-    *cleanup_done = true;
-    backend.stopDiscovery();
-    backend.stopReceive();
-  };
-
-  QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, cleanup);
-
+void InstallTerminationCleanup(QApplication& app) {
   if (pipe(g_signal_pipe) != 0) {
     return;
   }
@@ -105,12 +93,11 @@ void InstallTerminationCleanup(QApplication& app, Backend& backend) {
   auto* notifier = new QSocketNotifier(g_signal_pipe[0],
                                        QSocketNotifier::Read, &app);
   QObject::connect(notifier, &QSocketNotifier::activated, &app,
-                   [&app, notifier, cleanup](int socket) {
+                   [&app, notifier](int socket) {
                      notifier->setEnabled(false);
                      char buffer[32];
                      while (read(socket, buffer, sizeof(buffer)) > 0) {
                      }
-                     cleanup();
                      app.quit();
                    });
 
@@ -127,9 +114,9 @@ void InstallTerminationCleanup(QApplication& app, Backend& backend) {
 int main(int argc, char* argv[]) {
   QApplication app(argc, argv);
 
-  QQmlApplicationEngine engine;
   Backend backend;
-  InstallTerminationCleanup(app, backend);
+  QQmlApplicationEngine engine;
+  InstallTerminationCleanup(app);
 
   const int fontId = QFontDatabase::addApplicationFont(":/googlesans_var.ttf");
 
@@ -192,7 +179,9 @@ int main(int argc, char* argv[]) {
     watcher.addPath(qml_source_dir.absolutePath());
     fullReload();
 
-    return app.exec();
+    const int result = app.exec();
+    backend.shutdown();
+    return result;
   }
 
   engine.rootContext()->setContextProperty("backend", &backend);
@@ -208,5 +197,7 @@ int main(int argc, char* argv[]) {
 
   engine.load(url);
 
-  return app.exec();
+  const int result = app.exec();
+  backend.shutdown();
+  return result;
 }
