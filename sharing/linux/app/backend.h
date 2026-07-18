@@ -118,7 +118,7 @@ class Backend : public QObject,
 
   Q_INVOKABLE void startReceive();
   Q_INVOKABLE void startDiscovery();
-  Q_INVOKABLE void sendFile(qint64 share_target_id, const QString& path);
+  Q_INVOKABLE bool sendFile(qint64 share_target_id, const QString& path);
   Q_INVOKABLE void accept(qint64 share_target_id);
   Q_INVOKABLE void reject(qint64 share_target_id);
   Q_INVOKABLE void cancel(qint64 share_target_id);
@@ -126,6 +126,7 @@ class Backend : public QObject,
 
  signals:
   void incomingTransfer(qint64 share_target_id);
+  void outgoingTransferStartFailed(qint64 share_target_id);
 
  private:
   using NearbySharingService = nearby::sharing::NearbySharingService;

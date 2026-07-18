@@ -23,6 +23,8 @@ Rectangle {
     property var totalBytes: 0
     property var transferredBytes: 0
 
+    signal returnHomeRequested()
+
     function baseName(path) {
         if (!path || path.length === 0) {
             return direction === "send" ? "Selected file" : transferSummary()
@@ -91,140 +93,24 @@ Rectangle {
         return direction === "send" ? "Starting send" : "Preparing transfer"
     }
 
-    Item {
+    TransferCard {
         visible: root.transferring
         anchors.centerIn: parent
         width: Math.min(parent.width * 0.9, 700)
         height: 212
-
-        Rectangle {
-            anchors.fill: parent
-            radius: 24
-            color: "#FFFFFF"
-            border.color: "#BCE5F5"
-            border.width: 1
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.margins: 28
-            spacing: 24
-
-            Rectangle {
-                Layout.preferredWidth: 96
-                Layout.preferredHeight: 96
-                radius: 24
-                color: "#E8F7FC"
-
-                Image {
-                    anchors.centerIn: parent
-                    width: 60
-                    height: 60
-                    source: "qrc:/icons/file.svg"
-                    fillMode: Image.PreserveAspectFit
-                    sourceSize.width: width
-                    sourceSize.height: height
-                    smooth: true
-                    antialiasing: true
-                }
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignVCenter
-                spacing: 10
-
-                Text {
-                    text: root.targetname
-                    font.pointSize: 17
-                    font.weight: 700
-                    color: "#1A1C1E"
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                }
-
-                Text {
-                    text: root.baseName(root.filename)
-                    color: "#57707A"
-                    font.pointSize: 12
-                    elide: Text.ElideMiddle
-                    Layout.fillWidth: true
-                }
-
-                ProgressBar {
-                    id: transferProgress
-                    Layout.fillWidth: true
-                    from: 0
-                    to: 1
-                    value: Math.max(0, Math.min(1, root.progressValue))
-
-                    background: Rectangle {
-                        implicitHeight: 10
-                        radius: 5
-                        color: "#DDEEF5"
-                    }
-
-                    contentItem: Item {
-                        Rectangle {
-                            width: transferProgress.visualPosition * parent.width
-                            height: 10
-                            radius: 5
-                            color: "#0D6D90"
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Text {
-                        text: root.statusText()
-                        color: "#57707A"
-                        font.pointSize: 12
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
-                    }
-
-                    Text {
-                        text: Math.round(Math.max(0, Math.min(1, root.progressValue)) * 100) + "%"
-                        color: "#0D6D90"
-                        font.pointSize: 13
-                        font.weight: 700
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Item {
-                        Layout.fillWidth: true
-                    }
-
-                    Button {
-                        id: cancelButton
-                        text: "Cancel"
-                        visible: !root.isFinalStatus
-                        onClicked: backend.cancel(root.shareTargetId)
-
-                        contentItem: Text {
-                            text: cancelButton.text
-                            font.pointSize: 14
-                            font.weight: 600
-                            color: "white"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        background: Rectangle {
-                            implicitWidth: 118
-                            implicitHeight: 46
-                            radius: 12
-                            color: cancelButton.hovered ? "#B62828" : "#D94C4C"
-                        }
-                    }
-                }
-            }
-        }
+        shareTargetId: root.shareTargetId
+        direction: root.direction
+        filename: root.filename
+        targetname: root.targetname
+        progressValue: root.progressValue
+        status: root.status
+        isFinalStatus: root.isFinalStatus
+        totalBytes: root.totalBytes
+        totalAttachmentsCount: root.totalAttachmentsCount
+        transferredAttachmentsCount: root.transferredAttachmentsCount
+        finalActionText: root.isFinalStatus ? "Go back home" : ""
+        onCancelRequested: backend.cancel(root.shareTargetId)
+        onFinalActionRequested: root.returnHomeRequested()
     }
 
     Item {

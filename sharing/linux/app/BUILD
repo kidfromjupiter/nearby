@@ -32,6 +32,7 @@ qt_resource_via_qrc(
         "SearchingDevices.qml",
         "Targets.qml",
         "IncomingShare.qml",
+        "TransferCard.qml",
         "googlesans_var.ttf",
         "icons/file.svg",
         "icons/laptop.svg",

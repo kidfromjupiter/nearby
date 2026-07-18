@@ -14,7 +14,8 @@ Rectangle {
     property string deviceName: "Unknown Device"
     property string iconSource: "qrc:icons/smartphone.svg"
     property var shareTargetId: 0
-    property bool hovered: targetMouseArea.containsMouse
+    property bool interactionEnabled: true
+    property bool hovered: interactionEnabled && targetMouseArea.containsMouse
 
     ColumnLayout {
         anchors.top: parent.top
@@ -47,6 +48,7 @@ Rectangle {
 
                 Button {
                     id: iconButton
+                    enabled: rootItem.interactionEnabled
                     icon.source: rootItem.iconSource
                     anchors.fill: parent
                     anchors.margins: 5
@@ -63,8 +65,9 @@ Rectangle {
             MouseArea {
                 id: targetMouseArea
                 anchors.fill: parent
+                enabled: rootItem.interactionEnabled
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
+                cursorShape: rootItem.interactionEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
                     EventBus.shareTargetSelected(rootItem.shareTargetId);
                 }

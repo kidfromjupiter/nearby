@@ -265,6 +265,8 @@ void ShareTransferModel::PrepareOutgoingTransfer(
 
   transfers_[row].receive_mode = false;
   transfers_[row].target = target;
+  transfers_[row].transfer.reset();
+  transfers_[row].total_bytes = 0;
   transfers_[row].local_path = local_path;
   EmitRowChanged(row);
 }
@@ -394,26 +396,42 @@ void Backend::startDiscovery() {
   SetDesiredMode(Mode::kDiscovery);
 }
 
-void Backend::sendFile(qint64 share_target_id, const QString& path) {
+bool Backend::sendFile(qint64 share_target_id, const QString& path) {
   if (service_ == nullptr || shutting_down_) {
-    return;
+    return false;
   }
   const QString local_path = NormalizeLocalPath(path);
   const std::string native_path = local_path.toStdString();
   std::error_code error;
   if (!std::filesystem::is_regular_file(native_path, error)) {
     qWarning() << "Send file failed: path is not a regular file" << local_path;
-    return;
+    return false;
   }
   const auto target = targets_.FindTarget(share_target_id);
   if (!target.has_value()) {
     qWarning() << "Send file failed: unknown target" << share_target_id;
-    return;
+    return false;
   }
 
   transfers_.PrepareOutgoingTransfer(share_target_id, local_path, target);
-  service_->SendAttachments(share_target_id, CreateFileAttachments(native_path),
-                            StatusCallback(QStringLiteral("Send file")));
+  QPointer<Backend> backend(this);
+  service_->SendAttachments(
+      share_target_id, CreateFileAttachments(native_path),
+      [backend, share_target_id](NearbySharingService::StatusCodes status) {
+        if (!backend) {
+          return;
+        }
+        PostStatus(backend, [backend, share_target_id, status]() {
+          if (!backend || backend->shutting_down_) {
+            return;
+          }
+          backend->ReportStatus(QStringLiteral("Send file"), status);
+          if (status != NearbySharingService::StatusCodes::kOk) {
+            emit backend->outgoingTransferStartFailed(share_target_id);
+          }
+        });
+      });
+  return true;
 }
 
 void Backend::accept(qint64 share_target_id) {

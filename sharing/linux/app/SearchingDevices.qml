@@ -3,9 +3,13 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 Rectangle {
+    id: root
     color: "transparent"
     Layout.fillWidth: true
     Layout.fillHeight: true
+
+    property bool transferLocked: false
+    property var activeTransferId: 0
 
     Rectangle {
         id: pulseButton
@@ -83,6 +87,8 @@ Rectangle {
 
         Targets {
             Layout.alignment: Qt.AlignHCenter
+            interactionLocked: root.transferLocked
+            activeTransferId: root.activeTransferId
         }
     }
 }

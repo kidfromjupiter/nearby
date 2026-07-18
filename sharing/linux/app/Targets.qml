@@ -7,6 +7,8 @@ Row {
     spacing: 10
 
     property bool useDummyTargets: false
+    property bool interactionLocked: false
+    property var activeTransferId: 0
 
     ListModel {
         id: dummyTargets
@@ -45,6 +47,15 @@ Row {
             width: 100
             height: 130
             color: "transparent"
+            opacity: !shareTargetsRow.interactionLocked
+                     || model.targetId == shareTargetsRow.activeTransferId ? 1 : 0.32
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 180
+                    easing.type: Easing.OutQuad
+                }
+            }
 
             ColumnLayout {
                 anchors.top: parent.top
@@ -55,6 +66,7 @@ Row {
                 ShareTarget {
                     shareTargetId: model.targetId
                     deviceName: model.deviceName
+                    interactionEnabled: !shareTargetsRow.interactionLocked
                     iconSource: {
                         if (model.type === 2)
                             return "qrc:icons/laptop.svg"

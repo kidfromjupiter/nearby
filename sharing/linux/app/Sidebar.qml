@@ -10,6 +10,7 @@ Rectangle {
     Layout.preferredWidth: 300
 
     property string pendingPath: ""
+    property bool cancelEnabled: true
 
     color: "#CBF0FF"
 
@@ -109,6 +110,8 @@ Rectangle {
                     id: cancelbutton
                     Layout.fillWidth: true
                     text: "Cancel"
+                    enabled: sidebar.cancelEnabled
+                    opacity: enabled ? 1 : 0.55
                     onClicked: EventBus.cancelPendingShareRequested()
                     contentItem: Text {
                         text: cancelbutton.text

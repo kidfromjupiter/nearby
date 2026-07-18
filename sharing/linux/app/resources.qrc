@@ -9,6 +9,7 @@
     <file>ShareTarget.qml</file>
     <file>SearchingDevices.qml</file>
     <file>IncomingShare.qml</file>
+    <file>TransferCard.qml</file>
     <file>Targets.qml</file>
     <file>googlesans_var.ttf</file>
     <file>icons/file.svg</file>
