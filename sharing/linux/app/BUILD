@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_qt//:qt.bzl", "qt_cc_binary", "qt_cc_library", "qt_resource_via_qrc")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
@@ -87,5 +88,23 @@ qt_cc_binary(
         "@rules_qt//:qt_quick_layouts",
         "@rules_qt//:qt_quick_shapes",
         "@rules_qt//:qt_widgets",
+    ],
+)
+
+sh_binary(
+    name = "appimage",
+    srcs = ["packaging/package_appimage.sh"],
+    data = [
+        ":app",
+        "icons/smartphone.svg",
+        "packaging/AppRun",
+        "packaging/nearby-sharing.desktop",
+        "packaging/nearby-sharing.metainfo.xml",
+        "@appimage_runtime_x86_64//file",
+        "@appimagetool_x86_64//file",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
     ],
 )

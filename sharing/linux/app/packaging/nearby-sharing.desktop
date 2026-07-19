@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Nearby Sharing
+Comment=Share files with nearby devices
+Exec=nearby-sharing
+Icon=nearby-sharing
+Categories=Network;FileTransfer;
+Terminal=false
+StartupNotify=true

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)"
+
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export QT_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins"
+export QT_QPA_PLATFORM_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins/platforms"
+export QML2_IMPORT_PATH="$HERE/usr/lib/qt6/qml"
+export QML_IMPORT_PATH="$HERE/usr/lib/qt6/qml"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+
+exec "$HERE/usr/bin/nearby-sharing" "$@"
