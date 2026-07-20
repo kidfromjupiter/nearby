@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QFontDatabase>
+#include <QIcon>
 #include <QApplication>
 #include <QMetaObject>
 #include <QObject>
@@ -113,6 +114,9 @@ void InstallTerminationCleanup(QApplication& app) {
 
 int main(int argc, char* argv[]) {
   QApplication app(argc, argv);
+  app.setApplicationName(QStringLiteral("QuickShare"));
+  app.setDesktopFileName(QStringLiteral("quickshare"));
+  app.setWindowIcon(QIcon(QStringLiteral(":/icons/quickshare.svg")));
 
   Backend backend;
   QQmlApplicationEngine engine;

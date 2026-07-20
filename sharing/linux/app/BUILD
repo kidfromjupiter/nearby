@@ -37,6 +37,7 @@ qt_resource_via_qrc(
         "googlesans_var.ttf",
         "icons/file.svg",
         "icons/laptop.svg",
+        "icons/quickshare.svg",
         "icons/smartphone.svg",
         "icons/tablet.svg",
         "icons/up_file.svg",

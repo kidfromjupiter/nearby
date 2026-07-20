@@ -15,7 +15,8 @@
     <file>icons/file.svg</file>
     <file>icons/up_file.svg</file>
     <file>icons/tablet.svg</file>
-    <file>icons/laptop.svg</file>
-    <file>icons/smartphone.svg</file>
+        <file>icons/laptop.svg</file>
+        <file>icons/quickshare.svg</file>
+        <file>icons/smartphone.svg</file>
 </qresource>
 </RCC>

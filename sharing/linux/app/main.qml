@@ -6,7 +6,7 @@ Window {
     width: 640
     height: 480
     visible: true
-    title: qsTr("Quickshare")
+    title: qsTr("QuickShare")
     color: "#DCF5FF"
 
 
