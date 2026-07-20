@@ -64,6 +64,7 @@ jobs:
             libgpg-error-dev \
             libbluetooth-dev \
             libxkbcommon-dev \
+            libxcb-cursor0 \
             patchelf \
             qt6-base-dev \
             qt6-declarative-dev \
