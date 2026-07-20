@@ -106,6 +106,7 @@ class Backend : public QObject,
                 public nearby::sharing::ShareTargetDiscoveredCallback {
   Q_OBJECT
   QML_ELEMENT
+  Q_PROPERTY(QString hostname READ hostname CONSTANT)
   Q_PROPERTY(QAbstractListModel* targets READ targets CONSTANT)
   Q_PROPERTY(QAbstractListModel* transfers READ transfers CONSTANT)
 
@@ -113,6 +114,7 @@ class Backend : public QObject,
   explicit Backend(QObject* parent = nullptr);
   ~Backend() override;
 
+  QString hostname() const;
   QAbstractListModel* targets() { return &targets_; }
   QAbstractListModel* transfers() { return &transfers_; }
 

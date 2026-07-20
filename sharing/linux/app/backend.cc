@@ -11,6 +11,7 @@
 #include <QDebug>
 #include <QMetaObject>
 #include <QPointer>
+#include <QSysInfo>
 #include <QUrl>
 
 #include "absl/time/time.h"
@@ -386,6 +387,10 @@ Backend::Backend(QObject* parent)
 
 Backend::~Backend() {
   shutdown();
+}
+
+QString Backend::hostname() const {
+  return QSysInfo::machineHostName();
 }
 
 void Backend::startReceive() {

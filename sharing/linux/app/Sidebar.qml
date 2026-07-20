@@ -32,7 +32,7 @@ Rectangle {
                 }
 
                 Text {
-                    text: "lasans-laptop"
+                    text: backend.hostname
                     font.weight: 500
                     font.pointSize: 17
                     horizontalAlignment: Text.AlignHCenter
