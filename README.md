@@ -1,4 +1,7 @@
-# Google Nearby for Linux
+<img width="1661" height="569" alt="Frame 2 (2)" src="https://github.com/user-attachments/assets/db8376a9-35d9-406f-bcb8-5581cd0dd762" />
+
+
+
 > ## 🚧 **Under Construction** 🚧  
 > This repo is actively being worked on. Things are buggy, builds may fail, documentation is non-existent, and we test in prod.
 >
@@ -6,14 +9,13 @@
 
 ---
 
-<img width="600" height="464" alt="image" src="https://github.com/user-attachments/assets/9533ea09-81d9-4162-b90f-e0bd8b714d1d" />
-
-
-
-## Demo
-
-
-https://github.com/user-attachments/assets/048afa1e-40a4-4351-a859-c81b642fc6e3
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/4e630d75-3484-4f9d-9657-c99a2b64ab69" alt="send" width="400" />
+  <img src="https://github.com/user-attachments/assets/8d925e98-f791-4cd4-8e18-f790b9d10bb5" alt="recv" width="400" />
+</div>
+<p align="center" italic>
+     <em>(Android captured with scrcpy)</em>
+</p>
 
 ## What
 This repo consists of the entirety of google's open source nearby library. Currently, it is seperated into 3 (now 2) sections. 
@@ -24,27 +26,20 @@ This repo consists of the entirety of google's open source nearby library. Curre
     
 Linux specific implementation and compatibility shims are provided for building **Sharing** and **Connections**. 
 
-## Why
-This repo could've been a PR on the official repo. All I've done is implement the platform abstraction layer google has provided for a linux specific environment.
-It's not like I haven't made a PR towards the official repo. I got tired of begging the official nearby maintainers for a PR review. So here we are. 
+Linux implementation of a QT-based QuickShare application is also provided as a release
 
+## Features
+- Near feature parity with QuickShare on android
+- No companion apps. Works with native quickshare
+- Share files over the network, wifi hotspot or bluetooth
+- Fast, seamless and compatible with any android device
 
-Moreover, all I've wanted was seamless file sharing between my android devices and my linux workstation + laptop. With this repo and the example application provided here,
-it accomplishes that goal perfectly. This repo wasn't created out of any altruistic goals or out of the goodness of my heart. I had a problem. I solved it. Simple as that. 
-
-
-## Documentation
-Docs is on the backburner for now
-
-If you want any clarification on anything, feel free to open an issue. I'll get back to you ASAP.
-
-As a consolation prize, I've indexed this project using [Deepwiki](https://deepwiki.com/kidfromjupiter/nearby). You might have strong feeling about AI use. But I feel like documenting very large codebases is a perfect usecase for such models. (They are called Large Language Models for a reason )
 
 ### How to install
-This repo provides prebuilt binaries of the Quick Share application. The only officially supported distro is Fedora 43 for now. The newest ubuntu images *should* work fine
+This repo provides prebuilt AppImages of the Quick Share application. The only officially supported distro is Fedora 43 ( what I'm using personally ) and Ubuntu 24.04 for now. The newest ubuntu images *should* work fine
 although that needs to be tested. I want to support more distros so if you encounter issues installing on your distro, please let me know. 
 
->**NOTE: Previosly, the quickshare binary required the `sdbus-cpp` v2 library installed on the system. This is no longer the case and it is bundled with the shared library. Hopefully this expands compatibility**
+Download and click to run on most linux distros : )
 
 #### Prerequisites
 
@@ -54,6 +49,8 @@ although that needs to be tested. I want to support more distros so if you encou
 
 **To install the prerequisites, run this command**
 
+Fedora : 
+
 ```bash
 sudo dnf install -y \
   bluez bluez-libs bluez-libs-devel \
@@ -61,14 +58,13 @@ sudo dnf install -y \
 ```
 ---
 
-**To install the Quick Share application,**
+## Documentation
+Docs is on the backburner for now
 
-1. Go to [releases](https://github.com/kidfromjupiter/nearby/releases)
-2. Download the latest `nearby-file-share-linux-*.tar.gz`
-3. `mkdir -p nearby && tar -xf nearby-file-share-linux-*.tar.gz -C nearby`
-4. `cd nearby`
-5. `chmod +x install_nearby_file_share.sh`
-6. `./install_nearby_file_share.sh`
+If you want any clarification on anything, feel free to open an issue. I'll get back to you ASAP.
+
+As a consolation prize, I've indexed this project using [Deepwiki](https://deepwiki.com/kidfromjupiter/nearby). You might have strong feeling about AI use. But I feel like documenting very large codebases is a perfect usecase for such models. (They are called Large Language Models for a reason )
+
 
 **To install the actual library and headers,**
 
@@ -79,21 +75,10 @@ Currently there are no prebuilt shared library or headers. You'll have to build 
 Best place to consult would be the Github actions and workflows. 
 
 
-
-## TODO
-
-###  WIP
-
-- [ ] **Transition from QT to a TUI**
-
-    We're moving away from a GUI application to TUI application. On top of this, I've made a nearby sharing daemon with socket based IPC so that even if anyone wants to create a GUI application, it is trivial without them needing to link with nearby sharing libraries.
-
-    This change was done to decouple the UI from the library itself since the previous implementation was difficult to work with 
+## KNOWN BUGS
+- [ ] **Launch the app when you want to receive/send**
+        Keeping the application on may interfere with bluetooth devices. I am working on fixing this. So turn the application on only **when** you want to share stuff
       
-
----
-
-### BUGS
 - [ ] **Bluetooth classic bandwidth**
   
     File transfer on bluetooth classic is painfully slow. Bandwidth close to 20KB/s. ~May be a regression issue after bluetooth socket refactor~. May be an issue with sending back acknowledgements. Issue is present on pre-refactor versions. ~Look into Multiplexing maybe~ Multiplexing did not fix it : (?
@@ -114,6 +99,7 @@ Best place to consult would be the Github actions and workflows.
 ### New Features
 
 - [ ] Upstream has been slowly adding webrtc support. Should we support it?
+- [ ] Support enabling receive on detection of fast initiation LE advertisement
 
 ## Special thanks
 
