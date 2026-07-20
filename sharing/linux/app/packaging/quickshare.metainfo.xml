@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.google.nearby.sharing</id>
+  <id>com.google.quickshare</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
-  <name>Nearby Sharing</name>
+  <name>QuickShare</name>
   <summary>Share files with nearby devices</summary>
   <description>
     <p>
-      Nearby Sharing discovers compatible devices and transfers files over
+      QuickShare discovers compatible devices and transfers files over
       local wireless connections.
     </p>
   </description>
   <url type="homepage">https://github.com/google/nearby</url>
-  <launchable type="desktop-id">nearby-sharing.desktop</launchable>
+  <launchable type="desktop-id">quickshare.desktop</launchable>
 </component>

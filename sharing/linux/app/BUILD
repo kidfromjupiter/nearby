@@ -93,13 +93,13 @@ qt_cc_binary(
 
 sh_binary(
     name = "appimage",
-    srcs = ["packaging/package_appimage.sh"],
+    srcs = ["packaging/package_minimal_appimage.sh"],
     data = [
         ":app",
-        "icons/smartphone.svg",
+        "icons/quickshare.svg",
         "packaging/AppRun",
-        "packaging/nearby-sharing.desktop",
-        "packaging/nearby-sharing.metainfo.xml",
+        "packaging/quickshare.desktop",
+        "packaging/quickshare.metainfo.xml",
         "@appimage_runtime_x86_64//file",
         "@appimagetool_x86_64//file",
     ],

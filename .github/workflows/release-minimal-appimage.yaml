@@ -1,0 +1,104 @@
+name: Release QuickShare AppImage
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to build and publish
+        required: true
+        type: string
+
+env:
+  FORCE_COLOR: true
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-appimage:
+    name: Build and Release QuickShare AppImage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v.+ ]]; then
+            echo "Release tag must start with v: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          submodules: recursive
+
+      - name: Set up Bazelisk
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libssl-dev \
+            libsystemd-dev \
+            libcurlpp-dev \
+            libasound2-dev \
+            libunistring-dev \
+            libldap-dev \
+            libkrb5-dev \
+            libgpg-error-dev \
+            libbluetooth-dev \
+            libxkbcommon-dev \
+            patchelf \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-wayland \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            libqrencode-dev
+
+      - name: Build minimal AppImage inputs
+        run: |
+          bazel build \
+            --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc=true \
+            --copt='-DGITHUB_BUILD' \
+            //sharing/linux/app:appimage
+
+      - name: Package and validate minimal AppImage
+        run: ./sharing/linux/app/packaging/package_minimal_appimage.sh
+
+      - name: Generate SHA256 checksum
+        working-directory: sharing/linux/dist-minimal
+        run: |
+          sha256sum QuickShare-x86_64.AppImage \
+            > QuickShare-x86_64.AppImage.sha256
+          sha256sum --check QuickShare-x86_64.AppImage.sha256
+
+      - name: Validate AppImage output
+        run: |
+          test -x sharing/linux/dist-minimal/QuickShare-x86_64.AppImage
+          file sharing/linux/dist-minimal/QuickShare-x86_64.AppImage
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            sharing/linux/dist-minimal/QuickShare-x86_64.AppImage
+            sharing/linux/dist-minimal/QuickShare-x86_64.AppImage.sha256

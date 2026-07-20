@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Nearby Sharing
+Name=QuickShare
 Comment=Share files with nearby devices
-Exec=nearby-sharing
-Icon=nearby-sharing
+Exec=quickshare
+Icon=quickshare
 Categories=Network;FileTransfer;
 Terminal=false
 StartupNotify=true

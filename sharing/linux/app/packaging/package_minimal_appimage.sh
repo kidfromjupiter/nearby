@@ -13,10 +13,10 @@ readonly APPIMAGE_RUNFILES="$WORKSPACE_ROOT/bazel-bin/sharing/linux/app/appimage
 readonly APPIMAGETOOL="$APPIMAGE_RUNFILES/+http_file+appimagetool_x86_64/file/appimagetool-x86_64.AppImage"
 readonly RUNTIME="$APPIMAGE_RUNFILES/+http_file+appimage_runtime_x86_64/file/runtime-x86_64"
 readonly OUTPUT_DIR="$WORKSPACE_ROOT/sharing/linux/dist-minimal"
-readonly FINAL_APPDIR="$OUTPUT_DIR/NearbySharing.AppDir"
-readonly OUTPUT_APPIMAGE="$OUTPUT_DIR/NearbySharing-x86_64.AppImage"
+readonly FINAL_APPDIR="$OUTPUT_DIR/QuickShare.AppDir"
+readonly OUTPUT_APPIMAGE="$OUTPUT_DIR/QuickShare-x86_64.AppImage"
 readonly STAGE="$(mktemp -d /tmp/nearby-minimal-appdir.XXXXXX)"
-readonly APPDIR="$STAGE/NearbySharing.AppDir"
+readonly APPDIR="$STAGE/QuickShare.AppDir"
 
 cleanup() {
   rm -rf -- "$STAGE"
@@ -49,7 +49,7 @@ mkdir -p \
   "$APPDIR/usr/share/icons/hicolor/scalable/apps" \
   "$APPDIR/usr/share/metainfo"
 
-install -m 0755 "$BINARY" "$APPDIR/usr/bin/nearby-sharing"
+install -m 0755 "$BINARY" "$APPDIR/usr/bin/quickshare"
 
 copy_qt_library() {
   local name="$1"
@@ -211,20 +211,20 @@ while true; do
 done
 
 install -m 0644 \
-  "$WORKSPACE_ROOT/sharing/linux/app/packaging/nearby-sharing.desktop" \
-  "$APPDIR/usr/share/applications/nearby-sharing.desktop"
+  "$WORKSPACE_ROOT/sharing/linux/app/packaging/quickshare.desktop" \
+  "$APPDIR/usr/share/applications/quickshare.desktop"
 install -m 0644 \
-  "$WORKSPACE_ROOT/sharing/linux/app/packaging/nearby-sharing.metainfo.xml" \
-  "$APPDIR/usr/share/metainfo/nearby-sharing.metainfo.xml"
+  "$WORKSPACE_ROOT/sharing/linux/app/packaging/quickshare.metainfo.xml" \
+  "$APPDIR/usr/share/metainfo/quickshare.metainfo.xml"
 install -m 0644 \
-  "$WORKSPACE_ROOT/sharing/linux/app/icons/smartphone.svg" \
-  "$APPDIR/usr/share/icons/hicolor/scalable/apps/nearby-sharing.svg"
+  "$WORKSPACE_ROOT/sharing/linux/app/icons/quickshare.svg" \
+  "$APPDIR/usr/share/icons/hicolor/scalable/apps/quickshare.svg"
 
 cp \
-  "$APPDIR/usr/share/applications/nearby-sharing.desktop" \
+  "$APPDIR/usr/share/applications/quickshare.desktop" \
   "$APPDIR/"
 cp \
-  "$APPDIR/usr/share/icons/hicolor/scalable/apps/nearby-sharing.svg" \
+  "$APPDIR/usr/share/icons/hicolor/scalable/apps/quickshare.svg" \
   "$APPDIR/"
 
 printf '%s\n' \
@@ -247,7 +247,7 @@ printf '%s\n' \
   'export QML2_IMPORT_PATH="$HERE/usr/lib/qt6/qml"' \
   'export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"' \
   '' \
-  'exec "$HERE/usr/bin/nearby-sharing" "$@"' \
+  'exec "$HERE/usr/bin/quickshare" "$@"' \
   >"$APPDIR/AppRun"
 chmod 0755 "$APPDIR/AppRun"
 

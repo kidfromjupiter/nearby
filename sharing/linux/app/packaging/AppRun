@@ -10,4 +10,4 @@ export QML2_IMPORT_PATH="$HERE/usr/lib/qt6/qml"
 export QML_IMPORT_PATH="$HERE/usr/lib/qt6/qml"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
 
-exec "$HERE/usr/bin/nearby-sharing" "$@"
+exec "$HERE/usr/bin/quickshare" "$@"
