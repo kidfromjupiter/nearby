@@ -5,10 +5,10 @@ shopt -s nullglob
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../..")"
 readonly BINARY="$WORKSPACE_ROOT/bazel-bin/sharing/linux/app/app"
-readonly RUNFILES="$WORKSPACE_ROOT/bazel-bin/sharing/linux/app/app.runfiles"
-readonly QT_ROOT="$RUNFILES/rules_qt++fetch+qt_linux_x86_64"
-readonly QT_DISTRIBUTION="$(dirname -- "$(readlink -f -- "$QT_ROOT/lib")")"
-readonly QML_TOOL="$QT_DISTRIBUTION/bin/qml"
+readonly BAZEL_OUTPUT_BASE="$(bazel info output_base)"
+readonly QT_ROOT="$BAZEL_OUTPUT_BASE/external/rules_qt++fetch+qt_linux_x86_64"
+readonly QT_DISTRIBUTION="$QT_ROOT"
+readonly QML_TOOL="$QT_ROOT/bin/qml"
 readonly APPIMAGE_RUNFILES="$WORKSPACE_ROOT/bazel-bin/sharing/linux/app/appimage.runfiles"
 readonly APPIMAGETOOL="$APPIMAGE_RUNFILES/+http_file+appimagetool_x86_64/file/appimagetool-x86_64.AppImage"
 readonly RUNTIME="$APPIMAGE_RUNFILES/+http_file+appimage_runtime_x86_64/file/runtime-x86_64"
@@ -25,7 +25,7 @@ trap cleanup EXIT
 
 for required in \
   "$BINARY" \
-  "$QT_ROOT/lib/libQt6Core.so.6.8.3" \
+  "$QT_ROOT/lib/libQt6Core.so.6" \
   "$QML_TOOL" \
   "$APPIMAGETOOL" \
   "$RUNTIME"; do
