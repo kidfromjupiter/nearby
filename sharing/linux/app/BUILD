@@ -1,4 +1,5 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_qt//:qt.bzl", "qt_cc_binary", "qt_cc_library", "qt_resource_via_qrc")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
@@ -67,6 +68,38 @@ qt_cc_library(
     ],
 )
 
+cc_library(
+    name = "native_file_logging",
+    srcs = ["native_file_logging.cc"],
+    hdrs = ["native_file_logging.h"],
+    deps = [
+        "//sharing/linux:linux_sharing_platform",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/log:log_entry",
+        "@com_google_absl//absl/log:log_sink",
+        "@com_google_absl//absl/log:log_sink_registry",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_test(
+    name = "native_file_logging_test",
+    size = "small",
+    srcs = ["native_file_logging_test.cc"],
+    deps = [
+        ":native_file_logging",
+        "//sharing/linux:linux_sharing_platform",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/log:log_sink",
+        "@com_google_absl//absl/log:log_sink_registry",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 qt_cc_binary(
     name = "app",
     srcs = ["main.cc"],
@@ -76,6 +109,7 @@ qt_cc_binary(
     deps = [
         ":app_resources",
         ":backend",
+        ":native_file_logging",
         "@rules_qt//:qt_core",
         "@rules_qt//:qt_gui",
         "@rules_qt//:qt_hdrs",

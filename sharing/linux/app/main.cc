@@ -18,6 +18,7 @@
 #include <QQmlContext>
 #include "backend.h"
 #include "qobject.h"
+#include "sharing/linux/app/native_file_logging.h"
 
 namespace {
 
@@ -113,6 +114,8 @@ void InstallTerminationCleanup(QApplication& app) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  std::unique_ptr<nearby::sharing::linux::NativeFileLogging> native_logging =
+      nearby::sharing::linux::NativeFileLogging::Initialize();
   QApplication app(argc, argv);
   app.setApplicationName(QStringLiteral("QuickShare"));
   app.setDesktopFileName(QStringLiteral("quickshare"));

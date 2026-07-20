@@ -50,6 +50,19 @@ FilePath BuildPathFromBase(const std::string& base,
   return FilePath(path.string());
 }
 
+FilePath GetQuickShareLogPath() {
+  const char* state_home = std::getenv("XDG_STATE_HOME");
+  std::filesystem::path base_path;
+  if (state_home != nullptr && *state_home != '\0' &&
+      std::filesystem::path(state_home).is_absolute()) {
+    base_path = state_home;
+  } else {
+    base_path =
+        std::filesystem::path(GetHomeDirectory()) / ".local" / "state";
+  }
+  return FilePath((base_path / "quickshare" / "logs").string());
+}
+
 std::optional<std::string> GetLanguageCode() {
   const char* lang = std::getenv("LANG");
   if (lang == nullptr || *lang == '\0') {

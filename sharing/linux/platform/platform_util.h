@@ -29,6 +29,7 @@ std::string GetEnvOrDefault(const char* key, std::string fallback);
 std::string GetHomeDirectory();
 FilePath BuildPathFromBase(const std::string& base,
                            std::initializer_list<std::string> components);
+FilePath GetQuickShareLogPath();
 std::optional<std::string> GetLanguageCode();
 bool HasNonLoopbackInterface();
 
