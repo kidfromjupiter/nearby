@@ -57,6 +57,9 @@ Cargo.lock
 # Bazel
 bazel-*
 /.clwb/
+/dist/
+/sharing/linux/dist-minimal/
+/sharing/linux/app/linuxdeploy.AppImage
 
 # Devcontainers
 # /.devcontainer/

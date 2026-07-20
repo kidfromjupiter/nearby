@@ -1,6 +1,7 @@
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_apple", version = "4.3.3")
 bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "rules_rust", version = "0.68.1")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "abseil-cpp", version = "20260107.0", repo_name = "com_google_absl")
@@ -15,6 +16,12 @@ bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 # Should update to 7.0.0
 bazel_dep(name = "ftxui", version = "6.1.9")
 bazel_dep(name = "rules_qt", version = "0.0.6")
+single_version_override(
+    module_name = "rules_qt",
+    patch_strip = 1,
+    patches = ["//sharing/linux:rules_qt_wayland.patch"],
+    version = "0.0.6",
+)
 qt = use_extension("@rules_qt//extension:qt.bzl", "fetch")
 qt.install(
     name = "qt_linux_x86_64",
@@ -62,6 +69,27 @@ crate.from_cargo(
 use_repo(crate, "crate_index")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "appimagetool_x86_64",
+    downloaded_file_path = "appimagetool-x86_64.AppImage",
+    executable = True,
+    sha256 = "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
+    urls = [
+        "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+    ],
+)
+
+http_file(
+    name = "appimage_runtime_x86_64",
+    downloaded_file_path = "runtime-x86_64",
+    executable = True,
+    sha256 = "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+    urls = [
+        "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+    ],
+)
 
 http_archive(
     name = "com_google_ukey2",
