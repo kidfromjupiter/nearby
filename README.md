@@ -76,8 +76,11 @@ Best place to consult would be the Github actions and workflows.
 
 
 ## KNOWN BUGS
+- [ ] **No cleanup of LE advertisements after application close**
+
 - [ ] **Launch the app when you want to receive/send**
-        Keeping the application on may interfere with bluetooth devices. I am working on fixing this. So turn the application on only **when** you want to share stuff
+        \
+      Keeping the application on may interfere with bluetooth devices. I am working on fixing this. So turn the application on only **when** you want to share stuff
       
 - [ ] **Bluetooth classic bandwidth**
   
