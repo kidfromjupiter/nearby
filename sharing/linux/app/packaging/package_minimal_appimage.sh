@@ -3,7 +3,17 @@ set -euo pipefail
 shopt -s nullglob
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../..")"
+# `bazel run` executes this script from Bazel's output tree and exports the
+# actual source checkout in BUILD_WORKSPACE_DIRECTORY. Falling back to the
+# script-relative path keeps direct source-tree invocation working.
+readonly WORKSPACE_ROOT="$(
+  if [[ -n "${BUILD_WORKSPACE_DIRECTORY:-}" ]]; then
+    realpath "$BUILD_WORKSPACE_DIRECTORY"
+  else
+    realpath "$SCRIPT_DIR/../../../.."
+  fi
+)"
+cd "$WORKSPACE_ROOT"
 readonly BINARY="$WORKSPACE_ROOT/bazel-bin/sharing/linux/app/app"
 readonly BAZEL_OUTPUT_BASE="$(bazel info output_base)"
 readonly QT_ROOT="$BAZEL_OUTPUT_BASE/external/rules_qt++fetch+qt_linux_x86_64"
@@ -142,6 +152,7 @@ cp -aL \
 readonly PLUGIN_CATEGORIES=(
   platforms
   imageformats
+  xcbglintegrations
   wayland-decoration-client
   wayland-graphics-integration-client
   wayland-shell-integration
@@ -163,6 +174,14 @@ done
 cp -aL \
   "$QT_ROOT/plugins/imageformats/libqsvg.so" \
   "$APPDIR/usr/lib/qt6/plugins/imageformats/"
+
+# The XCB platform plugin delegates OpenGL context creation to one of these
+# dynamically loaded integrations. Without them libqxcb still loads, but Qt
+# reports that neither GLX nor EGL is enabled and Qt Quick cannot create an RHI.
+cp -aL \
+  "$QT_ROOT/plugins/xcbglintegrations/libqxcb-egl-integration.so" \
+  "$QT_ROOT/plugins/xcbglintegrations/libqxcb-glx-integration.so" \
+  "$APPDIR/usr/lib/qt6/plugins/xcbglintegrations/"
 
 for category in \
   wayland-decoration-client \
