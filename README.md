@@ -103,6 +103,7 @@ Best place to consult would be the Github actions and workflows.
 
 - [ ] Upstream has been slowly adding webrtc support. Should we support it?
 - [ ] Support enabling receive on detection of fast initiation LE advertisement
+- [ ] Upstream has added WIFI-Aware support. Unfortunately, I've been lurking around the `hostap` mailing lists and from what I can see, my wifi card (Intel AX210) isn't supported. They do have experimental support for some wifi cards but not mine. Soooo.... I won't be able to test anything :(
 
 ## Special thanks
 
