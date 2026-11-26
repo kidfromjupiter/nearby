@@ -201,6 +201,12 @@ std::unique_ptr<api::ble::BleMedium> ImplementationPlatform::CreateBleMedium(
       dynamic_cast<linux::BluetoothAdapter&>(adapter));
 }
 
+std::unique_ptr<api::WifiAwareMedium> ImplementationPlatform::CreateWifiAwareMedium() {
+  LOG(INFO) << __func__ 
+  << ": Linux does not support WifiAwareMedium";
+  return nullptr;
+}
+
 std::unique_ptr<api::CredentialStorage>
 ImplementationPlatform::CreateCredentialStorage() {
   return nullptr;
