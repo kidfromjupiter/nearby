@@ -50,6 +50,16 @@ class SyncManager {
     }
   }
 
+  void AsyncDeleteSyncBinding(
+      absl::string_view binding_id,
+      absl::AnyInvocable<void(absl::Status)> callback) {
+    static_cast<void>(binding_id);
+    if (callback) {
+      std::move(callback)(absl::UnavailableError(
+          "Sync binding RPC is not available in this build"));
+    }
+  }
+
   void AddSyncBinding(const sync::SyncBinding& binding) {
     if (preference_manager_ == nullptr) {
       return;
