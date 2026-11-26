@@ -37,15 +37,19 @@ void LogAsyncGattManagerError(const bluez::GattManager& manager,
 
 }  // namespace
 
-absl::optional<api::ble::GattCharacteristic>
+std::optional<api::ble::GattCharacteristic>
 GattServer::CreateCharacteristic(
     const Uuid& service_uuid, const Uuid& characteristic_uuid,
     api::ble::GattCharacteristic::Permission permission,
-    api::ble::GattCharacteristic::Property property) {
+    api::ble::GattCharacteristic::Property property,
+    const ByteArray& initial_value) {
   absl::MutexLock lock(&services_mutex_);
   if (services_.count(service_uuid) == 1) {
     if (services_[service_uuid]->AddCharacteristic(
             service_uuid, characteristic_uuid, permission, property)) {
+      services_[service_uuid]
+          ->GetCharacteristic(characteristic_uuid)
+          ->Update(initial_value);
       api::ble::GattCharacteristic characteristic{
           characteristic_uuid, service_uuid, permission, property};
       return characteristic;
@@ -73,6 +77,7 @@ GattServer::CreateCharacteristic(
 
   if (service->AddCharacteristic(service_uuid, characteristic_uuid, permission,
                                  property)) {
+    service->GetCharacteristic(characteristic_uuid)->Update(initial_value);
     services_.insert({service_uuid, std::move(service)});
     {
       absl::MutexLock profile_lock(&profiles_mutex_);

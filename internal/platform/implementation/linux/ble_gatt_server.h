@@ -25,7 +25,6 @@
 #include "bluez_gatt_profile.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
-#include "absl/types/optional.h"
 #include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/implementation/ble.h"
@@ -82,10 +81,11 @@ class GattServer : public api::ble::GattServer {
   }
   ~GattServer() override = default;
 
-  absl::optional<api::ble::GattCharacteristic> CreateCharacteristic(
+  std::optional<api::ble::GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
       api::ble::GattCharacteristic::Permission permission,
-      api::ble::GattCharacteristic::Property property) override;
+      api::ble::GattCharacteristic::Property property,
+      const ByteArray& initial_value) override;
   bool UpdateCharacteristic(
       const api::ble::GattCharacteristic& characteristic,
       const nearby::ByteArray& value) override;

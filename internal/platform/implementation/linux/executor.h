@@ -34,7 +34,7 @@ class Executor : public api::Executor {
   // jobs to finish.
   ~Executor() override = default;
 
-  void Execute(Runnable&& runnable) override;
+  bool Execute(Runnable&& runnable) override;
   void Shutdown() override;
 
  private:

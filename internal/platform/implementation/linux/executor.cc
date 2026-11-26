@@ -27,19 +27,19 @@ Executor::Executor(size_t max_concurrency)
   assert(thread_pool_ != nullptr);
 }
 
-void Executor::Execute(Runnable &&runnable) {
+bool Executor::Execute(Runnable &&runnable) {
   if (shut_down_) {
     LOG(INFO) << "Warning: " << __func__
                          << ": Attempt to execute on a shut down pool.";
-    return;
+    return false;
   }
 
   if (runnable == nullptr) {
     LOG(ERROR) << __func__ << ": Runnable was null.";
-    return;
+    return false;
   }
 
-  thread_pool_->Run(std::move(runnable));
+  return thread_pool_->Run(std::move(runnable));
 }
 
 void Executor::Shutdown() {

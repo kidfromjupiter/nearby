@@ -98,13 +98,13 @@ std::shared_ptr<api::Cancelable> ScheduledExecutor::Schedule(
   return task;
 }
 
-void ScheduledExecutor::Execute(Runnable&& runnable) {
+bool ScheduledExecutor::Execute(Runnable&& runnable) {
   if (shut_down_) {
     LOG(ERROR) << __func__ << ": Attempt to Execute on a shut down executor.";
-    return;
+    return false;
   }
 
-  executor_->Execute(std::move(runnable));
+  return executor_->Execute(std::move(runnable));
 }
 
 void ScheduledExecutor::Shutdown() {

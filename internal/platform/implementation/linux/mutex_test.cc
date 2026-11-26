@@ -14,92 +14,33 @@
 
 #include "internal/platform/implementation/linux/mutex.h"
 
-#include <future>  // NOLINT
+#include <chrono>
+#include <future>
 
 #include "gtest/gtest.h"
 
-class MutexTests : public testing::Test {
- public:
-  class MutexTest {
-   public:
-    MutexTest(nearby::linux::Mutex& mutex) : mutex_(mutex) {}
-
-    std::future<bool> WaitForLock() {  // NOLINT
-      return std::async(std::launch::async,
-                        // for this lambda you need C++14
-                        [this]() mutable {
-                          absl::MutexLock(&mutex_.GetMutex());
-                          return true;
-                        });
-    }
-
-    void PostEvent() {
-      absl::MutexLock(&mutex_.GetMutex());
-      mutex_.Unlock();
-    }
-
-   private:
-    nearby::linux::Mutex& mutex_;
-  };
-};
-
-TEST_F(MutexTests, SuccessfulRecursiveCreation) {
-  // Arrange
-  nearby::linux::Mutex mutex =
-      nearby::linux::Mutex(nearby::linux::Mutex::Mode::kRecursive);
-
-  // Act
-  std::recursive_mutex& actual = mutex.GetRecursiveMutex();
-
-  // Assert
-  ASSERT_TRUE(actual.native_handle() != nullptr);
+TEST(Mutex, AllowsRecursiveLocking) {
+  nearby::linux::Mutex mutex;
+  mutex.Lock();
+  mutex.Lock();
+  mutex.Unlock();
+  mutex.Unlock();
 }
 
-TEST_F(MutexTests, SuccessfulCreation) {
-  // Arrange
-  nearby::linux::Mutex mutex(nearby::linux::Mutex::Mode::kRegular);
-
-  // Act
-  absl::Mutex& actual = mutex.GetMutex();
-
-  // Assert
-  ASSERT_TRUE(&actual != nullptr);
-}
-
-TEST_F(MutexTests, SuccessfulSignal) {
-  // Arrange
-  nearby::linux::Mutex mutex(nearby::linux::Mutex::Mode::kRegular);
-
-  nearby::linux::Mutex& mutexRef = mutex;
-  MutexTest mutexTest(mutexRef);
-
+TEST(Mutex, WaitsForOtherThreadToUnlock) {
+  nearby::linux::Mutex mutex;
+  std::promise<void> started;
+  auto started_future = started.get_future();
   mutex.Lock();
-
-  // Act
-  auto result = mutexTest.WaitForLock();
+  auto waiter = std::async(std::launch::async, [&]() {
+    started.set_value();
+    mutex.Lock();
+    mutex.Unlock();
+    return true;
+  });
+  started_future.wait();
+  EXPECT_EQ(waiter.wait_for(std::chrono::milliseconds(0)),
+            std::future_status::timeout);
   mutex.Unlock();
-
-  // Assert
-  ASSERT_TRUE(result.get());
-}
-
-TEST_F(MutexTests, SuccessfulRecursiveSignal) {
-  // Arrange
-  nearby::linux::Mutex mutex(nearby::linux::Mutex::Mode::kRecursive);
-
-  nearby::linux::Mutex& mutexRef = mutex;
-  MutexTest mutexTest(mutexRef);
-
-  mutex.Lock();
-  mutex.Lock();
-  mutex.Lock();
-
-  // Act
-  auto result = mutexTest.WaitForLock();
-  mutex.Unlock();
-  mutex.Unlock();
-  mutex.Unlock();
-
-  // Assert
-  ASSERT_TRUE(result.get());
+  EXPECT_TRUE(waiter.get());
 }

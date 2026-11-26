@@ -54,7 +54,6 @@ class BluetoothAdapter : public api::BluetoothAdapter {
   bool SetScanMode(ScanMode scan_mode) override;
   std::string GetName() const override;
 
-  bool SetName(absl::string_view name) override;
   bool SetName(absl::string_view name, bool persist) override;
   MacAddress GetMacAddress() const override;
 

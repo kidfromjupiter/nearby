@@ -22,23 +22,18 @@
 
 #include "device_info.h"
 #include "internal/platform/implementation/atomic_boolean.h"
-#include "internal/platform/implementation/atomic_reference.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
-#include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/linux/atomic_boolean.h"
-#include "internal/platform/implementation/linux/atomic_uint32.h"
 // #include "internal/platform/implementation/linux/ble_v2_medium.h"
 #include "internal/platform/implementation/linux/bluetooth_adapter.h"
 #include "internal/platform/implementation/linux/bluetooth_classic_medium.h"
 #include "internal/platform/implementation/linux/bluez.h"
-#include "internal/platform/implementation/linux/condition_variable.h"
 #include "internal/platform/implementation/linux/dbus.h"
 #include "internal/platform/implementation/linux/generated/dbus/bluez/adapter_client.h"
 #include "internal/platform/implementation/linux/mutex.h"
 #include "internal/platform/implementation/linux/preferences_manager.h"
-#include "internal/platform/implementation/linux/submittable_executor.h"
 #include "internal/platform/implementation/linux/timer.h"
 #include "internal/platform/implementation/linux/wifi_direct.h"
 // #include "internal/platform/implementation/linux/wifi_hotspot.h"
@@ -49,9 +44,7 @@
 #include "ble_v2_medium.h"
 #include "absl/strings/str_cat.h"
 
-#include "internal/platform/implementation/shared/count_down_latch.h"
 #include "internal/platform/implementation/shared/file.h"
-#include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/payload_id.h"
@@ -61,76 +54,42 @@
 
 namespace nearby {
 namespace api {
+static std::filesystem::path DownloadsPath() {
+  std::filesystem::path downloads;
+  const char* download_dir = getenv("XDG_DOWNLOAD_DIR");
+
+  if (download_dir != nullptr) {
+    downloads = std::filesystem::path(download_dir);
+  } else {
+    // Fallback to ~/Downloads if XDG_DOWNLOAD_DIR is not set
+    const char* home = getenv("HOME");
+    if (home != nullptr) {
+      downloads = std::filesystem::path(home) / "Downloads";
+    } else {
+      downloads = "/tmp/Downloads";
+    }
+  }
+
+  return downloads;
+}
+
 std::string ImplementationPlatform::GetCustomSavePath(
-    const std::string& parent_folder, const std::string& file_name) {
-  auto fs = std::filesystem::path(parent_folder);
-  return (fs / file_name).string();
-}
-
-std::string ImplementationPlatform::GetDownloadPath(
-    const std::string& parent_folder, const std::string& file_name) {
-  std::filesystem::path downloads;
-  const char* download_dir = getenv("XDG_DOWNLOAD_DIR");
-
-  if (download_dir != nullptr) {
-    downloads = std::filesystem::path(download_dir);
-  } else {
-    // Fallback to ~/Downloads if XDG_DOWNLOAD_DIR is not set
-    const char* home = getenv("HOME");
-    if (home != nullptr) {
-      downloads = std::filesystem::path(home) / "Downloads";
-    } else {
-      downloads = "/tmp/Downloads";
-    }
-  }
-
-  return (downloads / std::filesystem::path(parent_folder).filename() /
-          std::filesystem::path(file_name).filename())
-      .string();
-}
-
-std::string ImplementationPlatform::GetDownloadPath(
+    const std::string& save_path, const std::string& parent_folder,
     const std::string& file_name) {
-  std::filesystem::path downloads;
-  const char* download_dir = getenv("XDG_DOWNLOAD_DIR");
-
-  if (download_dir != nullptr) {
-    downloads = std::filesystem::path(download_dir);
-  } else {
-    // Fallback to ~/Downloads if XDG_DOWNLOAD_DIR is not set
-    const char* home = getenv("HOME");
-    if (home != nullptr) {
-      downloads = std::filesystem::path(home) / "Downloads";
-    } else {
-      downloads = "/tmp/Downloads";
-    }
+  std::filesystem::path directory =
+      save_path.empty() ? DownloadsPath() : std::filesystem::path(save_path);
+  const std::filesystem::path requested = directory / parent_folder / file_name;
+  std::filesystem::path candidate = requested;
+  for (int suffix = 1; std::filesystem::exists(candidate); ++suffix) {
+    candidate = requested.parent_path() /
+                (requested.stem().string() + " (" + std::to_string(suffix) +
+                 ")" + requested.extension().string());
   }
-
-  return (downloads / std::filesystem::path(file_name).filename()).string();
-}
-
-std::string ImplementationPlatform::GetAppDataPath(
-    const std::string& file_name) {
-  std::filesystem::path state;
-  const char* state_home = getenv("XDG_STATE_HOME");
-
-  if (state_home != nullptr) {
-    state = std::filesystem::path(state_home);
-  } else {
-    // Fallback to ~/.local/state if XDG_STATE_HOME is not set
-    const char* home = getenv("HOME");
-    if (home != nullptr) {
-      state = std::filesystem::path(home) / ".local" / "state";
-    } else {
-      state = "/tmp/state";
-    }
-  }
-
-  return (state / std::filesystem::path(file_name).filename()).string();
+  return candidate.string();
 }
 
 OSName ImplementationPlatform::GetCurrentOS() {
-  return OSName::kWindows;
+  return OSName::kLinux;
 }
 
 std::unique_ptr<api::AtomicBoolean> ImplementationPlatform::CreateAtomicBoolean(
@@ -138,27 +97,9 @@ std::unique_ptr<api::AtomicBoolean> ImplementationPlatform::CreateAtomicBoolean(
   return std::make_unique<linux::AtomicBoolean>(initial_value);
 }
 
-std::unique_ptr<api::AtomicUint32> ImplementationPlatform::CreateAtomicUint32(
-    std::uint32_t value) {
-  return std::make_unique<linux::AtomicUint32>(value);
-}
-
-std::unique_ptr<api::CountDownLatch>
-ImplementationPlatform::CreateCountDownLatch(std::int32_t count) {
-  return std::make_unique<shared::CountDownLatch>(count);
-}
-
-#pragma push_macro("CreateMutex")
-#undef CreateMutex
-std::unique_ptr<api::Mutex> ImplementationPlatform::CreateMutex(
-    Mutex::Mode mode) {
-  return std::make_unique<linux::Mutex>(mode);
-}
-#pragma pop_macro("CreateMutex")
-
-std::unique_ptr<api::ConditionVariable>
-ImplementationPlatform::CreateConditionVariable(api::Mutex* mutex) {
-  return std::make_unique<linux::ConditionVariable>(mutex);
+std::unique_ptr<api::RecursiveMutex>
+ImplementationPlatform::CreateRecursiveMutex() {
+  return std::make_unique<linux::Mutex>();
 }
 
 std::unique_ptr<AppLifecycleMonitor>
@@ -167,22 +108,26 @@ ImplementationPlatform::CreateAppLifecycleMonitor(
         state_updated_callback) {
   return nullptr;
 }
+#if defined(NEARBY_CHROMIUM)
 std::unique_ptr<api::InputFile> ImplementationPlatform::CreateInputFile(
     PayloadId id) {
-  auto path = GetDownloadPath(std::to_string(id));
+  auto path = (DownloadsPath() / std::to_string(id)).string();
   return nearby::shared::IOFile::CreateInputFile(path);
 }
+#endif
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
     const std::string& file_path) {
   return nearby::shared::IOFile::CreateInputFile(file_path);
 }
 
+#if defined(NEARBY_CHROMIUM)
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
     PayloadId payload_id) {
   return nearby::shared::IOFile::CreateOutputFile(
-      GetDownloadPath("", std::to_string(payload_id)));
+      (DownloadsPath() / std::to_string(payload_id)).string());
 }
+#endif
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
     const std::string& file_path) {
@@ -204,15 +149,15 @@ std::unique_ptr<api::LogMessage> ImplementationPlatform::CreateLogMessage(
   // return std::make_unique<linux::LogMessage>(file, line, severity);
 }
 
-std::unique_ptr<api::SubmittableExecutor>
+std::unique_ptr<api::Executor>
 ImplementationPlatform::CreateSingleThreadExecutor() {
-  return std::make_unique<linux::SubmittableExecutor>();
+  return std::make_unique<linux::Executor>();
 }
 
-std::unique_ptr<api::SubmittableExecutor>
+std::unique_ptr<api::Executor>
 ImplementationPlatform::CreateMultiThreadExecutor(
     std::int32_t max_concurrency) {
-  return std::make_unique<linux::SubmittableExecutor>(max_concurrency);
+  return std::make_unique<linux::Executor>(max_concurrency);
 }
 
 std::unique_ptr<ScheduledExecutor>

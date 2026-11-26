@@ -9,7 +9,6 @@ cc_test(
     size = "small",
     srcs = [
         "atomic_boolean_test.cc",
-        "atomic_reference_test.cc",
         "mutex_test.cc",
         "utils_test.cc",
     ],
@@ -24,7 +23,6 @@ cc_test(
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation:types",
-        "//internal/platform/implementation/shared:count_down_latch",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",

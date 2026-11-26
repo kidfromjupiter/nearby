@@ -178,14 +178,6 @@ MacAddress mac_address) {
   return device.get();
 }
 
-std::unique_ptr<api::BluetoothPairing> BluetoothClassicMedium::CreatePairing(
-    api::BluetoothDevice &remote_device) {
-  auto device = devices_->get_device_by_address(remote_device.GetMacAddress());
-  if (device == nullptr) return nullptr;
-
-  return std::unique_ptr<api::BluetoothPairing>(
-      new BluetoothPairing(adapter_, device));
-}
 
 }  // namespace linux
 }  // namespace nearby

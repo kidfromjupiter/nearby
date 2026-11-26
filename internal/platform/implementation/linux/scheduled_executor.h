@@ -54,7 +54,7 @@ class ScheduledExecutor : public api::ScheduledExecutor {
                                             absl::Duration duration) override;
 
   // Executes the runnable task immedately.
-  void Execute(Runnable&& runnable) override;
+  bool Execute(Runnable&& runnable) override;
 
   // Shutdowns the executor, all scheduled task will be cancelled.
   void Shutdown() override;
