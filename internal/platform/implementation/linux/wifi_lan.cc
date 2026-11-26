@@ -110,7 +110,7 @@ bool WifiLanMedium::StartAdvertising(const NsdServiceInfo& nsd_service_info) {
   }
 
   {
-    absl::ReaderMutexLock l(&entry_groups_mutex_);
+    absl::ReaderMutexLock l(entry_groups_mutex_);
     if (entry_groups_.count(*key) == 1) {
       LOG(ERROR) << __func__
                  << ": advertising is already active for this service";
@@ -161,7 +161,7 @@ bool WifiLanMedium::StartAdvertising(const NsdServiceInfo& nsd_service_info) {
     return false;
   }
 
-  absl::MutexLock l(&entry_groups_mutex_);
+  absl::MutexLock l(entry_groups_mutex_);
   entry_groups_.insert({*key, std::move(entry_group)});
 
   return true;
@@ -173,7 +173,7 @@ bool WifiLanMedium::StopAdvertising(const NsdServiceInfo& nsd_service_info) {
     return false;
   }
 
-  absl::MutexLock l(&entry_groups_mutex_);
+  absl::MutexLock l(entry_groups_mutex_);
   if (entry_groups_.count(*key) == 0) {
     LOG(ERROR) << __func__
                << ": Advertising is already inactive for this service.";
@@ -188,7 +188,7 @@ bool WifiLanMedium::StartDiscovery(
     const std::string& service_type,
     api::WifiLanMedium::DiscoveredServiceCallback callback) {
   {
-    absl::ReaderMutexLock l(&service_browsers_mutex_);
+    absl::ReaderMutexLock l(service_browsers_mutex_);
     if (service_browsers_.count(service_type) != 0) {
       auto& object = service_browsers_[service_type];
       LOG(ERROR) << __func__ << ": A service browser for service type "
@@ -210,7 +210,7 @@ bool WifiLanMedium::StartDiscovery(
         << ": Created a new org.freedesktop.Avahi.ServiceBrowser object at "
         << browser_object_path << " for service_type: " << service_type;
 
-    absl::MutexLock l(&service_browsers_mutex_);
+    absl::MutexLock l(service_browsers_mutex_);
     service_browsers_.emplace(service_type,
                               std::make_unique<avahi::ServiceBrowser>(
                                   *system_bus_, browser_object_path, avahi_));
@@ -236,7 +236,7 @@ bool WifiLanMedium::StartDiscovery(
 }
 
 bool WifiLanMedium::StopDiscovery(const std::string& service_type) {
-  absl::MutexLock l(&service_browsers_mutex_);
+  absl::MutexLock l(service_browsers_mutex_);
 
   if (service_browsers_.count(service_type) == 0) {
     LOG(ERROR) << __func__ << ": Service type " << service_type

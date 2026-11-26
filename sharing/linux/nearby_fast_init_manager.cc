@@ -64,7 +64,7 @@ void LinuxFastInitiationManager::StartAdvertising(
     std::function<void()> callback,
     std::function<void(nearby::api::FastInitiationManager::Error)>
         error_callback) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (advertisement_ != nullptr) {
     if (error_callback) {
       error_callback(nearby::api::FastInitiationManager::Error::kResourceInUse);
@@ -153,7 +153,7 @@ void LinuxFastInitiationManager::StartAdvertising(
 
 void LinuxFastInitiationManager::StopAdvertising(
     std::function<void()> callback) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (advertisement_ != nullptr && adv_manager_ != nullptr) {
     try {
       adv_manager_->UnregisterAdvertisementSync(
@@ -175,7 +175,7 @@ void LinuxFastInitiationManager::StartScanning(
         error_callback) {
   std::optional<nearby::api::FastInitiationManager::Error> error;
   {
-    absl::MutexLock operation_lock(&scan_operation_mutex_);
+    absl::MutexLock operation_lock(scan_operation_mutex_);
     error = StartScanningInternal(std::move(devices_discovered_callback),
                                   std::move(devices_not_discovered_callback));
   }
@@ -190,7 +190,7 @@ LinuxFastInitiationManager::StartScanningInternal(
     std::function<void()> devices_not_discovered_callback) {
   bool already_scanning = false;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     already_scanning = is_scanning_;
   }
   if (already_scanning) {
@@ -228,7 +228,7 @@ LinuxFastInitiationManager::StartScanningInternal(
   uint64_t generation;
   try {
     {
-      absl::MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       is_scanning_ = true;
       generation = ++scan_generation_;
       devices_discovered_callback_ = std::move(devices_discovered_callback);
@@ -263,7 +263,7 @@ LinuxFastInitiationManager::StartScanningInternal(
     scan_monitor_manager_ = std::move(monitor_manager);
   } catch (const sdbus::Error& error) {
     {
-      absl::MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       is_scanning_ = false;
       devices_discovered_callback_ = nullptr;
       devices_not_discovered_callback_ = nullptr;
@@ -294,7 +294,7 @@ LinuxFastInitiationManager::StartScanningInternal(
 
   if (!registration_error_name.empty()) {
     {
-      absl::MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       is_scanning_ = false;
       ++scan_generation_;
       devices_discovered_callback_ = nullptr;
@@ -316,7 +316,7 @@ LinuxFastInitiationManager::StartScanningInternal(
       filter["DuplicateData"] = sdbus::Variant(true);
       bluez_adapter.SetDiscoveryFilter(filter);
       bluez_adapter.StartDiscovery();
-      absl::MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       owns_bluez_discovery_ = true;
     }
   } catch (const sdbus::Error& error) {
@@ -329,7 +329,7 @@ LinuxFastInitiationManager::StartScanningInternal(
 
 void LinuxFastInitiationManager::StopScanning(std::function<void()> callback) {
   {
-    absl::MutexLock operation_lock(&scan_operation_mutex_);
+    absl::MutexLock operation_lock(scan_operation_mutex_);
     StopScanningInternal();
   }
   if (callback) {
@@ -340,7 +340,7 @@ void LinuxFastInitiationManager::StopScanning(std::function<void()> callback) {
 void LinuxFastInitiationManager::StopScanningInternal() {
   bool owns_discovery = false;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (!is_scanning_) {
       return;
     }
@@ -386,7 +386,7 @@ void LinuxFastInitiationManager::StopScanningInternal() {
 }
 
 bool LinuxFastInitiationManager::IsScanning() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return is_scanning_;
 }
 
@@ -400,7 +400,7 @@ void LinuxFastInitiationManager::OnAdvertisementFound(
 
   std::function<void()> callback;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (!is_scanning_ || scan_generation != scan_generation_) {
       return;
     }
@@ -419,7 +419,7 @@ void LinuxFastInitiationManager::OnAdvertisementLost(
     nearby::api::ble::BlePeripheral::UniqueId peripheral_id) {
   std::function<void()> callback;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (!is_scanning_ || scan_generation != scan_generation_ ||
         discovered_peripherals_.erase(peripheral_id) == 0) {
       return;

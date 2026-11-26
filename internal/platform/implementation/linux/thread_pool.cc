@@ -49,7 +49,7 @@ bool ThreadPool::Start() {
     }
   };
 
-  absl::MutexLock l(&threads_mutex_);
+  absl::MutexLock l(threads_mutex_);
   if (!threads_.empty()) {
     LOG(ERROR) << __func__ << "thread pool is already active";
     return false;
@@ -72,31 +72,31 @@ bool ThreadPool::Run(Runnable &&task) {
   }
 
   {
-    absl::ReaderMutexLock l(&threads_mutex_);
+    absl::ReaderMutexLock l(threads_mutex_);
     if (threads_.empty()) {
       LOG(ERROR) << __func__ << ": thread pool is not active";
       return false;
     }
   }
 
-  absl::MutexLock l(&tasks_mutex_);
+  absl::MutexLock l(tasks_mutex_);
   tasks_.push(std::move(task));
   return true;
 }
 
 void ThreadPool::ShutDown() {
   {
-    absl::MutexLock l(&tasks_mutex_);
+    absl::MutexLock l(tasks_mutex_);
     shut_down_.store(true, std::memory_order_relaxed);
   }
   {
-    absl::ReaderMutexLock l(&threads_mutex_);
+    absl::ReaderMutexLock l(threads_mutex_);
     for (auto &thread : threads_) {
       thread.join();
     }
   }
 
-  absl::MutexLock l(&threads_mutex_);
+  absl::MutexLock l(threads_mutex_);
   threads_.clear();
 }
 
@@ -108,7 +108,7 @@ Runnable ThreadPool::NextTask() {
   };
 
   {
-    absl::MutexLock l(&tasks_mutex_, absl::Condition(&task_available));
+    absl::MutexLock l(tasks_mutex_, absl::Condition(&task_available));
     if (shut_down_) {
       return nullptr;
     }

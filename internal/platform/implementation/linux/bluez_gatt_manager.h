@@ -46,25 +46,25 @@ class GattManager
   ~GattManager() { unregisterProxy(); }
 
   void SetRegisterApplicationReplyCallback(ReplyCallback callback) {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     register_application_reply_callback_ = std::move(callback);
   }
 
   void SetUnregisterApplicationReplyCallback(ReplyCallback callback) {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     unregister_application_reply_callback_ = std::move(callback);
   }
 
  protected:
   void onRegisterApplicationReply(std::optional<sdbus::Error> error) override {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     if (register_application_reply_callback_.has_value()) {
       (*register_application_reply_callback_)(std::move(error));
     }
   }
 
   void onUnregisterApplicationReply(std::optional<sdbus::Error> error) override {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     if (unregister_application_reply_callback_.has_value()) {
       (*unregister_application_reply_callback_)(std::move(error));
     }

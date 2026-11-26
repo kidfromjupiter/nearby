@@ -29,7 +29,7 @@ InputStream& BleV2Socket::GetInputStream() { return input_stream_; }
 OutputStream& BleV2Socket::GetOutputStream() { return output_stream_; }
 
 Exception BleV2Socket::Close() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     return {Exception::kSuccess};
   }
@@ -58,13 +58,13 @@ Exception BleV2Socket::Close() {
 }
 
 bool BleV2Socket::IsClosed() const {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return closed_;
 }
 
 // BleInputStream implementation
 ExceptionOr<ByteArray> BleV2Socket::BleInputStream::Read(std::int64_t size) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   
   while (buffer_.Empty() && !closed_) {
     cond_.Wait(&mutex_);
@@ -86,7 +86,7 @@ ExceptionOr<ByteArray> BleV2Socket::BleInputStream::Read(std::int64_t size) {
 }
 
 Exception BleV2Socket::BleInputStream::Close() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     return {Exception::kSuccess};
   }
@@ -96,7 +96,7 @@ Exception BleV2Socket::BleInputStream::Close() {
 }
 
 void BleV2Socket::BleInputStream::ReceiveData(const ByteArray& data) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     return;
   }
@@ -113,14 +113,14 @@ void BleV2Socket::BleInputStream::ReceiveData(const ByteArray& data) {
 }
 
 void BleV2Socket::BleInputStream::NotifyClose() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   closed_ = true;
   cond_.SignalAll();
 }
 
 // BleOutputStream implementation
 Exception BleV2Socket::BleOutputStream::Write(absl::string_view data) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     return {Exception::kIo};
   }
@@ -139,7 +139,7 @@ Exception BleV2Socket::BleOutputStream::Flush() {
 }
 
 Exception BleV2Socket::BleOutputStream::Close() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     return {Exception::kSuccess};
   }
@@ -149,7 +149,7 @@ Exception BleV2Socket::BleOutputStream::Close() {
 }
 
 void BleV2Socket::BleOutputStream::SetWriteCallback(WriteCallback callback) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   write_callback_ = std::move(callback);
 }
 
@@ -157,7 +157,7 @@ void BleV2Socket::SetGattServer(
     std::unique_ptr<api::ble::GattServer> gatt_server,
     const api::ble::GattCharacteristic& rx_char,
     const api::ble::GattCharacteristic& tx_char) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   
   if (closed_) {
     LOG(WARNING) << "Cannot set GATT server on closed socket";
@@ -171,7 +171,7 @@ void BleV2Socket::SetGattServer(
   // Set up write callback to use GATT server notifications
   output_stream_.SetWriteCallback(
       [this](absl::string_view data) -> bool {
-        absl::MutexLock lock(&mutex_);
+        absl::MutexLock lock(mutex_);
         if (!gatt_server_) {
           LOG(ERROR) << "GATT server not available for write";
           return false;
@@ -203,7 +203,7 @@ void BleV2Socket::SetGattClient(
     std::unique_ptr<api::ble::GattClient> gatt_client,
     const api::ble::GattCharacteristic& rx_char,
     const api::ble::GattCharacteristic& tx_char) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   
   if (closed_) {
     LOG(WARNING) << "Cannot set GATT client on closed socket";
@@ -217,7 +217,7 @@ void BleV2Socket::SetGattClient(
   // Set up write callback to use GATT client writes
   output_stream_.SetWriteCallback(
       [this](absl::string_view data) -> bool {
-        absl::MutexLock lock(&mutex_);
+        absl::MutexLock lock(mutex_);
         if (!gatt_client_) {
           LOG(ERROR) << "GATT client not available for write";
           return false;

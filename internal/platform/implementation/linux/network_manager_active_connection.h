@@ -89,7 +89,7 @@ class ActiveConnection
  protected:
   void onStateChanged(const uint32_t& state, const uint32_t& reason) override
       ABSL_LOCKS_EXCLUDED(state_mutex_) {
-    absl::MutexLock l(&state_mutex_);
+    absl::MutexLock l(state_mutex_);
     if (state >= kStateUnknown && state <= kStateDeactivated) {
       state_ = static_cast<ActiveConnectionState>(state);
     }

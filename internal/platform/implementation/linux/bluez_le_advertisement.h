@@ -122,7 +122,7 @@ class LEAdvertisementManager final
     auto future = promise.get_future();
     
     {
-      absl::MutexLock lock(&pending_ops_mutex_);
+      absl::MutexLock lock(pending_ops_mutex_);
       pending_register_op_ = std::move(promise);
     }
     
@@ -140,7 +140,7 @@ class LEAdvertisementManager final
     auto future = promise.get_future();
     
     {
-      absl::MutexLock lock(&pending_ops_mutex_);
+      absl::MutexLock lock(pending_ops_mutex_);
       pending_unregister_op_ = std::move(promise);
     }
     
@@ -154,7 +154,7 @@ class LEAdvertisementManager final
 
  protected:
   void onRegisterAdvertisementReply(std::optional<sdbus::Error> error) override {
-    absl::MutexLock lock(&pending_ops_mutex_);
+    absl::MutexLock lock(pending_ops_mutex_);
     if (pending_register_op_) {
       pending_register_op_->set_value(std::move(error));
       pending_register_op_.reset();
@@ -162,7 +162,7 @@ class LEAdvertisementManager final
   }
 
   void onUnregisterAdvertisementReply(std::optional<sdbus::Error> error) override {
-    absl::MutexLock lock(&pending_ops_mutex_);
+    absl::MutexLock lock(pending_ops_mutex_);
     if (pending_unregister_op_) {
       pending_unregister_op_->set_value(std::move(error));
       pending_unregister_op_.reset();

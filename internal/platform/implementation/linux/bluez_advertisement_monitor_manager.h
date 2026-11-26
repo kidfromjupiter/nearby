@@ -58,12 +58,12 @@ class AdvertisementMonitorManager final
   ~AdvertisementMonitorManager() { unregisterProxy(); }
 
   void SetRegisterMonitorReplyCallback(ReplyCallback callback) {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     register_monitor_reply_callback_ = std::move(callback);
   }
 
   void SetUnregisterMonitorReplyCallback(ReplyCallback callback) {
-    absl::MutexLock lock(&callbacks_mutex_);
+    absl::MutexLock lock(callbacks_mutex_);
     unregister_monitor_reply_callback_ = std::move(callback);
   }
 
@@ -104,7 +104,7 @@ class AdvertisementMonitorManager final
   void onRegisterMonitorReply(std::optional<sdbus::Error> error) override {
     std::optional<ReplyCallback> callback;
     {
-      absl::MutexLock lock(&callbacks_mutex_);
+      absl::MutexLock lock(callbacks_mutex_);
       callback = std::move(register_monitor_reply_callback_);
       register_monitor_reply_callback_.reset();
     }
@@ -116,7 +116,7 @@ class AdvertisementMonitorManager final
   void onUnregisterMonitorReply(std::optional<sdbus::Error> error) override {
     std::optional<ReplyCallback> callback;
     {
-      absl::MutexLock lock(&callbacks_mutex_);
+      absl::MutexLock lock(callbacks_mutex_);
       callback = std::move(unregister_monitor_reply_callback_);
       unregister_monitor_reply_callback_.reset();
     }

@@ -26,7 +26,7 @@ namespace nearby {
 namespace linux {
 
 std::unique_ptr<api::ble::BleSocket> BleV2ServerSocket::Accept() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << "BleV2ServerSocket::Accept waiting for connection";
 
   while (!closed_ && pending_sockets_.empty()) {
@@ -46,7 +46,7 @@ std::unique_ptr<api::ble::BleSocket> BleV2ServerSocket::Accept() {
 }
 
 Exception BleV2ServerSocket::Close() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << "BleV2ServerSocket::Close for service " << service_id_;
 
   if (closed_) {
@@ -69,7 +69,7 @@ Exception BleV2ServerSocket::Close() {
 }
 
 void BleV2ServerSocket::AddPendingSocket(std::unique_ptr<BleV2Socket> socket) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (closed_) {
     LOG(WARNING)
         << "BleV2ServerSocket::AddPendingSocket socket is closed";

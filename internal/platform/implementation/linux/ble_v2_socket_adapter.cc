@@ -44,14 +44,14 @@ Uuid BleV2SocketAdapter::GetTxCharacteristicUuid() {
 
 void BleV2SocketAdapter::RegisterSocket(
     api::ble::BlePeripheral::UniqueId device_id, BleV2Socket* socket) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   device_sockets_[device_id] = socket;
   LOG(INFO) << "Registered socket for device " << device_id;
 }
 
 void BleV2SocketAdapter::UnregisterSocket(
     api::ble::BlePeripheral::UniqueId device_id) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   device_sockets_.erase(device_id);
   LOG(INFO) << "Unregistered socket for device " << device_id;
 }
@@ -102,7 +102,7 @@ BleV2SocketAdapter::CreateServerCallbacks() {
         // Find the socket for this device
         BleV2Socket* socket = nullptr;
         {
-          absl::MutexLock lock(&mutex_);
+          absl::MutexLock lock(mutex_);
           auto it = device_sockets_.find(remote_device_id);
           if (it != device_sockets_.end()) {
             socket = it->second;

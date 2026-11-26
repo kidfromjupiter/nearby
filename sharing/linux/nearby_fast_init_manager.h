@@ -72,7 +72,7 @@ class LinuxFastInitiationManager final
   void StopScanning(std::function<void()> callback) override;
 
   bool IsAdvertising() override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return advertisement_ != nullptr;
   }
   bool IsScanning() override;

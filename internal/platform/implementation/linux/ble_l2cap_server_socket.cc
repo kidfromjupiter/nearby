@@ -44,7 +44,7 @@ BleL2capServerSocket::~BleL2capServerSocket() {
 }
 
 void BleL2capServerSocket::SetPSM(int psm) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   psm_ = psm;
 }
 
@@ -132,7 +132,7 @@ std::unique_ptr<api::ble::BleL2capSocket> BleL2capServerSocket::Accept() {
 
   std::string service_id;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     service_id = service_id_;
   }
   return std::make_unique<BleL2capSocket>(client_fd, peripheral_id, service_id );
@@ -141,7 +141,7 @@ std::unique_ptr<api::ble::BleL2capSocket> BleL2capServerSocket::Accept() {
 Exception BleL2capServerSocket::Close() {
   int server_fd = -1;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (closed_) {
       return {Exception::kSuccess};
     }

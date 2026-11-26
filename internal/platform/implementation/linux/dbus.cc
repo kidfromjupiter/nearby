@@ -32,7 +32,7 @@ static std::weak_ptr<sdbus::IConnection> global_system_bus_connection
 }  // namespace
 
 std::shared_ptr<sdbus::IConnection> getSystemBusConnection() {
-  absl::MutexLock lock(&global_system_bus_mutex);
+  absl::MutexLock lock(global_system_bus_mutex);
   auto bus = global_system_bus_connection.lock();
   if (bus == nullptr) {
     bus =

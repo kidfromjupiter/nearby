@@ -29,7 +29,7 @@ void GattCharacteristicServer::Update(const nearby::ByteArray &value) {
   const auto *buf = value.data();
   for (auto i = 0; i < value.size(); i++) bytes[i] = buf[i];
 
-  absl::MutexLock static_value_lock(&static_value_mutex_);
+  absl::MutexLock static_value_lock(static_value_mutex_);
   static_value_ = std::move(bytes);
 }
 
@@ -40,7 +40,7 @@ absl::Status GattCharacteristicServer::NotifyChanged(
   for (auto i = 0; i < new_value.size(); i++) bytes[i] = buf[i];
 
   {
-    absl::MutexLock lock(&cached_value_mutex_);
+    absl::MutexLock lock(cached_value_mutex_);
     cached_value_ = bytes;
   }
 
@@ -50,10 +50,10 @@ absl::Status GattCharacteristicServer::NotifyChanged(
       return confirmed_;
     };
     {
-      absl::MutexLock lock(&confirmed_mutex_);
+      absl::MutexLock lock(confirmed_mutex_);
       confirmed_ = false;
     }
-    absl::ReaderMutexLock lock(&confirmed_mutex_, absl::Condition(&confirmed));
+    absl::ReaderMutexLock lock(confirmed_mutex_, absl::Condition(&confirmed));
   }
 
   try {
@@ -74,11 +74,11 @@ void GattCharacteristicServer::ReadValue(
     sdbus::Result<std::vector<uint8_t>> &&result,
     std::map<std::string, sdbus::Variant> options) {
   {
-    absl::ReaderMutexLock static_value_lock(&static_value_mutex_);
+    absl::ReaderMutexLock static_value_lock(static_value_mutex_);
     if (static_value_.has_value()) {
       result.returnResults(*static_value_);
 
-      absl::MutexLock cached_value_lock(&cached_value_mutex_);
+      absl::MutexLock cached_value_lock(cached_value_mutex_);
       cached_value_ = *static_value_;
       return;
     }
@@ -108,7 +108,7 @@ void GattCharacteristicServer::ReadValue(
   //         }
   //         result.returnResults(bytes);
   //
-  //         absl::MutexLock lock(&cached_value_mutex_);
+  //         absl::MutexLock lock(cached_value_mutex_);
   //         cached_value_ = bytes;
   //       } else if (absl::IsPermissionDenied(status)) {
   //         result.returnError(sdbus::Error("org.bluez.Error.NotPermitted",

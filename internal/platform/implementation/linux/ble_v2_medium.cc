@@ -108,7 +108,7 @@ BleV2Medium::BleV2Medium(BluetoothAdapter& adapter)
 
 void BleV2Medium::OnRegisterMonitorReply(std::optional<sdbus::Error> error) {
   {
-    absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+    absl::MutexLock lock(adv_monitor_manager_ready_mutex_);
     adv_monitor_manager_ready_ = !error.has_value() || !error->isValid();
     if (error.has_value() && error->isValid()) {
       adv_monitor_manager_error_name_ = error->getName();
@@ -134,7 +134,7 @@ bool BleV2Medium::WaitForAdvertisementMonitorManager() {
 
   adv_monitor_manager_ready_notification_.WaitForNotification();
 
-  absl::MutexLock lock(&adv_monitor_manager_ready_mutex_);
+  absl::MutexLock lock(adv_monitor_manager_ready_mutex_);
   if (adv_monitor_manager_ready_) {
     return true;
   }
@@ -171,7 +171,7 @@ bool BleV2Medium::StartAdvertising(
     return false;
   }
 
-  absl::MutexLock l(&advs_mutex_);
+  absl::MutexLock l(advs_mutex_);
   advs_.push_front(bluez::LEAdvertisement::CreateLEAdvertisement(
       *system_bus_, advertising_data, advertise_set_parameters));
   auto it = advs_.begin();
@@ -215,7 +215,7 @@ BleV2Medium::StartAdvertising(
   std::shared_ptr<AdvertisingCallback> shared_cb =
       std::make_shared<AdvertisingCallback>(std::move(callback));
 
-  absl::MutexLock lock(&advs_mutex_);
+  absl::MutexLock lock(advs_mutex_);
   advs_.push_front(bluez::LEAdvertisement::CreateLEAdvertisement(
       *system_bus_, advertising_data, advertise_set_parameters));
   auto adv_it = advs_.begin();
@@ -249,7 +249,7 @@ BleV2Medium::StartAdvertising(
   absl::AnyInvocable<absl::Status()> stop_adv = [&, adv_it]() {
     LOG(INFO) << __func__ << ": Unregistering advertisement object "
               << (*adv_it)->getObject().getObjectPath();
-    absl::MutexLock lock(&advs_mutex_);
+    absl::MutexLock lock(advs_mutex_);
     try {
       adv_manager_->UnregisterAdvertisementSync(
           (*adv_it)->getObject().getObjectPath());
@@ -267,7 +267,7 @@ BleV2Medium::StartAdvertising(
 
 bool BleV2Medium::StopAdvertising() {
   LOG(INFO) << __func__ << ": Stop advertising called";
-  absl::MutexLock l(&advs_mutex_);
+  absl::MutexLock l(advs_mutex_);
   try {
     for (auto& adv : advs_) {
       adv_manager_->UnregisterAdvertisementSync(
@@ -304,7 +304,7 @@ bool BleV2Medium::StartScanning(const Uuid& service_uuid,
     return false;
   }
 
-  absl::MutexLock lock(&active_adv_monitors_mutex_);
+  absl::MutexLock lock(active_adv_monitors_mutex_);
   if (active_adv_monitors_.count(service_uuid) == 1) {
     LOG(ERROR) << __func__ << ": an advertising session for service "
                << std::string{service_uuid} << " already exists";
@@ -377,7 +377,7 @@ bool BleV2Medium::StopScanning() {
     DBUS_LOG_METHOD_CALL_ERROR(&adapter, "StopDiscovery", e);
   }
 
-  absl::MutexLock lock(&active_adv_monitors_mutex_);
+  absl::MutexLock lock(active_adv_monitors_mutex_);
   auto monitor_it = active_adv_monitors_.find(*cur_monitored_service_uuid_);
   assert(monitor_it != active_adv_monitors_.end());
   {
@@ -403,7 +403,7 @@ BleV2Medium::StartScanning(const Uuid& service_uuid,
     return nullptr;
   }
 
-  absl::MutexLock lock(&active_adv_monitors_mutex_);
+  absl::MutexLock lock(active_adv_monitors_mutex_);
   if (active_adv_monitors_.count(service_uuid) == 1) {
     LOG(ERROR) << __func__ << ": Service " << std::string{service_uuid}
                << " is already being advertised";
@@ -446,7 +446,7 @@ BleV2Medium::StartScanning(const Uuid& service_uuid,
 
   return std::make_unique<ScanningSession>(
       ScanningSession{.stop_scanning = [this, service_uuid]() {
-        absl::MutexLock lock(&active_adv_monitors_mutex_);
+        absl::MutexLock lock(active_adv_monitors_mutex_);
         if (active_adv_monitors_.count(service_uuid) == 0) {
           LOG(ERROR) << __func__ << ": Advertising monitor for service "
                      << std::string{service_uuid} << " does not exist anymore";

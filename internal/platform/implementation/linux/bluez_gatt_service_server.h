@@ -60,7 +60,7 @@ class GattServiceServer final
   }
 
   ~GattServiceServer() {
-    absl::MutexLock lock(&characterstics_mutex_);
+    absl::MutexLock lock(characterstics_mutex_);
     for (auto &[_uuid, characteristic] : characteristics_) {
       LOG(INFO) << __func__ << ": Removing characteristic "
                            << characteristic->getObject().getObjectPath();

@@ -155,7 +155,7 @@ class MonitoredBluetoothDevice final
   void SetDiscoveryCallback(
       std::shared_ptr<api::BluetoothClassicMedium::DiscoveryCallback> &callback)
       ABSL_LOCKS_EXCLUDED(discovery_cb_mutex_) {
-    absl::MutexLock lock(&discovery_cb_mutex_);
+    absl::MutexLock lock(discovery_cb_mutex_);
     discovery_cb_ = callback;
   };
 

@@ -19,7 +19,7 @@ class LinuxFastInitiationManagerTestPeer {
   static void BeginScan(LinuxFastInitiationManager& manager,
                         std::function<void()> discovered,
                         std::function<void()> not_discovered) {
-    absl::MutexLock lock(&manager.mutex_);
+    absl::MutexLock lock(manager.mutex_);
     manager.is_scanning_ = true;
     manager.scan_generation_ = 1;
     manager.devices_discovered_callback_ = std::move(discovered);

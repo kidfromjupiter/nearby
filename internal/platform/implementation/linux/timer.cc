@@ -57,7 +57,7 @@ bool Timer::Create(int delay, int interval,
     return false;
   }
 
-  absl::MutexLock l(&mutex_);
+  absl::MutexLock l(mutex_);
   if (timerid_.has_value()) {
     if (timer_delete(*timerid_) < 0) {
       if (errno != EINVAL) {
@@ -104,7 +104,7 @@ bool Timer::Create(int delay, int interval,
 }
 
 bool Timer::Stop() {
-  absl::MutexLock l(&mutex_);
+  absl::MutexLock l(mutex_);
   if (!timerid_.has_value()) {
     return true;
   }

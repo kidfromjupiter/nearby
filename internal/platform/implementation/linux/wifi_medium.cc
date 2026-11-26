@@ -102,7 +102,7 @@ void NetworkManagerWifiMedium::onPropertiesChanged(
   }
 
   if (changedProperties.count(sdbus::PropertyName("LastScan")) == 1) {
-    absl::MutexLock l(&last_scan_lock_);
+    absl::MutexLock l(last_scan_lock_);
     last_scan_ = changedProperties.at(sdbus::PropertyName("LastScan")).get<int64_t>();
   }
 }
@@ -111,7 +111,7 @@ void NetworkManagerWifiMedium::onPropertiesChanged(
 std::shared_ptr<NetworkManagerAccessPoint>
 NetworkManagerWifiMedium::SearchBySSIDNoScan(
     std::vector<std::uint8_t> &ssid_bytes) {
-  absl::ReaderMutexLock l(&known_access_points_lock_);
+  absl::ReaderMutexLock l(known_access_points_lock_);
   for (auto &[object_path, ap] : known_access_points_) {
     try {
       if (ap->Ssid() == ssid_bytes) {
@@ -141,7 +141,7 @@ NetworkManagerWifiMedium::SearchBySSID(absl::string_view ssid,
 
   std::int64_t cur_last_scan;
   {
-    absl::ReaderMutexLock l(&last_scan_lock_);
+    absl::ReaderMutexLock l(last_scan_lock_);
     cur_last_scan = last_scan_;
   }
 

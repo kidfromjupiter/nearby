@@ -93,7 +93,7 @@ absl::optional<api::ble::GattCharacteristic> GattClient::GetCharacteristic(
     }
   }
 
-  absl::MutexLock lock(&characteristics_mutex_);
+  absl::MutexLock lock(characteristics_mutex_);
   characteristics_.emplace(chr, std::move(chr_proxy));
 
   LOG(INFO) << __func__ << ": Cached characteristic for service "
@@ -106,7 +106,7 @@ absl::optional<std::string> GattClient::ReadCharacteristic(
     const api::ble::GattCharacteristic &characteristic) {
   LOG(INFO) << __func__ << ": Reading characteristic '"
             << absl::Substitute("$0", characteristic) << "'";
-  absl::ReaderMutexLock lock(&characteristics_mutex_);
+  absl::ReaderMutexLock lock(characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
                        << absl::Substitute("$0", characteristic) << "'";
@@ -141,7 +141,7 @@ bool GattClient::WriteCharacteristic(
             << (type == api::ble::GattClient::WriteType::kWithResponse
                     ? "with_response"
                     : "without_response");
-  absl::ReaderMutexLock lock(&characteristics_mutex_);
+  absl::ReaderMutexLock lock(characteristics_mutex_);
   if (characteristics_.count(characteristic) == 0) {
     LOG(ERROR) << __func__ << ": Unknown characteristic '"
                        << absl::Substitute("$0", characteristic) << "'";
@@ -176,7 +176,7 @@ void GattClient::Disconnect() {
   LOG(INFO) << __func__
             << ": Disconnecting GATT client for peripheral "
             << peripheral_object_path_;
-  absl::MutexLock lock(&disconnected_callback_mutex_);
+  absl::MutexLock lock(disconnected_callback_mutex_);
   if (!discovery_cancel_.Cancelled()) {
     discovery_cancel_.Cancel();
     if (*disconnected_callback_it_ != nullptr) (*disconnected_callback_it_)();
@@ -215,7 +215,7 @@ bool BluezGattDiscovery::InitializeKnownServices() {
     return false;
   }
 
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   auto chr_it = std::find_if(
       objects.cbegin(), objects.cend(),
       [](std::pair<sdbus::ObjectPath,
@@ -252,7 +252,7 @@ bool BluezGattDiscovery::InitializeKnownServices() {
 BluezGattDiscovery::CallbackIter BluezGattDiscovery::AddPeripheralConnection(
     const sdbus::ObjectPath &device_object_path,
     absl::AnyInvocable<void()> disconnected_callback_) {
-  absl::MutexLock lock(&peripheral_disconnected_callbacks_mutex_);
+  absl::MutexLock lock(peripheral_disconnected_callbacks_mutex_);
   if (peripheral_disconnected_callbacks_.count(device_object_path) == 0)
     peripheral_disconnected_callbacks_.emplace(
         device_object_path, std::list<absl::AnyInvocable<void()>>{});
@@ -264,7 +264,7 @@ BluezGattDiscovery::CallbackIter BluezGattDiscovery::AddPeripheralConnection(
 void BluezGattDiscovery::RemovePeripheralConnection(
     const sdbus::ObjectPath &device_object_path,
     BluezGattDiscovery::CallbackIter cb) {
-  absl::MutexLock lock(&peripheral_disconnected_callbacks_mutex_);
+  absl::MutexLock lock(peripheral_disconnected_callbacks_mutex_);
   auto it = peripheral_disconnected_callbacks_.find(device_object_path);
   if (it != peripheral_disconnected_callbacks_.end()) {
     it->second.erase(cb);
@@ -294,7 +294,7 @@ bool BluezGattDiscovery::DiscoverServiceAndCharacteristics(
                });
   };
 
-  absl::ReaderMutexLock lock(&mutex_, absl::Condition(&discovered));
+  absl::ReaderMutexLock lock(mutex_, absl::Condition(&discovered));
 
   LOG(INFO) << __func__ << ": Finished discovering gatt services and characteristics";
   return !cancel.Cancelled();
@@ -307,7 +307,7 @@ BluezGattDiscovery::GetCharacteristic(
   auto key =
       std::make_tuple(service_uuid, characteristic_uuid, device_object_path);
 
-  absl::ReaderMutexLock lock(&mutex_);
+  absl::ReaderMutexLock lock(mutex_);
   auto path_it = discovered_characteristics_.find(key);
   if (path_it == discovered_characteristics_.end()) {
     LOG(ERROR) << __func__ << ": No characteristic known for device "
@@ -330,7 +330,7 @@ BluezGattDiscovery::GetSubscribedCharacteristic(
   auto key =
       std::make_tuple(service_uuid, characteristic_uuid, device_object_path);
 
-  absl::ReaderMutexLock lock(&mutex_);
+  absl::ReaderMutexLock lock(mutex_);
   auto path_it = discovered_characteristics_.find(key);
   if (path_it == discovered_characteristics_.end()) {
     LOG(ERROR) << __func__ << ": No characteristic known for device "
@@ -415,7 +415,7 @@ void BluezGattDiscovery::onInterfacesAdded(
   const auto &properties = interfacesAndProperties.at(
       sdbus::InterfaceName(org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME));
 
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   auto maybe_props = characteristicProperties(objectPath, properties);
   if (!maybe_props.has_value()) return;
   auto [service_uuid, chr_uuid, device_path] = *maybe_props;
@@ -435,7 +435,7 @@ void BluezGattDiscovery::onInterfacesRemoved(
   auto service_it =
       std::find(begin, end, org::bluez::GattService1_proxy::INTERFACE_NAME);
   if (service_it != end) {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     cached_services_.erase(objectPath);
     return;
   }
@@ -443,7 +443,7 @@ void BluezGattDiscovery::onInterfacesRemoved(
   auto chr_it = std::find(
       begin, end, org::bluez::GattCharacteristic1_proxy::INTERFACE_NAME);
   if (chr_it != end) {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     {
     auto it = characteristics_properties_.find(objectPath);
       if (it == characteristics_properties_.end()) {

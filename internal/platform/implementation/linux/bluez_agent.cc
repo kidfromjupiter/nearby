@@ -61,7 +61,7 @@ bool AgentManager::AgentRegistered(absl::string_view agent_object_path) {
 
 bool AgentManager::Register(std::optional<absl::string_view> capability,
                             const sdbus::ObjectPath& agent_object_path) {
-  absl::MutexLock l(&registered_agents_mutex_);
+  absl::MutexLock l(registered_agents_mutex_);
 
   const std::string agent_path_str = std::string(agent_object_path);
 

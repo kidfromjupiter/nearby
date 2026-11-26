@@ -34,25 +34,25 @@ namespace linux {
 void CurrentUserSession::RegisterScreenLockedListener(
     absl::string_view listener_name,
     std::function<void(api::DeviceInfo::ScreenStatus)> callback) {
-  absl::MutexLock l(&screen_lock_listeners_mutex_);
+  absl::MutexLock l(screen_lock_listeners_mutex_);
   screen_lock_listeners_[listener_name] = std::move(callback);
 }
 
 void CurrentUserSession::UnregisterScreenLockedListener(
     absl::string_view listener_name) {
-  absl::MutexLock l(&screen_lock_listeners_mutex_);
+  absl::MutexLock l(screen_lock_listeners_mutex_);
   screen_lock_listeners_.erase(listener_name);
 }
 
 void CurrentUserSession::onLock() {
-  absl::ReaderMutexLock l(&screen_lock_listeners_mutex_);
+  absl::ReaderMutexLock l(screen_lock_listeners_mutex_);
   for (auto &[_, callback] : screen_lock_listeners_) {
     callback(api::DeviceInfo::ScreenStatus::kLocked);
   }
 }
 
 void CurrentUserSession::onUnlock() {
-  absl::ReaderMutexLock l(&screen_lock_listeners_mutex_);
+  absl::ReaderMutexLock l(screen_lock_listeners_mutex_);
   for (auto &[_, callback] : screen_lock_listeners_) {
     callback(api::DeviceInfo::ScreenStatus::kUnlocked);
   }

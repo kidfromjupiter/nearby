@@ -38,19 +38,19 @@ class Device : public sdbus::ProxyInterfaces<org::bluez::Device1_proxy> {
   void SetPairReplyCallback(
       absl::AnyInvocable<void(std::optional<sdbus::Error>)> cb)
       ABSL_LOCKS_EXCLUDED(pair_callback_lock_) {
-    absl::MutexLock l(&pair_callback_lock_);
+    absl::MutexLock l(pair_callback_lock_);
     on_pair_reply_cb_ = std::move(cb);
   }
 
   void ResetPairReplyCallback() ABSL_LOCKS_EXCLUDED(pair_callback_lock_) {
-    absl::MutexLock l(&pair_callback_lock_);
+    absl::MutexLock l(pair_callback_lock_);
     on_pair_reply_cb_ = nullptr;
   }
 
  protected:
   void onPairReply(std::optional<sdbus::Error> error) override
       ABSL_LOCKS_EXCLUDED(pair_callback_lock_) {
-    absl::ReaderMutexLock l(&pair_callback_lock_);
+    absl::ReaderMutexLock l(pair_callback_lock_);
     if (on_pair_reply_cb_ != nullptr) on_pair_reply_cb_(std::move(error));
   };
 

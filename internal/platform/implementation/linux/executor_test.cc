@@ -293,7 +293,7 @@ TEST(ExecutorTests,
     executor->Execute([&]() mutable {
       std::thread::id id = std::this_thread::get_id();
       {
-        absl::MutexLock lock(&mutex);
+        absl::MutexLock lock(mutex);
         threadIds.push_back(id);
       }
 

@@ -42,7 +42,7 @@ std::shared_ptr<BluetoothDevices> GetSharedBluetoothDevices(
     std::shared_ptr<sdbus::IConnection> system_bus,
     const sdbus::ObjectPath& adapter_object_path) {
   const std::string key = adapter_object_path;
-  absl::MutexLock lock(&g_shared_devices_lock);
+  absl::MutexLock lock(g_shared_devices_lock);
   auto it = g_shared_devices.find(key);
   if (it != g_shared_devices.end()) {
     if (auto existing = it->second.lock()) {
@@ -57,7 +57,7 @@ std::shared_ptr<BluetoothDevices> GetSharedBluetoothDevices(
 
 std::shared_ptr<BluetoothDevice> BluetoothDevices::get_device_by_path(
     const sdbus::ObjectPath &device_object_path) {
-  absl::ReaderMutexLock l(&devices_by_path_lock_);
+  absl::ReaderMutexLock l(devices_by_path_lock_);
 
   if (devices_by_path_.count(device_object_path) == 0) {
     return nullptr;
@@ -95,14 +95,14 @@ std::shared_ptr<BluetoothDevice> BluetoothDevices::get_device_by_address(
 
 void BluetoothDevices::remove_device_by_path(
     const sdbus::ObjectPath &device_object_path) {
-  absl::MutexLock l(&devices_by_path_lock_);
+  absl::MutexLock l(devices_by_path_lock_);
 
   devices_by_path_.erase(device_object_path);
 }
 
 void BluetoothDevices::mark_peripheral_lost(
     const sdbus::ObjectPath &device_object_path) {
-  absl::ReaderMutexLock lock(&devices_by_path_lock_);
+  absl::ReaderMutexLock lock(devices_by_path_lock_);
   if (devices_by_path_.count(device_object_path) == 0) {
     LOG(ERROR) << __func__ << ": Device " << device_object_path
                        << " doesn't exist";
@@ -113,7 +113,7 @@ void BluetoothDevices::mark_peripheral_lost(
 
 void BluetoothDevices::cleanup_lost_peripherals() {
   auto now = std::chrono::steady_clock::now();
-  absl::MutexLock lock(&devices_by_path_lock_);
+  absl::MutexLock lock(devices_by_path_lock_);
   if ((now - last_cleanup_) < kLostPeripheralsCleanupMinFreq) {
     return;
   }
@@ -128,7 +128,7 @@ void BluetoothDevices::cleanup_lost_peripherals() {
 
 std::shared_ptr<MonitoredBluetoothDevice> BluetoothDevices::add_new_device(
     sdbus::ObjectPath device_object_path) {
-  absl::MutexLock l(&devices_by_path_lock_);
+  absl::MutexLock l(devices_by_path_lock_);
   auto [device_it, inserted] = devices_by_path_.emplace(
       std::string(device_object_path),
       std::make_shared<MonitoredBluetoothDevice>(

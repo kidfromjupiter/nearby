@@ -46,14 +46,14 @@ BluetoothDevice::BluetoothDevice(std::shared_ptr<bluez::Device> device)
 std::string BluetoothDevice::GetName() const {
   auto device = device_;
   if (device == nullptr) {
-    absl::ReaderMutexLock l(&properties_mutex_);
+    absl::ReaderMutexLock l(properties_mutex_);
     return last_known_name_;
   }
 
   try {
     std::string alias = device->Alias();
     {
-      absl::MutexLock l(&properties_mutex_);
+      absl::MutexLock l(properties_mutex_);
       last_known_name_ = alias;
     }
     return alias;
@@ -66,7 +66,7 @@ std::string BluetoothDevice::GetName() const {
 MacAddress BluetoothDevice::GetMacAddress() const {
   auto device = device_;
   if (device == nullptr) {
-    absl::ReaderMutexLock l(&properties_mutex_);
+    absl::ReaderMutexLock l(properties_mutex_);
     MacAddress addr;
     MacAddress::FromString("00:00:00:00:00:00", addr);
     return addr;
@@ -75,7 +75,7 @@ MacAddress BluetoothDevice::GetMacAddress() const {
   try {
     std::string addr = device->Address();
     {
-      absl::MutexLock l(&properties_mutex_);
+      absl::MutexLock l(properties_mutex_);
       MacAddress::FromString(addr, last_known_address_);
     }
     return last_known_address_;

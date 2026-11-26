@@ -46,13 +46,13 @@ class LEBearerClient
       absl::AnyInvocable<void(const std::string& reason,
                               const std::string& message)> cb)
       ABSL_LOCKS_EXCLUDED(disconnect_callback_lock_) {
-    absl::MutexLock l(&disconnect_callback_lock_);
+    absl::MutexLock l(disconnect_callback_lock_);
     on_disconnected_cb_ = std::move(cb);
   }
 
   void ResetDisconnectedCallback()
       ABSL_LOCKS_EXCLUDED(disconnect_callback_lock_) {
-    absl::MutexLock l(&disconnect_callback_lock_);
+    absl::MutexLock l(disconnect_callback_lock_);
     on_disconnected_cb_ = nullptr;
   }
 
@@ -60,7 +60,7 @@ class LEBearerClient
   void onDisconnected(const std::string& reason,
                       const std::string& message) override
       ABSL_LOCKS_EXCLUDED(disconnect_callback_lock_) {
-    absl::ReaderMutexLock l(&disconnect_callback_lock_);
+    absl::ReaderMutexLock l(disconnect_callback_lock_);
     if (on_disconnected_cb_ != nullptr) {
       on_disconnected_cb_(reason, message);
     }

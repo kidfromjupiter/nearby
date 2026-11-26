@@ -82,7 +82,7 @@ void Profile::NewConnection(
           << " obj=" << getObject().getObjectPath()
           << " path=" << device_object_path;
   {
-    absl::MutexLock l(&connections_lock_);
+    absl::MutexLock l(connections_lock_);
     connections_[mac_addr].push_back(std::pair(fd, props));
   }
 }
@@ -102,7 +102,7 @@ void Profile::RequestDisconnection(
   LOG(INFO) << __func__ << ": Disconnection requested for device "
                        << device_object_path;
 
-  absl::MutexLock l(&connections_lock_);
+  absl::MutexLock l(connections_lock_);
   if (connections_.count(mac_addr) == 0) {
     LOG(ERROR)
         << __func__
@@ -114,7 +114,7 @@ void Profile::RequestDisconnection(
 
 bool ProfileManager::Register(std::optional<absl::string_view> name,
                               absl::string_view service_uuid) {
-  absl::MutexLock l(&registered_service_uuids_mutex_);
+  absl::MutexLock l(registered_service_uuids_mutex_);
   if (registered_services_.count(std::string(service_uuid)) == 1) {
     LOG(WARNING) << __func__ << ": Trying to register profile "
                          << service_uuid << " which was already registered.";
@@ -152,7 +152,7 @@ bool ProfileManager::Register(std::optional<absl::string_view> name,
 }
 
 void ProfileManager::Unregister(absl::string_view service_uuid) {
-  absl::MutexLock l(&registered_service_uuids_mutex_);
+  absl::MutexLock l(registered_service_uuids_mutex_);
   if (registered_services_.count(std::string(service_uuid)) == 0) {
     LOG(WARNING)
         << __func__
@@ -180,7 +180,7 @@ std::optional<sdbus::UnixFd> ProfileManager::GetServiceRecordFD(
     CancellationFlag *cancellation_flag) {
   std::shared_ptr<Profile> profile;
   {
-    absl::ReaderMutexLock lock(&registered_service_uuids_mutex_);
+    absl::ReaderMutexLock lock(registered_service_uuids_mutex_);
     if (registered_services_.count(std::string(service_uuid)) == 0) {
       LOG(ERROR) << __func__ << ": Service " << service_uuid
                          << " is not registered";
@@ -218,7 +218,7 @@ std::optional<sdbus::UnixFd> ProfileManager::GetServiceRecordFD(
   // BUG: Race condition. Hangs here
   LOG(INFO) << "WAIT key(GetMacAddress)=" << mac_addr.ToString();
   LOG(INFO) << "connections_ size" << profile -> connections_.size();
-  absl::MutexLock connections_lock(&profile->connections_lock_,
+  absl::MutexLock connections_lock(profile->connections_lock_,
                                    absl::Condition(&cond));
   LOG(INFO) << "WAIT_ACQUIRED "
             << " map_size=" << profile->connections_.size();
@@ -253,7 +253,7 @@ ProfileManager::GetServiceRecordFD(absl::string_view service_uuid,
   std::shared_ptr<Profile> profile;
 
   {
-    absl::ReaderMutexLock lock(&registered_service_uuids_mutex_);
+    absl::ReaderMutexLock lock(registered_service_uuids_mutex_);
     if (registered_services_.count(std::string(service_uuid)) == 0) {
       return std::nullopt;
     }
@@ -336,12 +336,12 @@ ProfileManager::GetServiceRecordFD(absl::string_view service_uuid,
 }
   void ProfileManager::MarkPendingOutgoing(absl::string_view service_uuid,
                                                 const MacAddress& mac_address) {
-  absl::ReaderMutexLock lock(&registered_service_uuids_mutex_);
+  absl::ReaderMutexLock lock(registered_service_uuids_mutex_);
   if (registered_services_.count(std::string(service_uuid)) == 0) {
     return;
   }
   auto profile = registered_services_[std::string(service_uuid)];
-  absl::MutexLock l(&profile->connections_lock_);
+  absl::MutexLock l(profile->connections_lock_);
   profile->pending_outgoing_.insert(mac_address);
   LOG(INFO) << __func__ << ": Marked " << mac_address.ToString()
             << " as pending outgoing for " << service_uuid;
@@ -349,12 +349,12 @@ ProfileManager::GetServiceRecordFD(absl::string_view service_uuid,
 
   void ProfileManager::ClearPendingOutgoing(absl::string_view service_uuid,
                                             const MacAddress& mac_address) {
-  absl::ReaderMutexLock lock(&registered_service_uuids_mutex_);
+  absl::ReaderMutexLock lock(registered_service_uuids_mutex_);
   if (registered_services_.count(std::string(service_uuid)) == 0) {
     return;
   }
   auto profile = registered_services_[std::string(service_uuid)];
-  absl::MutexLock l(&profile->connections_lock_);
+  absl::MutexLock l(profile->connections_lock_);
   profile->pending_outgoing_.erase(mac_address);
   LOG(INFO) << __func__ << ": Cleared " << mac_address.ToString()
             << " as pending outgoing for " << service_uuid;

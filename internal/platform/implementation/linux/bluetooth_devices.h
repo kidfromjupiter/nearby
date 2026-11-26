@@ -62,7 +62,7 @@ class BluetoothDevices final {
 
     // DEBUG
     void dump_devices() ABSL_LOCKS_EXCLUDED(devices_by_path_lock_) {
-      absl::ReaderMutexLock lock(&devices_by_path_lock_);
+      absl::ReaderMutexLock lock(devices_by_path_lock_);
       LOG(INFO) << "Dumping BluetoothDevices:";
       for (const auto& [path, device] : devices_by_path_) {
         LOG(INFO) << " - Device path: " << path << " , Name: " << device->GetName();

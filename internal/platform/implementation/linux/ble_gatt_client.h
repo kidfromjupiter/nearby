@@ -133,7 +133,7 @@ class GattClient : public api::ble::GattClient {
     LOG(INFO) << __func__
               << ": Destroying GATT client for peripheral "
               << peripheral_object_path_;
-    absl::MutexLock lock(&disconnected_callback_mutex_);
+    absl::MutexLock lock(disconnected_callback_mutex_);
     if (!discovery_cancel_.Cancelled()) {
       discovery_cancel_.Cancel();
       gatt_discovery_->RemovePeripheralConnection(peripheral_object_path_,

@@ -87,7 +87,7 @@ class GattCharacteristicServer final
   void StartNotify() override;
   void StopNotify() override;
   void Confirm() override ABSL_LOCKS_EXCLUDED(confirmed_mutex_) {
-    absl::MutexLock lock(&confirmed_mutex_);
+    absl::MutexLock lock(confirmed_mutex_);
     confirmed_ = true;
   };
 
@@ -98,7 +98,7 @@ class GattCharacteristicServer final
   std::vector<std::string> Flags() override;
   std::vector<uint8_t> Value() override
       ABSL_LOCKS_EXCLUDED(cached_value_mutex_) {
-    absl::ReaderMutexLock lock(&cached_value_mutex_);
+    absl::ReaderMutexLock lock(cached_value_mutex_);
     return cached_value_;
   }
 

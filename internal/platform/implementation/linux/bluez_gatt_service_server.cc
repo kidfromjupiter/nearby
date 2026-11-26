@@ -26,7 +26,7 @@ bool GattServiceServer::AddCharacteristic(
     const Uuid &service_uuid, const Uuid &characteristic_uuid,
     api::ble::GattCharacteristic::Permission permission,
     api::ble::GattCharacteristic::Property property) {
-  absl::MutexLock lock(&characterstics_mutex_);
+  absl::MutexLock lock(characterstics_mutex_);
   api::ble::GattCharacteristic characteristic{
       characteristic_uuid, service_uuid, permission, property};
   auto count = characteristics_.size();
@@ -52,7 +52,7 @@ bool GattServiceServer::AddCharacteristic(
 
 std::shared_ptr<GattCharacteristicServer> GattServiceServer::GetCharacteristic(
     const Uuid &uuid) {
-  absl::ReaderMutexLock lock(&characterstics_mutex_);
+  absl::ReaderMutexLock lock(characterstics_mutex_);
   if (characteristics_.count(uuid) == 0) {
     return nullptr;
   }
