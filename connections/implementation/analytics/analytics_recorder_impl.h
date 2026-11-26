@@ -38,6 +38,8 @@ class AnalyticsRecorderImpl : public AnalyticsRecorder {
       AdvertisingMetadataParams* advertising_metadata_params) override {}
   void OnStopAdvertising() override {}
   int GetNextAdvertisingUpdateIndex() override { return 0; }
+  void UpdateAdvertisingPowerLevel(
+      location::nearby::proto::connections::PowerLevel power_level) override {};
   void OnStartedIncomingConnectionListening(
       connections::Strategy strategy) override {}
   void OnStoppedIncomingConnectionListening() override {}
@@ -116,7 +118,7 @@ class AnalyticsRecorderImpl : public AnalyticsRecorder {
       location::nearby::proto::connections::Medium to_medium,
       location::nearby::proto::connections::ConnectionAttemptDirection
           direction,
-      const std::string& connection_token) override {}
+      const std::string& connection_token, bool is_role_switched) override {}
   void UpdateBwUpgradeNetworkInfo(const std::string& endpoint_id,
                                   int num_interfaces,
                                   int num_ipv6_only_interfaces) override {}

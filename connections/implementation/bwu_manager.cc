@@ -260,21 +260,6 @@ void BwuManager::InitiateBwuForEndpoint(ClientProxy* client,
                 client, endpoint_id,
                 client->GetUpgradeMediums(endpoint_id).GetMediums(true))
           : new_medium;
-  if (proposed_medium == Medium::WIFI_DIRECT &&
-      mediums_->GetWifiDirect().IsGCONly()) {
-    std::vector<Medium> fallback_mediums =
-        client->GetUpgradeMediums(endpoint_id).GetMediums(true);
-    fallback_mediums.erase(
-        std::remove(fallback_mediums.begin(), fallback_mediums.end(),
-                    Medium::WIFI_DIRECT),
-        fallback_mediums.end());
-    proposed_medium = ChooseBestUpgradeMedium(endpoint_id, fallback_mediums);
-    LOG(INFO) << "Wi-Fi Direct is GC-only; selected fallback medium "
-              << location::nearby::proto::connections::Medium_Name(
-                     proposed_medium)
-              << " for endpoint " << endpoint_id;
-  }
-
   RunOnBwuManagerThread("bwu-init", [this, client, endpoint_id, proposed_medium,
                                      allow_role_switch]() {
     LOG(INFO) << "InitiateBwuForEndpoint for endpoint " << endpoint_id
