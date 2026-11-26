@@ -22,10 +22,8 @@ namespace {
 TEST(FakeContext, TestAccessMockContext) {
   FakeContext context;
   EXPECT_NE(context.GetClock(), nullptr);
-  EXPECT_NE(context.CreateTimer(), nullptr);
   EXPECT_NE(context.GetConnectivityManager(), nullptr);
-  EXPECT_NE(context.CreateSequencedTaskRunner(), nullptr);
-  EXPECT_NE(context.CreateConcurrentTaskRunner(5), nullptr);
+  EXPECT_NE(context.CreateSingleThreadExecutor(), nullptr);
 }
 
 }  // namespace

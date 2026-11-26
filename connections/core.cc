@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "connections/advertising_options.h"
@@ -47,7 +48,6 @@
 #include "connections/v3/params.h"
 #include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/logging.h"
 
@@ -72,16 +72,13 @@ void CheckServiceId(absl::string_view service_id) {
 Core::Core(ServiceControllerRouter* router) : router_(router) {}
 
 Core::~Core() {
-  CountDownLatch latch(1);
-  router_->StopAllEndpoints(&client_, [&latch](Status) { latch.CountDown(); });
-  if (!latch.Await(kWaitForDisconnect).result()) {
+  absl::Notification notification;
+  router_->StopAllEndpoints(
+      &client_, [&notification](Status) { notification.Notify(); });
+  if (!notification.WaitForNotificationWithTimeout(kWaitForDisconnect)) {
     LOG(FATAL) << "Unable to shutdown";
   }
 }
-
-Core::Core(Core&&) = default;
-
-Core& Core::operator=(Core&&) = default;
 
 void Core::StartAdvertising(absl::string_view service_id,
                             AdvertisingOptions advertising_options,
@@ -331,22 +328,21 @@ void Core::StartDiscoveryV3(absl::string_view service_id,
       .endpoint_found_cb =
           [endpoint_found_cb = std::move(listener.endpoint_found_cb)](
               const std::string& endpoint_id, const ByteArray& endpoint_info,
-              const std::string& service_id) mutable {
+              const std::string& service_id) {
             auto remote_device = v3::ConnectionsDevice(
                 endpoint_id, endpoint_info.AsStringView(), {});
             endpoint_found_cb(remote_device, service_id);
           },
       .endpoint_lost_cb =
           [endpoint_lost_cb = std::move(listener.endpoint_lost_cb)](
-              const std::string& endpoint_id) mutable {
+              const std::string& endpoint_id) {
             auto remote_device = v3::ConnectionsDevice(endpoint_id, "", {});
             endpoint_lost_cb(remote_device);
           },
       .endpoint_distance_changed_cb =
           [endpoint_distance_changed_cb =
                std::move(listener.endpoint_distance_changed_cb)](
-              const std::string& endpoint_id,
-              DistanceInfo distance_info) mutable {
+              const std::string& endpoint_id, DistanceInfo distance_info) {
             auto remote = v3::ConnectionsDevice(endpoint_id, "", {});
             endpoint_distance_changed_cb(remote, distance_info);
           },

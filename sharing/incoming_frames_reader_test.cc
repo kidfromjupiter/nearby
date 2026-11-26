@@ -16,16 +16,20 @@
 
 #include <stdint.h>
 
+#include <array>
 #include <memory>
 #include <optional>
+#include <thread>  // NOLINT: remove after adding thread ID to TaskRunner.
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
-#include "internal/test/fake_task_runner.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "sharing/internal/public/logging.h"
 #include "sharing/nearby_connection_impl.h"
 #include "sharing/proto/wire_format.pb.h"
@@ -106,8 +110,16 @@ class IncomingFramesReaderTest : public testing::Test {
   ~IncomingFramesReaderTest() override = default;
 
   void SetUp() override {
+    fake_task_runner_.Execute(
+        [this]() { service_thread_id_ = std::this_thread::get_id(); });
+    Sync();
+    ASSERT_NE(service_thread_id_, std::this_thread::get_id());
     frames_reader_ = std::make_shared<IncomingFramesReader>(
         fake_task_runner_, nearby_connection_.get());
+  }
+
+  bool IsOnServiceThread() const {
+    return std::this_thread::get_id() == service_thread_id_;
   }
 
   NearbyConnectionImpl& connection() {
@@ -126,7 +138,8 @@ class IncomingFramesReaderTest : public testing::Test {
 
  private:
   FakeClock fake_clock_;
-  FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
+  TestSingleThreadExecutor fake_task_runner_{&fake_clock_};
+  std::thread::id service_thread_id_;
   FakeDeviceInfo fake_device_info_;
   std::unique_ptr<NearbyConnectionImpl> nearby_connection_;
   std::shared_ptr<IncomingFramesReader> frames_reader_ = nullptr;
@@ -135,8 +148,24 @@ class IncomingFramesReaderTest : public testing::Test {
 TEST_F(IncomingFramesReaderTest, ReadTimedOut) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_TRUE(is_timeout);
+        EXPECT_EQ(frame, std::nullopt);
+        notification.Notify();
+      },
+      kTimeout);
+  Sync();
+  FastForward(kTimeout);
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+}
+
+TEST_F(IncomingFramesReaderTest, ReadAnyFrameTimedOut) {
+  absl::Notification notification;
+  frames_reader()->ReadFrame(
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_TRUE(is_timeout);
         EXPECT_EQ(frame, std::nullopt);
         notification.Notify();
@@ -165,6 +194,7 @@ TEST_F(IncomingFramesReaderTest, ReadNonV1FrameSkipped) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
         notification.Notify();
@@ -182,6 +212,7 @@ TEST_F(IncomingFramesReaderTest, ReadAnyFrameSuccessful) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
         notification.Notify();
@@ -198,8 +229,9 @@ TEST_F(IncomingFramesReaderTest, ReadSuccessful) {
 
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
         notification.Notify();
@@ -220,8 +252,9 @@ TEST_F(IncomingFramesReaderTest, ReadSuccessful_JumbledFramesOrdering) {
 
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
         notification.Notify();
@@ -245,8 +278,9 @@ TEST_F(IncomingFramesReaderTest, JumbledFramesOrdering_ReadFromCache) {
 
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
         notification.Notify();
@@ -258,6 +292,7 @@ TEST_F(IncomingFramesReaderTest, JumbledFramesOrdering_ReadFromCache) {
   absl::Notification cancel_notification;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         ASSERT_NE(frame, std::nullopt);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
@@ -268,6 +303,7 @@ TEST_F(IncomingFramesReaderTest, JumbledFramesOrdering_ReadFromCache) {
   absl::Notification response_notification;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         ASSERT_NE(frame, std::nullopt);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::RESPONSE);
@@ -277,11 +313,71 @@ TEST_F(IncomingFramesReaderTest, JumbledFramesOrdering_ReadFromCache) {
   EXPECT_TRUE(response_notification.WaitForNotificationWithTimeout(kTimeout));
 }
 
+TEST_F(IncomingFramesReaderTest, ReadSpecificFrameFromCacheCancelsTimeout) {
+  std::optional<std::vector<uint8_t>> cancel_frame = GetCancelFrame();
+  ASSERT_TRUE(cancel_frame.has_value());
+  connection().WriteMessage(*cancel_frame);
+  std::optional<std::vector<uint8_t>> introduction_frame =
+      GetIntroductionFrame();
+  ASSERT_TRUE(introduction_frame.has_value());
+  connection().WriteMessage(*introduction_frame);
+
+  absl::Notification intro_notification;
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::INTRODUCTION},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_NE(frame, std::nullopt);
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
+        intro_notification.Notify();
+      },
+      kTimeout);
+  EXPECT_TRUE(intro_notification.WaitForNotificationWithTimeout(kTimeout));
+
+  // Read cached CANCEL frame with a non-zero timeout.
+  absl::Notification cached_notification;
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::CANCEL},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_NE(frame, std::nullopt);
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
+        cached_notification.Notify();
+      },
+      kTimeout);
+  EXPECT_TRUE(cached_notification.WaitForNotificationWithTimeout(kTimeout));
+
+  // Subsequent read with ZeroDuration must not be timed out by the finished
+  // cached read's timer.
+  absl::Notification next_notification;
+  frames_reader()->ReadFrame(
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_NE(frame, std::nullopt);
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::RESPONSE);
+        next_notification.Notify();
+      },
+      absl::ZeroDuration());
+  Sync();
+  FastForward(kTimeout);
+  Sync();
+  EXPECT_FALSE(next_notification.HasBeenNotified());
+
+  std::optional<std::vector<uint8_t>> response_frame = GetResponseFrame();
+  ASSERT_TRUE(response_frame.has_value());
+  connection().WriteMessage(*response_frame);
+  EXPECT_TRUE(next_notification.WaitForNotificationWithTimeout(kTimeout));
+}
+
 TEST_F(IncomingFramesReaderTest, ReadAfterConnectionClosed) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame, std::nullopt);
         notification.Notify();
@@ -292,21 +388,31 @@ TEST_F(IncomingFramesReaderTest, ReadAfterConnectionClosed) {
   EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
 }
 
-TEST_F(IncomingFramesReaderTest, ReadTwoFramesWithTimeoutSuccessfully) {
+TEST_F(IncomingFramesReaderTest, ReadAnyFrameAfterConnectionClosed) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
-        EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
-      },
-      kTimeout);
-  frames_reader()->ReadFrame(
-      service::proto::V1Frame::CANCEL,
-      [&](bool is_timeout, std::optional<V1Frame> frame) {
-        EXPECT_FALSE(is_timeout);
-        EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
+        EXPECT_EQ(frame, std::nullopt);
         notification.Notify();
+      },
+      absl::ZeroDuration());
+  Sync();
+  CloseConnection();
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+}
+
+TEST_F(IncomingFramesReaderTest, ReadTwoFramesWithTimeoutSuccessfully) {
+  absl::Notification first_notification;
+  std::optional<V1Frame> first_frame;
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::INTRODUCTION},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        first_frame = std::move(frame);
+        first_notification.Notify();
       },
       kTimeout);
 
@@ -319,23 +425,36 @@ TEST_F(IncomingFramesReaderTest, ReadTwoFramesWithTimeoutSuccessfully) {
   ASSERT_TRUE(introduction_frame.has_value());
   connection().WriteMessage(*introduction_frame);
 
-  Sync();
-  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(first_notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(first_frame.has_value());
+  EXPECT_EQ(first_frame->type(), service::proto::V1Frame::INTRODUCTION);
+
+  absl::Notification second_notification;
+  std::optional<V1Frame> second_frame;
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::CANCEL},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        second_frame = std::move(frame);
+        second_notification.Notify();
+      },
+      kTimeout);
+
+  ASSERT_TRUE(second_notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(second_frame.has_value());
+  EXPECT_EQ(second_frame->type(), service::proto::V1Frame::CANCEL);
 }
 
 TEST_F(IncomingFramesReaderTest, ReadTwoFramesWithoutTimeoutSuccessfully) {
-  absl::Notification notification;
+  absl::Notification first_notification;
+  std::optional<V1Frame> first_frame;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
-        EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
-      },
-      absl::ZeroDuration());
-  frames_reader()->ReadFrame(
-      [&](bool is_timeout, std::optional<V1Frame> frame) {
-        EXPECT_FALSE(is_timeout);
-        EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
-        notification.Notify();
+        first_frame = std::move(frame);
+        first_notification.Notify();
       },
       absl::ZeroDuration());
 
@@ -348,33 +467,115 @@ TEST_F(IncomingFramesReaderTest, ReadTwoFramesWithoutTimeoutSuccessfully) {
   ASSERT_TRUE(cancel_frame.has_value());
   connection().WriteMessage(*cancel_frame);
 
-  Sync();
-  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(first_notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(first_frame.has_value());
+  EXPECT_EQ(first_frame->type(), service::proto::V1Frame::INTRODUCTION);
+
+  absl::Notification second_notification;
+  std::optional<V1Frame> second_frame;
+  frames_reader()->ReadFrame(
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        second_frame = std::move(frame);
+        second_notification.Notify();
+      },
+      absl::ZeroDuration());
+
+  ASSERT_TRUE(second_notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(second_frame.has_value());
+  EXPECT_EQ(second_frame->type(), service::proto::V1Frame::CANCEL);
+}
+
+TEST_F(IncomingFramesReaderTest, ReadNextFrameFromCallback) {
+  std::optional<std::vector<uint8_t>> cancel_frame = GetCancelFrame();
+  ASSERT_TRUE(cancel_frame.has_value());
+  connection().WriteMessage(*cancel_frame);
+
+  std::optional<std::vector<uint8_t>> introduction_frame =
+      GetIntroductionFrame();
+  ASSERT_TRUE(introduction_frame.has_value());
+  connection().WriteMessage(*introduction_frame);
+
+  std::optional<std::vector<uint8_t>> response_frame = GetResponseFrame();
+  ASSERT_TRUE(response_frame.has_value());
+  connection().WriteMessage(*response_frame);
+
+  absl::Notification done_notification;
+  std::optional<V1Frame> first_frame;
+  std::optional<V1Frame> second_frame;
+  std::optional<V1Frame> third_frame;
+
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::INTRODUCTION},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        first_frame = std::move(frame);
+        frames_reader()->ReadFrame(
+            {service::proto::V1Frame::RESPONSE},
+            [&](bool is_timeout, std::optional<V1Frame> frame) {
+              EXPECT_TRUE(IsOnServiceThread());
+              EXPECT_FALSE(is_timeout);
+              second_frame = std::move(frame);
+              frames_reader()->ReadFrame(
+                  [&](bool is_timeout, std::optional<V1Frame> frame) {
+                    EXPECT_TRUE(IsOnServiceThread());
+                    EXPECT_FALSE(is_timeout);
+                    third_frame = std::move(frame);
+                    done_notification.Notify();
+                  },
+                  kTimeout);
+            },
+            kTimeout);
+      },
+      kTimeout);
+
+  ASSERT_TRUE(done_notification.WaitForNotificationWithTimeout(kTimeout));
+  ASSERT_TRUE(first_frame.has_value());
+  EXPECT_EQ(first_frame->type(), service::proto::V1Frame::INTRODUCTION);
+  ASSERT_TRUE(second_frame.has_value());
+  EXPECT_EQ(second_frame->type(), service::proto::V1Frame::RESPONSE);
+  ASSERT_TRUE(third_frame.has_value());
+  EXPECT_EQ(third_frame->type(), service::proto::V1Frame::CANCEL);
 }
 
 TEST_F(IncomingFramesReaderTest, ReleaseFrameReaderDuringRead) {
+  absl::Notification notification;
   frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
+      {service::proto::V1Frame::INTRODUCTION},
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame, std::nullopt);
-      },
-      kTimeout);
-  frames_reader()->ReadFrame(
-      service::proto::V1Frame::INTRODUCTION,
-      [&](bool is_timeout, std::optional<V1Frame> frame) {
-        EXPECT_FALSE(is_timeout);
-        EXPECT_EQ(frame, std::nullopt);
+        notification.Notify();
       },
       kTimeout);
   ReleaseFrameReader();
   EXPECT_EQ(frames_reader(), nullptr);
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+}
+
+TEST_F(IncomingFramesReaderTest, ReleaseFrameReaderDuringReadAnyFrame) {
+  absl::Notification notification;
+  frames_reader()->ReadFrame(
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        EXPECT_EQ(frame, std::nullopt);
+        notification.Notify();
+      },
+      kTimeout);
+  ReleaseFrameReader();
+  EXPECT_EQ(frames_reader(), nullptr);
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
 }
 
 TEST_F(IncomingFramesReaderTest, SkipInvalidFrame) {
   absl::Notification notification;
   frames_reader()->ReadFrame(
       [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
         EXPECT_FALSE(is_timeout);
         EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
         notification.Notify();
@@ -390,6 +591,77 @@ TEST_F(IncomingFramesReaderTest, SkipInvalidFrame) {
 
   Sync();
   EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+  ReleaseFrameReader();
+}
+
+TEST_F(IncomingFramesReaderTest,
+       CancelFrameNotCachedDuringPairedKeyEncryptionRead) {
+  absl::Notification notification;
+  static constexpr std::array<V1Frame::FrameType, 2> kExpectedTypes = {
+      service::proto::V1Frame::PAIRED_KEY_ENCRYPTION,
+      service::proto::V1Frame::CANCEL,
+  };
+  frames_reader()->ReadFrame(
+      kExpectedTypes,
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_TRUE(frame.has_value());
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
+        notification.Notify();
+      },
+      kTimeout);
+
+  std::optional<std::vector<uint8_t>> cancel_frame = GetCancelFrame();
+  ASSERT_TRUE(cancel_frame.has_value());
+  connection().WriteMessage(*cancel_frame);
+
+  Sync();
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(kTimeout));
+  ReleaseFrameReader();
+}
+
+TEST_F(IncomingFramesReaderTest,
+       CachedCancelFramePoppedDuringPairedKeyResultRead) {
+  std::optional<std::vector<uint8_t>> cancel_frame = GetCancelFrame();
+  ASSERT_TRUE(cancel_frame.has_value());
+  connection().WriteMessage(*cancel_frame);
+
+  std::optional<std::vector<uint8_t>> introduction_frame =
+      GetIntroductionFrame();
+  ASSERT_TRUE(introduction_frame.has_value());
+  connection().WriteMessage(*introduction_frame);
+
+  absl::Notification intro_notification;
+  frames_reader()->ReadFrame(
+      {service::proto::V1Frame::INTRODUCTION},
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_TRUE(frame.has_value());
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::INTRODUCTION);
+        intro_notification.Notify();
+      },
+      kTimeout);
+  EXPECT_TRUE(intro_notification.WaitForNotificationWithTimeout(kTimeout));
+
+  absl::Notification cancel_notification;
+  static constexpr std::array<V1Frame::FrameType, 2> kExpectedTypes = {
+      service::proto::V1Frame::PAIRED_KEY_RESULT,
+      service::proto::V1Frame::CANCEL,
+  };
+  frames_reader()->ReadFrame(
+      kExpectedTypes,
+      [&](bool is_timeout, std::optional<V1Frame> frame) {
+        EXPECT_TRUE(IsOnServiceThread());
+        EXPECT_FALSE(is_timeout);
+        ASSERT_TRUE(frame.has_value());
+        EXPECT_EQ(frame->type(), service::proto::V1Frame::CANCEL);
+        cancel_notification.Notify();
+      },
+      kTimeout);
+  Sync();
+  EXPECT_TRUE(cancel_notification.WaitForNotificationWithTimeout(kTimeout));
   ReleaseFrameReader();
 }
 

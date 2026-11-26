@@ -42,7 +42,7 @@
 #include "absl/types/span.h"
 #include "internal/platform/clock.h"
 #include "internal/platform/implementation/device_info.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/single_thread_executor.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/advertisement.h"
 #include "sharing/analytics/analytics_recorder.h"
@@ -104,7 +104,8 @@ class NearbySharingServiceImpl
 
  public:
   NearbySharingServiceImpl(
-      std::unique_ptr<nearby::TaskRunner> service_thread, Context* context,
+      std::unique_ptr<nearby::SingleThreadExecutor> service_thread,
+      Context* context,
       nearby::sharing::api::SharingPlatform& sharing_platform,
       nearby::sharing::api::IdentityRpcClient* absl_nonnull
           nearby_identity_client,
@@ -185,8 +186,6 @@ class NearbySharingServiceImpl
                             NearbyConnection* connection) override;
 
   std::string Dump() const override;
-
-  void UpdateFilePathsInProgress(bool update) override;
 
  private:
   // Internal implementation of methods to avoid using recursive mutex.
@@ -328,6 +327,13 @@ class NearbySharingServiceImpl
       ::location::nearby::proto::sharing::OSType share_target_os_type);
   void BeginOutgoingTransfer(OutgoingShareSession& session);
   void BeginOutgoingPairing(OutgoingShareSession& session);
+  std::function<void(bool is_timeout,
+                     std::optional<nearby::sharing::service::proto::V1Frame>)>
+  CreateIncomingFrameReadCallback(int64_t share_target_id);
+  std::function<void(bool is_timeout,
+                     std::optional<nearby::sharing::service::proto::V1Frame>)>
+  CreateOutgoingFrameReadCallback(int64_t share_target_id);
+
   void OnIncomingSessionFrameRead(
       int64_t share_target_id,
       bool is_timeout,
@@ -408,8 +414,6 @@ class NearbySharingServiceImpl
   void SendInitialAdapterState(NearbySharingService::Observer* observer);
 
   bool OutgoingSessionAccept(OutgoingShareSession& session);
-  void OnIncomingFilesMetadataUpdated(int64_t share_target_id,
-                                      TransferMetadata metadata, bool success);
   std::vector<std::string> GetCertIdsForSyncBinding();
   // Called when InitiateBinding rpc returns.
   void OnInitiateSyncBindingResponse(
@@ -428,7 +432,7 @@ class NearbySharingServiceImpl
   void LogShareTargetDiscovered(const ShareTarget& share_target);
 
   // Used to run nearby sharing service APIs.
-  std::unique_ptr<TaskRunner> service_thread_;
+  std::unique_ptr<SingleThreadExecutor> service_thread_;
   Context* const context_;
   nearby::api::DeviceInfo& device_info_;
   nearby::sharing::api::PreferenceManager& preference_manager_;
@@ -441,6 +445,7 @@ class NearbySharingServiceImpl
   std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager_;
   nearby::sharing::api::IdentityRpcClient* absl_nonnull const
       nearby_identity_client_;
+  nearby::sharing::SyncManager sync_manager_;
   std::unique_ptr<NearbyShareLocalDeviceDataManager> local_device_data_manager_;
   std::unique_ptr<NearbyShareCertificateManager> certificate_manager_;
   std::unique_ptr<NearbyFastInitiation> nearby_fast_initiation_;
@@ -540,9 +545,6 @@ class NearbySharingServiceImpl
   // Used to track the time of screen unlock.
   absl::Time screen_unlock_time_;
 
-  // Whether to update the file paths in transfer progress.
-  bool update_file_paths_in_progress_ = false;
-
   // Used to track the time when share sheet activity starts
   absl::Time share_foreground_send_surface_start_timestamp_;
   std::unique_ptr<nearby::api::AppInfo> app_info_;
@@ -550,7 +552,6 @@ class NearbySharingServiceImpl
   // If true, a new endpoint id will be generated at the next advertisement.
   bool force_new_endpoint_id_ = false;
   OutgoingTargetsManager outgoing_targets_manager_;
-  nearby::sharing::SyncManager sync_manager_;
 
   // Visibility used for the last advertisement.
   proto::DeviceVisibility last_advertised_device_visibility_ =

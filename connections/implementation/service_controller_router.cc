@@ -30,7 +30,6 @@
 #include "connections/discovery_options.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/offline_service_controller.h"
 #include "connections/implementation/service_controller.h"
 #include "connections/listeners.h"
@@ -46,16 +45,20 @@
 #include "connections/v3/listeners.h"
 #include "connections/v3/listening_result.h"
 #include "connections/v3/params.h"
-#include "internal/flags/nearby_flags.h"
 #include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/feature_flags.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/runnable.h"
 
 namespace nearby {
 namespace connections {
 namespace {
+#if defined(__APPLE__) && !defined(GITHUB_BUILD) && defined(__cpp_exceptions)
+static_assert(false,
+              "Nearby Connections internal must be compiled with "
+              "-fno-exceptions");
+#endif
+
 // Length of a MAC address, which consists of 6 bytes uniquely identifying a
 // hardware interface.
 const std::size_t kMacAddressLength = 6u;
@@ -94,6 +97,7 @@ v3::Quality ServiceControllerRouter::GetMediumQuality(Medium medium) {
     case location::nearby::proto::connections::WIFI_HOTSPOT:
     case location::nearby::proto::connections::WIFI_LAN:
     case location::nearby::proto::connections::WIFI_AWARE:
+    case location::nearby::proto::connections::WIFI_AWARE_R4:
     case location::nearby::proto::connections::WIFI_DIRECT:
     case location::nearby::proto::connections::WEB_RTC:
     case location::nearby::proto::connections::WEB_RTC_NON_CELLULAR:
@@ -491,7 +495,7 @@ void ServiceControllerRouter::RequestConnectionV3(
                 },
             .bandwidth_changed_cb =
                 [this, v3_shared](const std::string& endpoint_id,
-                                  Medium medium) mutable {
+                                  Medium medium) {
                   v3::BandwidthInfo bandwidth_info = {
                       .quality = GetMediumQuality(medium),
                       .medium = medium,
@@ -550,7 +554,7 @@ void ServiceControllerRouter::AcceptConnectionV3(
             .payload_progress_cb =
                 [v3_cb = std::move(v3_listener.payload_progress_cb)](
                     absl::string_view endpoint_id,
-                    const PayloadProgressInfo& info) mutable {
+                    const PayloadProgressInfo& info) {
                   v3_cb(v3::ConnectionsDevice(endpoint_id, "", {}), info);
                 }};
 
@@ -738,6 +742,7 @@ ServiceController* ServiceControllerRouter::GetServiceController() {
                                      /*web_rtc_no_cellular=*/false,
                                      /*web_rtc=*/true,
                                      /*wifi_lan=*/true,
+                                     /*wifi_aware=*/true,
                                      /*wifi_hotspot=*/false,
                                      /*wifi_direct=*/true,
                                      /*awdl=*/false};

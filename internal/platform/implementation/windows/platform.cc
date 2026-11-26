@@ -34,46 +34,40 @@
 
 #include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
-#include "internal/platform/implementation/app_lifecycle_monitor.h"
-#undef StrCat  // Remove the Windows macro definition
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/atomic_boolean.h"
-#include "internal/platform/implementation/atomic_reference.h"
 #include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
-#include "internal/platform/implementation/condition_variable.h"
-#include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/credential_storage.h"
+#include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/output_file.h"
 #include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/implementation/shared/count_down_latch.h"
-#include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/wifi.h"
-#include "internal/platform/implementation/wifi_lan.h"
+#include "internal/platform/implementation/wifi_aware.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
+#include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/implementation/windows/atomic_boolean.h"
-#include "internal/platform/implementation/windows/atomic_reference.h"
 #include "internal/platform/implementation/windows/ble.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/implementation/windows/bluetooth_classic_medium.h"
-#include "internal/platform/implementation/windows/condition_variable.h"
 #include "internal/platform/implementation/windows/device_info.h"
-#include "internal/platform/implementation/windows/file.h"
-#include "internal/platform/implementation/windows/file_path.h"
+#include "internal/platform/implementation/windows/device_paths.h"
+#include "internal/platform/implementation/windows/get_custom_save_path.h"
 #include "internal/platform/implementation/windows/http_loader.h"
+#include "internal/platform/implementation/windows/input_file.h"
 #include "internal/platform/implementation/windows/mutex.h"
+#include "internal/platform/implementation/windows/output_file.h"
 #include "internal/platform/implementation/windows/preferences_manager.h"
 #include "internal/platform/implementation/windows/scheduled_executor.h"
 #include "internal/platform/implementation/windows/string_utils.h"
-#include "internal/platform/implementation/windows/submittable_executor.h"
 #include "internal/platform/implementation/windows/timer.h"
 #include "internal/platform/implementation/windows/wifi.h"
 #include "internal/platform/implementation/windows/wifi_direct.h"
@@ -81,59 +75,26 @@
 #include "internal/platform/implementation/windows/wifi_lan.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/os_name.h"
-#include "internal/platform/payload_id.h"
 
 namespace nearby::api {
 
-namespace {
-
-constexpr char kNCRelativePath[] = "Google/Nearby/Connections";
-
-}  // namespace
-
 std::string ImplementationPlatform::GetCustomSavePath(
-    const std::string& parent_folder, const std::string& file_name) {
-  auto parent = windows::string_utils::StringToWideString(parent_folder);
-  auto file = windows::string_utils::StringToWideString(file_name);
-
-  return windows::string_utils::WideStringToString(
-      windows::FilePath::GetCustomSavePath(parent, file));
-}
-
-std::string ImplementationPlatform::GetDownloadPath(
-    const std::string& parent_folder, const std::string& file_name) {
-  auto parent = windows::string_utils::StringToWideString(parent_folder);
-  auto file = windows::string_utils::StringToWideString(file_name);
-
-  return windows::string_utils::WideStringToString(
-      windows::FilePath::GetDownloadPath(parent, file));
-}
-
-std::string ImplementationPlatform::GetDownloadPath(
+    const std::string& save_path, const std::string& parent_folder,
     const std::string& file_name) {
-  std::wstring fake_parent_path;
-  auto file = windows::string_utils::StringToWideString(file_name);
-
-  return windows::string_utils::WideStringToString(
-      windows::FilePath::GetDownloadPath(fake_parent_path, file));
-}
-
-std::string ImplementationPlatform::GetAppDataPath(
-    const std::string& file_name) {
-  PWSTR basePath;
-
-  HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT,
-                                        nullptr, &basePath);
-  if (result != S_OK) {
-    return file_name;
+  FilePath path{save_path};
+  if (path.IsEmpty()) {
+    path = nearby::platform::windows::GetDownloadsPath();
+  }
+  FilePath parent_folder_path{parent_folder};
+  if (!parent_folder_path.IsEmpty()) {
+    path.append(parent_folder_path);
+  }
+  FilePath file_path{file_name};
+  if (!file_path.IsEmpty()) {
+    path.append(file_path);
   }
 
-  std::wstring app_data_path{basePath};
-  CoTaskMemFree(basePath);
-  std::string app_data_path_utf8 =
-      windows::string_utils::WideStringToString(app_data_path);
-  std::replace(app_data_path_utf8.begin(), app_data_path_utf8.end(), '\\', '/');
-  return absl::StrCat(app_data_path_utf8, "/", kNCRelativePath, "/", file_name);
+  return windows::GetCustomSavePath(path).ToString();
 }
 
 OSName ImplementationPlatform::GetCurrentOS() { return OSName::kWindows; }
@@ -143,47 +104,14 @@ std::unique_ptr<AtomicBoolean> ImplementationPlatform::CreateAtomicBoolean(
   return std::make_unique<windows::AtomicBoolean>(initial_value);
 }
 
-std::unique_ptr<AtomicUint32> ImplementationPlatform::CreateAtomicUint32(
-    std::uint32_t value) {
-  return std::make_unique<windows::AtomicUint32>(value);
-}
-
-std::unique_ptr<CountDownLatch> ImplementationPlatform::CreateCountDownLatch(
-    std::int32_t count) {
-  return std::make_unique<shared::CountDownLatch>(count);
-}
-
-#pragma push_macro("CreateMutex")
-#undef CreateMutex
-std::unique_ptr<Mutex> ImplementationPlatform::CreateMutex(Mutex::Mode mode) {
-  return std::make_unique<windows::Mutex>(mode);
-}
-#pragma pop_macro("CreateMutex")
-
-std::unique_ptr<ConditionVariable>
-ImplementationPlatform::CreateConditionVariable(Mutex* mutex) {
-  return std::make_unique<windows::ConditionVariable>(mutex);
-}
-
-ABSL_DEPRECATED("This interface will be deleted in the near future.")
-std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    PayloadId payload_id) {
-  std::string file_name(std::to_string(payload_id));
-  return windows::IOFile::CreateInputFile(GetDownloadPath(file_name));
+std::unique_ptr<RecursiveMutex>
+ImplementationPlatform::CreateRecursiveMutex() {
+  return std::make_unique<windows::RecursiveMutex>();
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
     const std::string& file_path) {
-  return windows::IOFile::CreateInputFile(file_path);
-}
-
-ABSL_DEPRECATED("This interface will be deleted in the near future.")
-std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
-    PayloadId payload_id) {
-  std::string parent_folder("");
-  std::string file_name(std::to_string(payload_id));
-  return windows::IOFile::CreateOutputFile(
-      GetDownloadPath(parent_folder, file_name));
+  return std::make_unique<windows::InputFile>(file_path);
 }
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
@@ -197,18 +125,18 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
       return nullptr;
     }
   }
-  return windows::IOFile::CreateOutputFile(file_path);
+  return std::make_unique<windows::OutputFile>(file_path);
 }
 
-std::unique_ptr<SubmittableExecutor>
+std::unique_ptr<Executor>
 ImplementationPlatform::CreateSingleThreadExecutor() {
-  return std::make_unique<windows::SubmittableExecutor>();
+  return std::make_unique<windows::ScheduledExecutor>();
 }
 
-std::unique_ptr<SubmittableExecutor>
+std::unique_ptr<Executor>
 ImplementationPlatform::CreateMultiThreadExecutor(
     std::int32_t max_concurrency) {
-  return std::make_unique<windows::SubmittableExecutor>(max_concurrency);
+  return std::make_unique<windows::ScheduledExecutor>(max_concurrency);
 }
 
 std::unique_ptr<ScheduledExecutor>
@@ -246,6 +174,11 @@ std::unique_ptr<WifiLanMedium> ImplementationPlatform::CreateWifiLanMedium() {
 }
 
 std::unique_ptr<AwdlMedium> ImplementationPlatform::CreateAwdlMedium() {
+  return nullptr;
+}
+
+std::unique_ptr<WifiAwareMedium>
+ImplementationPlatform::CreateWifiAwareMedium() {
   return nullptr;
 }
 

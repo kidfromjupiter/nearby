@@ -107,17 +107,17 @@ class ClientSocketTest : public ::testing::Test {
                                  SocketCallback{
                                      .on_connected_cb =
                                          [this]() {
-                                           MutexLock lock(&mutex_);
+                                           absl::MutexLock lock(mutex_);
                                            connected_ = true;
                                          },
                                      .on_disconnected_cb =
                                          [this]() {
-                                           MutexLock lock(&mutex_);
+                                           absl::MutexLock lock(mutex_);
                                            connected_ = false;
                                          },
                                      .on_receive_cb =
                                          [this](std::string message) {
-                                           MutexLock lock(&mutex_);
+                                           absl::MutexLock lock(mutex_);
                                            messages_read_.push_back(message);
                                          },
                                      .on_error_cb =
@@ -143,16 +143,15 @@ class ClientSocketTest : public ::testing::Test {
     EXPECT_EQ(packet->GetControlCommandNumber(),
               Packet::ControlPacketType::kControlConnectionRequest);
     EXPECT_EQ(packet->GetPacketCounter(), 0);
-    int16_t min_protocol_version = ((packet->GetPayload().data()[0] << 8) |
-                                    packet->GetPayload().data()[1]) &
-                                   (int16_t)0xFFFF;
-    int16_t max_protocol_version = ((packet->GetPayload().data()[2] << 8) |
-                                    packet->GetPayload().data()[3]) &
-                                   (int16_t)0xFFFF;
+    int16_t min_protocol_version =
+        ((packet->GetPayload()[0] << 8) | packet->GetPayload()[1]) &
+        (int16_t)0xFFFF;
+    int16_t max_protocol_version =
+        ((packet->GetPayload()[2] << 8) | packet->GetPayload()[3]) &
+        (int16_t)0xFFFF;
     EXPECT_EQ(min_protocol_version, kProtocolVersion);
     EXPECT_EQ(max_protocol_version, kProtocolVersion);
-    int pkt_size = ((packet->GetPayload().data()[4] << 8) |
-                    packet->GetPayload().data()[5]) &
+    int pkt_size = ((packet->GetPayload()[4] << 8) | packet->GetPayload()[5]) &
                    (int16_t)0xFFFF;
     EXPECT_EQ(pkt_size, client_size);
     EXPECT_EQ(packet->GetPayload().size(), 6);
@@ -177,7 +176,7 @@ class ClientSocketTest : public ::testing::Test {
   }
   FakeConnection connection_;
   TestClientSocket socket_;
-  Mutex mutex_;
+  absl::Mutex mutex_;
   bool connected_ = true;
   std::vector<std::string> messages_read_;
   bool expect_connected_ = true;
@@ -205,16 +204,15 @@ TEST_F(ClientSocketTest, TestClientServerPacketSizeHigher) {
             Packet::ControlPacketType::kControlConnectionRequest);
   EXPECT_EQ(packet->GetPacketCounter(), 0);
   int16_t min_protocol_version =
-      ((packet->GetPayload().data()[0] << 8) | packet->GetPayload().data()[1]) &
+      ((packet->GetPayload()[0] << 8) | packet->GetPayload()[1]) &
       (int16_t)0xFFFF;
   int16_t max_protocol_version =
-      ((packet->GetPayload().data()[2] << 8) | packet->GetPayload().data()[3]) &
+      ((packet->GetPayload()[2] << 8) | packet->GetPayload()[3]) &
       (int16_t)0xFFFF;
   EXPECT_EQ(min_protocol_version, kProtocolVersion);
   EXPECT_EQ(max_protocol_version, kProtocolVersion);
-  int pkt_size =
-      ((packet->GetPayload().data()[4] << 8) | packet->GetPayload().data()[5]) &
-      (int16_t)0xFFFF;
+  int pkt_size = ((packet->GetPayload()[4] << 8) | packet->GetPayload()[5]) &
+                 (int16_t)0xFFFF;
   EXPECT_EQ(pkt_size, client_size);
   EXPECT_EQ(packet->GetPayload().size(), 6);
   socket_.OnReceiveControlPacketProxy(
@@ -336,17 +334,17 @@ TEST_F(ClientSocketTest, TestSocketWithRandomDataProvider) {
       SocketCallback{
           .on_connected_cb =
               [this]() {
-                MutexLock lock(&mutex_);
+                absl::MutexLock lock(mutex_);
                 connected_ = true;
               },
           .on_disconnected_cb =
               [this]() {
-                MutexLock lock(&mutex_);
+                absl::MutexLock lock(mutex_);
                 connected_ = false;
               },
           .on_receive_cb =
               [this](std::string message) {
-                MutexLock lock(&mutex_);
+                absl::MutexLock lock(mutex_);
                 messages_read_.push_back(message);
               },
           .on_error_cb = [](absl::Status status) { LOG(ERROR) << status; },

@@ -27,6 +27,7 @@
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFrameworkError.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFrameworkServerSocket+Internal.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWFrameworkSocket.h"
+#import "internal/platform/implementation/apple/Mediums/WiFiCommon/GNCNWListenerImpl.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/Tests/GNCFakeNWBrowseResult.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/Tests/GNCFakeNWBrowser.h"
 #import "internal/platform/implementation/apple/Mediums/WiFiCommon/Tests/GNCFakeNWConnection.h"
@@ -35,6 +36,8 @@
 #import "third_party/objective_c/ocmock/v3/Source/OCMock/OCMock.h"
 
 // Extern C functions for testing.
+typedef nw_error_domain_t (^GNCNWErrorGetDomainHandler)(nw_error_t error);
+extern void GNCSetNWErrorGetDomainOverrideForTesting(GNCNWErrorGetDomainHandler _Nullable handler);
 extern BOOL GNCHasLoopbackInterface(nw_browse_result_t browseResult);
 extern NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(
     nw_browse_result_t browseResult);
@@ -61,6 +64,11 @@ static NSString *const kHostAddress = @"127.0.0.1";
   _mockConnectionImpl = OCMClassMock([GNCNWConnectionImpl class]);
 }
 
+- (void)tearDown {
+  GNCSetNWErrorGetDomainOverrideForTesting(nil);
+  [super tearDown];
+}
+
 - (void)testGNCNWFrameworkCanBeInstantiated {
   GNCNWFramework *framework = [[GNCNWFramework alloc] init];
   XCTAssertNotNil(framework);
@@ -71,18 +79,52 @@ static NSString *const kHostAddress = @"127.0.0.1";
   XCTAssertFalse([framework isListeningForAnyService]);
 }
 
+- (void)testIsListeningForAnyServiceWhenServerSocketIsDeallocated {
+  GNCNWFramework *framework = [[GNCNWFramework alloc] init];
+
+  @autoreleasepool {
+    GNCFakeNWFrameworkServerSocket *fakeServerSocket =
+        [[GNCFakeNWFrameworkServerSocket alloc] initWithPort:kPort];
+
+    id mockServerSocketAlloc = OCMClassMock([GNCNWFrameworkServerSocket class]);
+    OCMStub([mockServerSocketAlloc alloc]).andReturn(mockServerSocketAlloc);
+    OCMStub([mockServerSocketAlloc initWithPort:kPort]).andReturn(fakeServerSocket);
+
+    OCMStub([mockServerSocketAlloc startListeningWithPSKIdentity:nil
+                                                 PSKSharedSecret:nil
+                                               includePeerToPeer:NO
+                                                           error:[OCMArg anyObjectRef]])
+        .andReturn(YES);
+
+    NSError *error = nil;
+    GNCNWFrameworkServerSocket *serverSocket = [framework listenForServiceOnPort:kPort
+                                                                           error:&error];
+    XCTAssertNotNil(serverSocket);
+    XCTAssertNil(error);
+    XCTAssertTrue([framework isListeningForAnyService]);
+
+    [mockServerSocketAlloc stopMocking];
+  }
+
+  // Verify that once the strong reference is released, the weak entry in NSMapTable
+  // is no longer counted as an active listener.
+  XCTAssertFalse([framework isListeningForAnyService]);
+}
+
 - (void)testListenForServiceOnPortSuccess {
   GNCNWFramework *framework = [[GNCNWFramework alloc] init];
   id mockServerSocket = OCMClassMock([GNCNWFrameworkServerSocket class]);
   id mockServerSocketAlloc = OCMClassMock([GNCNWFrameworkServerSocket class]);
   OCMStub([mockServerSocketAlloc alloc]).andReturn(mockServerSocketAlloc);
   OCMStub([mockServerSocketAlloc initWithPort:kPort]).andReturn(mockServerSocket);
-  OCMStub([mockServerSocket startListeningWithError:[OCMArg anyObjectRef] includePeerToPeer:NO])
+  OCMStub([mockServerSocket startListeningWithPSKIdentity:nil
+                                          PSKSharedSecret:nil
+                                        includePeerToPeer:NO
+                                                    error:[OCMArg anyObjectRef]])
       .andReturn(YES);
 
   NSError *error = nil;
   GNCNWFrameworkServerSocket *serverSocket = [framework listenForServiceOnPort:kPort
-                                                             includePeerToPeer:NO
                                                                          error:&error];
   XCTAssertNotNil(serverSocket);
   XCTAssertNil(error);
@@ -95,8 +137,12 @@ static NSString *const kHostAddress = @"127.0.0.1";
   id mockServerSocketAlloc = OCMClassMock([GNCNWFrameworkServerSocket class]);
   OCMStub([mockServerSocketAlloc alloc]).andReturn(mockServerSocketAlloc);
   OCMStub([mockServerSocketAlloc initWithPort:kPort]).andReturn(mockServerSocket);
-  OCMStub([mockServerSocket startListeningWithError:[OCMArg anyObjectRef] includePeerToPeer:NO])
-      .andDo(^(id localSelf, NSError **error, BOOL includePeerToPeer) {
+  OCMStub([mockServerSocket startListeningWithPSKIdentity:nil
+                                          PSKSharedSecret:nil
+                                        includePeerToPeer:NO
+                                                    error:[OCMArg anyObjectRef]])
+      .andDo(^(id localSelf, NSData *PSKIdentity, NSData *PSKSharedSecret, BOOL includePeerToPeer,
+               NSError **error) {
         if (error) {
           *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EACCES userInfo:nil];
         }
@@ -105,7 +151,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
 
   NSError *error = nil;
   GNCNWFrameworkServerSocket *serverSocket = [framework listenForServiceOnPort:kPort
-                                                             includePeerToPeer:NO
                                                                          error:&error];
   XCTAssertNil(serverSocket);
   XCTAssertNotNil(error);
@@ -116,7 +161,7 @@ static NSString *const kHostAddress = @"127.0.0.1";
   NSData *pskIdentity = [@"testIdentity" dataUsingEncoding:NSUTF8StringEncoding];
   NSData *pskSharedSecret = [@"testSharedSecret" dataUsingEncoding:NSUTF8StringEncoding];
 
-  GNCNWFramework *framework = [[GNCNWFramework alloc] init];
+  GNCNWFramework *framework = [[GNCNWFramework alloc] initWithPeerToPeer:YES];
   id mockServerSocket = OCMClassMock([GNCNWFrameworkServerSocket class]);
   id mockServerSocketAlloc = OCMClassMock([GNCNWFrameworkServerSocket class]);
   OCMStub([mockServerSocketAlloc alloc]).andReturn(mockServerSocketAlloc);
@@ -132,7 +177,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       [framework listenForServiceWithPSKIdentity:pskIdentity
                                  PSKSharedSecret:pskSharedSecret
                                             port:kPort
-                               includePeerToPeer:YES
                                            error:&error];
   XCTAssertNotNil(serverSocket);
   XCTAssertNil(error);
@@ -165,7 +209,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       [framework listenForServiceWithPSKIdentity:pskIdentity
                                  PSKSharedSecret:pskSharedSecret
                                             port:kPort
-                               includePeerToPeer:NO
                                            error:&error];
   XCTAssertNil(serverSocket);
   XCTAssertNotNil(error);
@@ -208,7 +251,7 @@ static NSString *const kHostAddress = @"127.0.0.1";
   [framework stopAdvertisingPort:kPort];
 
   XCTAssertTrue(fakeServerSocket.stopAdvertisingCalled);
-  XCTAssertNil([serverSockets objectForKey:@(kPort)]);
+  XCTAssertTrue([[[serverSockets keyEnumerator] allObjects] containsObject:@(kPort)]);
 }
 
 - (void)testIsDiscoveringAnyServiceWhenNoServicesAreDiscovering {
@@ -239,7 +282,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
 
   XCTAssertTrue(result);
@@ -289,7 +331,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
 
   XCTAssertTrue(result);
@@ -330,7 +371,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
   XCTAssertNil(error);
 
@@ -342,7 +382,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
 
   XCTAssertFalse(result);
@@ -367,7 +406,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
 
   XCTAssertFalse(result);
@@ -397,7 +435,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
         lostServiceName = serviceName;
         [serviceLostExpectation fulfill];
       }
-      includePeerToPeer:NO
       error:&error];
   XCTAssertNil(error);
 
@@ -450,7 +487,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
         lostServiceName = serviceName;
         [serviceLostExpectation fulfill];
       }
-      includePeerToPeer:NO
       error:&error];
   XCTAssertNil(error);
 
@@ -502,7 +538,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
   XCTAssertNil(error);
 
@@ -542,7 +577,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
                            NSDictionary<NSString *, NSString *> *txtRecords) {
         [serviceLostExpectation fulfill];
       }
-      includePeerToPeer:NO
       error:&error];
   XCTAssertNil(error);
 
@@ -579,7 +613,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
       serviceLostHandler:^(NSString *serviceName,
                            NSDictionary<NSString *, NSString *> *txtRecords) {
       }
-      includePeerToPeer:NO
       error:&error];
 
   XCTAssertTrue(result);
@@ -741,6 +774,35 @@ static NSString *const kHostAddress = @"127.0.0.1";
   XCTAssertNil(error);
 }
 
+- (void)
+    testConnectToServiceNameWithPSK_tlsErrorInWaitingState_failsImmediatelyAndCancelsConnection {
+  GNCSetNWErrorGetDomainOverrideForTesting(^nw_error_domain_t(nw_error_t error) {
+    return nw_error_domain_tls;
+  });
+
+  GNCNWFramework *framework = [[GNCNWFramework alloc] init];
+  GNCFakeNWConnection *fakeConnection = [[GNCFakeNWConnection alloc] init];
+  fakeConnection.simulatedState = nw_connection_state_waiting;
+  fakeConnection.simulatedError = (nw_error_t)kCFNull;
+
+  // TODO: b/377543997 - Migrate to dependency injection and remove mocks.
+  OCMStub([_mockConnectionImpl alloc]).andReturn(fakeConnection);
+
+  NSData *pskIdentity = [@"testIdentity" dataUsingEncoding:NSUTF8StringEncoding];
+  NSData *pskSharedSecret = [@"testSharedSecret" dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSError *error = nil;
+  GNCNWFrameworkSocket *socket = [framework connectToServiceName:kServiceName
+                                                     serviceType:kServiceType
+                                                     PSKIdentity:pskIdentity
+                                                 PSKSharedSecret:pskSharedSecret
+                                                           error:&error];
+
+  XCTAssertNil(socket);
+  XCTAssertNotEqual(error.code, GNCNWFrameworkErrorTimedOut);
+  XCTAssertTrue(fakeConnection.cancelCalled);
+}
+
 - (void)testConnectToHostSuccess API_AVAILABLE(ios(13.0)) {
   GNCNWFramework *framework = [[GNCNWFramework alloc] init];
   GNCFakeNWConnection *fakeConnection = [[GNCFakeNWConnection alloc] init];
@@ -751,7 +813,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
   NSError *error = nil;
   GNCNWFrameworkSocket *socket = [framework connectToHost:address
                                                      port:kPort
-                                        includePeerToPeer:NO
                                              cancelSource:nil
                                                     queue:nil
                                                     error:&error];
@@ -771,7 +832,6 @@ static NSString *const kHostAddress = @"127.0.0.1";
   NSError *error = nil;
   GNCNWFrameworkSocket *socket = [framework connectToHost:address
                                                      port:kPort
-                                        includePeerToPeer:NO
                                              cancelSource:nil
                                                     queue:nil
                                                     error:&error];

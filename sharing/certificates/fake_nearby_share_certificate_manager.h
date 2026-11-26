@@ -113,6 +113,10 @@ class FakeNearbyShareCertificateManager : public NearbyShareCertificateManager {
     join_binding_time_ = join_binding_time;
     join_binding_life_time_ = life_time;
   }
+  std::optional<absl::Time> GetJoinBindingTime() override {
+    return std::nullopt;
+  }
+
   std::string Dump() const override { return ""; }
 
   // Make protected methods from base class public in this fake class.

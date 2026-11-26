@@ -90,6 +90,8 @@ enum OperationResultCategory : int;
 extern const uint32_t OperationResultCategory_internal_data_[];
 enum OperationResultCode : int;
 extern const uint32_t OperationResultCode_internal_data_[];
+enum OsType : int;
+extern const uint32_t OsType_internal_data_[];
 enum PayloadStatus : int;
 extern const uint32_t PayloadStatus_internal_data_[];
 enum PayloadType : int;
@@ -172,6 +174,9 @@ internal::EnumTraitsT<::location::nearby::proto::connections::OperationResultCat
 template <>
 internal::EnumTraitsT<::location::nearby::proto::connections::OperationResultCode_internal_data_>
     internal::EnumTraitsImpl::value<::location::nearby::proto::connections::OperationResultCode>;
+template <>
+internal::EnumTraitsT<::location::nearby::proto::connections::OsType_internal_data_>
+    internal::EnumTraitsImpl::value<::location::nearby::proto::connections::OsType>;
 template <>
 internal::EnumTraitsT<::location::nearby::proto::connections::PayloadStatus_internal_data_>
     internal::EnumTraitsImpl::value<::location::nearby::proto::connections::PayloadStatus>;
@@ -300,17 +305,18 @@ enum Medium : int {
   USB = 11,
   WEB_RTC_NON_CELLULAR = 12,
   AWDL = 13,
+  WIFI_AWARE_R4 = 14,
 };
 
 extern const uint32_t Medium_internal_data_[];
 inline constexpr Medium Medium_MIN =
     static_cast<Medium>(0);
 inline constexpr Medium Medium_MAX =
-    static_cast<Medium>(13);
+    static_cast<Medium>(14);
 inline bool Medium_IsValid(int value) {
-  return 0 <= value && value <= 13;
+  return 0 <= value && value <= 14;
 }
-inline constexpr int Medium_ARRAYSIZE = 13 + 1;
+inline constexpr int Medium_ARRAYSIZE = 14 + 1;
 const ::std::string& Medium_Name(Medium value);
 template <typename T>
 const ::std::string& Medium_Name(T value) {
@@ -1248,6 +1254,7 @@ enum OperationResultCode : int {
   NEARBY_CONNECTION_LISTENER_NULL = 4610,
   NEARBY_AWDL_ADVERTISE_TO_BYTES_FAILURE = 4611,
   NEARBY_AWDL_ENDPOINT_CHANNEL_CREATION_FAILURE = 4612,
+  NEARBY_PAIRED_KEY_VERIFICATION_FAILURE = 4613,
   DCT_ERROR_BLE_DISABLED = 5000,
   DCT_ERROR_BLE_ADV_FAILED = 5001,
   DCT_ERROR_BLE_SCAN_FAILED = 5002,
@@ -1460,6 +1467,34 @@ const ::std::string& DctPayloadType_Name(T value) {
 }
 bool DctPayloadType_Parse(
     ::absl::string_view name, DctPayloadType* PROTOBUF_NONNULL value);
+enum OsType : int {
+  UNKNOWN_OS_TYPE = 0,
+  ANDROID = 1,
+  CHROME_OS = 2,
+  WINDOWS = 3,
+  APPLE = 4,
+  LINUX = 100,
+};
+
+extern const uint32_t OsType_internal_data_[];
+inline constexpr OsType OsType_MIN =
+    static_cast<OsType>(0);
+inline constexpr OsType OsType_MAX =
+    static_cast<OsType>(100);
+inline bool OsType_IsValid(int value) {
+  return ::google::protobuf::internal::ValidateEnum(value, OsType_internal_data_);
+}
+inline constexpr int OsType_ARRAYSIZE = 100 + 1;
+const ::std::string& OsType_Name(OsType value);
+template <typename T>
+const ::std::string& OsType_Name(T value) {
+  static_assert(::std::is_same<T, OsType>::value ||
+                    ::std::is_integral<T>::value,
+                "Incorrect type passed to OsType_Name().");
+  return OsType_Name(static_cast<OsType>(value));
+}
+bool OsType_Parse(
+    ::absl::string_view name, OsType* PROTOBUF_NONNULL value);
 
 // ===================================================================
 
@@ -1547,6 +1582,8 @@ template <>
 struct is_proto_enum<::location::nearby::proto::connections::SupportedService> : std::true_type {};
 template <>
 struct is_proto_enum<::location::nearby::proto::connections::DctPayloadType> : std::true_type {};
+template <>
+struct is_proto_enum<::location::nearby::proto::connections::OsType> : std::true_type {};
 
 }  // namespace protobuf
 }  // namespace google

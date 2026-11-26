@@ -15,7 +15,6 @@
 #ifndef PLATFORM_API_PLATFORM_H_
 #define PLATFORM_API_PLATFORM_H_
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -25,15 +24,13 @@
 #include "absl/strings/string_view.h"
 #include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/atomic_boolean.h"
-#include "internal/platform/implementation/atomic_reference.h"
 #include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
-#include "internal/platform/implementation/condition_variable.h"
-#include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/credential_storage.h"
 #include "internal/platform/implementation/device_info.h"
+#include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/log_message.h"
@@ -41,14 +38,16 @@
 #include "internal/platform/implementation/output_file.h"
 #include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/timer.h"
 #include "internal/platform/implementation/wifi.h"
+#include "internal/platform/implementation/wifi_aware.h"
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/os_name.h"
+#if defined(NEARBY_CHROMIUM)
 #include "internal/platform/payload_id.h"
+#endif
 
 namespace nearby {
 namespace api {
@@ -60,20 +59,19 @@ class ImplementationPlatform {
   // General platform support:
   // - atomic variables (boolean, and any other copyable type)
   // - synchronization primitives:
-  //   - mutex (regular, and recursive)
-  //   - condition variable (must work with regular mutex only)
-  //   - CountDownLatch : to ensure at least N threads are waiting.
+  //   - recursive mutex
   // - file I/O
   // - Logging
-  static std::string GetCustomSavePath(const std::string& parent_folder,
+
+  // Returns an absolute path to a file at directory `parent_folder` with a
+  // filename `file_name` under the default download directory.
+  // `save_path` must be an absolute path.
+  // `parent_folder` and `file_name` are assumed to have been sanitized.
+  // If the computed save path already exists, a alternate file name will be
+  // used.
+  static std::string GetCustomSavePath(const std::string& save_path,
+                                       const std::string& parent_folder,
                                        const std::string& file_name);
-
-  static std::string GetDownloadPath(const std::string& parent_folder,
-                                     const std::string& file_name);
-
-  static std::string GetDownloadPath(const std::string& file_name);
-
-  static std::string GetAppDataPath(const std::string& file_name);
 
   static OSName GetCurrentOS();
 
@@ -85,27 +83,15 @@ class ImplementationPlatform {
   // Does not use dynamic memory allocations in operations.
   static std::unique_ptr<AtomicBoolean> CreateAtomicBoolean(bool initial_value);
 
-  // Supports enums and integers up to 32-bit.
-  // Does not use locking, if platform supports 32-bit atomics natively.
-  // Does not use dynamic memory allocations in operations.
-  static std::unique_ptr<AtomicUint32> CreateAtomicUint32(std::uint32_t value);
+  static std::unique_ptr<RecursiveMutex> CreateRecursiveMutex();
 
-  static std::unique_ptr<CountDownLatch> CreateCountDownLatch(
-      std::int32_t count);
-
-#pragma push_macro("CreateMutex")
-#undef CreateMutex
-  static std::unique_ptr<Mutex> CreateMutex(Mutex::Mode mode);
-#pragma pop_macro("CreateMutex")
-
-  static std::unique_ptr<ConditionVariable> CreateConditionVariable(
-      Mutex* mutex);
-
+#if defined(NEARBY_CHROMIUM)
   static std::unique_ptr<InputFile> CreateInputFile(PayloadId);
+  static std::unique_ptr<OutputFile> CreateOutputFile(PayloadId);
+#endif  // defined(NEARBY_CHROMIUM)
 
   static std::unique_ptr<InputFile> CreateInputFile(const std::string&);
 
-  static std::unique_ptr<OutputFile> CreateOutputFile(PayloadId);
 
   static std::unique_ptr<OutputFile> CreateOutputFile(const std::string&);
 
@@ -113,8 +99,8 @@ class ImplementationPlatform {
       const char* file, int line, LogMessage::Severity severity);
 
   // Java-like Executors
-  static std::unique_ptr<SubmittableExecutor> CreateSingleThreadExecutor();
-  static std::unique_ptr<SubmittableExecutor> CreateMultiThreadExecutor(
+  static std::unique_ptr<Executor> CreateSingleThreadExecutor();
+  static std::unique_ptr<Executor> CreateMultiThreadExecutor(
       std::int32_t max_concurrency);
   static std::unique_ptr<ScheduledExecutor> CreateScheduledExecutor();
 
@@ -128,6 +114,7 @@ class ImplementationPlatform {
   static std::unique_ptr<api::CredentialStorage> CreateCredentialStorage();
   static std::unique_ptr<WifiMedium> CreateWifiMedium();
   static std::unique_ptr<WifiLanMedium> CreateWifiLanMedium();
+  static std::unique_ptr<WifiAwareMedium> CreateWifiAwareMedium();
   static std::unique_ptr<WifiHotspotMedium> CreateWifiHotspotMedium();
   static std::unique_ptr<WifiDirectMedium> CreateWifiDirectMedium();
   static std::unique_ptr<Timer> CreateTimer();

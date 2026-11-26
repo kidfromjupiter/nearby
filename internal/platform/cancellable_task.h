@@ -17,9 +17,8 @@
 
 #include <utility>
 
-#include "internal/platform/atomic_boolean.h"
-#include "internal/platform/feature_flags.h"
-#include "internal/platform/future.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/synchronization/mutex.h"
 #include "internal/platform/runnable.h"
 
 namespace nearby {
@@ -36,38 +35,43 @@ class CancellableTask {
   explicit CancellableTask(Runnable&& runnable, bool is_repeated_)
       : is_repeated_{is_repeated_}, runnable_{std::move(runnable)} {}
 
+  ~CancellableTask() { CancelAndWaitIfStarted(); }
+
   /**
    * Try to cancel the task and wait until completion if the task is already
    * running.
    */
   void CancelAndWaitIfStarted() {
-    if (started_or_cancelled_.Set(true)) {
-      if (FeatureFlags::GetInstance()
-              .GetFlags()
-              .cancel_waits_for_running_tasks) {
-        // task could still be running, wait until finish
-        finished_.Get();
-      }
-    } else {
-      // mark as finished to support multiple calls to this method
-      finished_.Set(true);
+    absl::MutexLock lock(mutex_);
+    is_cancelled_ = true;
+    while (is_running_) {
+      cond_.Wait(&mutex_);
     }
   }
 
   void operator()() {
-    if (started_or_cancelled_.Set(true)) return;
-    finished_ = Future<bool>();
+    {
+      absl::MutexLock lock(mutex_);
+      if (is_cancelled_ || is_running_) return;
+      if (!is_repeated_ && was_run_) return;
+      was_run_ = true;
+      is_running_ = true;
+    }
     runnable_();
-    finished_.Set(true);
-    if (is_repeated_) {
-      started_or_cancelled_.Set(false);
+    {
+      absl::MutexLock lock(mutex_);
+      is_running_ = false;
+      cond_.SignalAll();
     }
   }
 
  private:
   const bool is_repeated_;
-  AtomicBoolean started_or_cancelled_{false};
-  Future<bool> finished_;
+  absl::Mutex mutex_;
+  absl::CondVar cond_;
+  bool is_cancelled_ ABSL_GUARDED_BY(mutex_){false};
+  bool was_run_ ABSL_GUARDED_BY(mutex_){false};
+  bool is_running_ ABSL_GUARDED_BY(mutex_){false};
   Runnable runnable_;
 };
 

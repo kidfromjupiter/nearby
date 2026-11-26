@@ -28,6 +28,7 @@ objc_library(
         "GNCBLEUtilsTest.mm",
         "GNCCryptoTest.mm",
         "GNCDeviceInfoTest.mm",
+        "GNCJsonUtilsTest.mm",
         "GNCMultiThreadExecutorTest.mm",
         "GNCPlatformTest.mm",
         "GNCPreferencesManagerTest.mm",
@@ -35,6 +36,7 @@ objc_library(
         "GNCSingleThreadExecutorTest.mm",
         "GNCTimerTest.mm",
         "GNCUtilsTest.m",
+        "GNCWifiAwareMediumTest.mm",
         "GNCWifiHotspotMediumTest.mm",
         "GNCWifiLanMediumTest.mm",
         "UtilsTest.mm",
@@ -63,6 +65,7 @@ objc_library(
         "//internal/platform/implementation/apple:ble_v2",
         "//internal/platform/implementation/apple:network_utils",
         "//internal/platform/implementation/apple/Flags",
+        "//internal/platform/implementation/apple/Mediums/Aware:WiFiAwareMedium",
         "//internal/platform/implementation/apple/Mediums/BLE",
         "//internal/platform/implementation/apple/Mediums/BLE/Sockets:Central",
         "//internal/platform/implementation/apple/Mediums/BLE/Sockets:Peripheral",
@@ -109,13 +112,12 @@ objc_library(
         "GNCFakeNotificationCenter.h",
     ],
     deps = [
-        ":PlatformTestsLibrary",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation/apple:GNCNotificationCenter",
         "//internal/platform/implementation/apple:app_lifecycle_monitor",
+        "//third_party/apple_frameworks:Foundation",
         "//third_party/apple_frameworks:UIKit",
         "//third_party/apple_frameworks:XCTest",
-        "@com_google_googletest//:gtest",
     ],
 )
 

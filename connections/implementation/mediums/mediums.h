@@ -17,14 +17,15 @@
 
 #include <memory>
 
-#include "connections/implementation/mediums/awdl.h"
+#include "connections/implementation/mediums/awdl/awdl_interface.h"
 #include "connections/implementation/mediums/ble.h"
-#include "connections/implementation/mediums/bluetooth_classic.h"
+#include "connections/implementation/mediums/bluetooth/bluetooth_classic_interface.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
 #include "connections/implementation/mediums/webrtc.h"
 #include "connections/implementation/mediums/wifi.h"
-#include "connections/implementation/mediums/wifi_direct.h"
-#include "connections/implementation/mediums/wifi_hotspot.h"
+#include "connections/implementation/mediums/wifi_aware/wifi_aware_interface.h"
+#include "connections/implementation/mediums/wifi_direct/wifi_direct_interface.h"
+#include "connections/implementation/mediums/wifi_hotspot/wifi_hotspot.h"
 #include "connections/implementation/mediums/wifi_lan.h"
 
 namespace nearby {
@@ -40,7 +41,7 @@ class Mediums {
   BluetoothRadio& GetBluetoothRadio();
 
   // Returns a handle to the Bluetooth Classic medium.
-  BluetoothClassic& GetBluetoothClassic();
+  BluetoothClassicInterface& GetBluetoothClassic();
 
   // Returns a handle to the Ble medium.
   Ble& GetBle();
@@ -51,17 +52,20 @@ class Mediums {
   // Returns a handle to the Wifi-Lan medium.
   WifiLan& GetWifiLan();
 
+  // Returns a handle to the Wifi-Aware medium.
+  WifiAwareInterface& GetWifiAware();
+
   // Returns a handle to the Wifi-Hotspot medium.
   WifiHotspot& GetWifiHotspot();
 
   // Returns a handle to the Wifi-Direct medium.
-  WifiDirect& GetWifiDirect();
+  WifiDirectInterface& GetWifiDirect();
 
   // Returns a handle to the WebRtc medium.
   mediums::WebRtc& GetWebRtc();
 
   // Returns a handle to the Awdl medium.
-  Awdl& GetAwdl();
+  AwdlInterface& GetAwdl();
 
  private:
   // The order of declaration is critical for both construction and
@@ -73,14 +77,15 @@ class Mediums {
   // 2) Destruction: The individual mediums should be shut down before the
   // corresponding radio.
   BluetoothRadio bluetooth_radio_;
-  BluetoothClassic bluetooth_classic_{bluetooth_radio_};
+  const std::unique_ptr<BluetoothClassicInterface> bluetooth_classic_;
   Ble ble_{bluetooth_radio_};
   Wifi wifi_;
   WifiLan wifi_lan_;
+  const std::unique_ptr<WifiAwareInterface> wifi_aware_;
   WifiHotspot wifi_hotspot_;
-  WifiDirect wifi_direct_;
-  std::unique_ptr<mediums::WebRtc> webrtc_;
-  Awdl awdl_;
+  const std::unique_ptr<WifiDirectInterface> wifi_direct_;
+  const std::unique_ptr<mediums::WebRtc> webrtc_;
+  const std::unique_ptr<AwdlInterface> awdl_;
 };
 
 }  // namespace connections

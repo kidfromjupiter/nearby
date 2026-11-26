@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 
+#include "location/nearby/analytics/cpp/logging/mock_event_logger.h"
 #include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
 #include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
 #include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
@@ -31,7 +32,7 @@
 #include "internal/base/observer_list.h"
 #include "internal/platform/clock.h"
 #include "internal/test/fake_clock.h"
-#include "internal/test/fake_task_runner.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "sharing/advertisement.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
@@ -133,7 +134,6 @@ class FakeNearbySharingService : public NearbySharingService {
   void SetVisibility(
       proto::DeviceVisibility visibility, absl::Duration expiration,
       absl::AnyInvocable<void(StatusCodes status_code) &&> callback) override {}
-  void UpdateFilePathsInProgress(bool update_file_paths) override {}
 
   NearbyShareSettings* GetSettings() override;
   NearbyShareCertificateManager* GetCertificateManager() override;
@@ -157,9 +157,13 @@ class FakeNearbySharingService : public NearbySharingService {
   FakeNearbyConnectionsManager& fake_nearby_connections_manager() {
     return connections_manager_;
   }
-  FakeTaskRunner& fake_task_runner() { return service_thread_; }
+  TestSingleThreadExecutor& service_thread() { return service_thread_; }
   analytics::AnalyticsRecorderImpl& analytics_recorder() {
     return analytics_recorder_;
+  }
+  FakeClock& fake_clock() { return clock_; }
+  nearby::analytics::MockEventLogger& mock_event_logger() {
+    return mock_event_logger_;
   }
 
   // Fake methods to support test scenarios.
@@ -200,8 +204,9 @@ class FakeNearbySharingService : public NearbySharingService {
   ObserverList<TransferUpdateCallback> foreground_receive_transfer_callbacks_;
   ObserverList<TransferUpdateCallback> background_receive_transfer_callbacks_;
   FakeClock clock_;
-  FakeTaskRunner service_thread_;
+  TestSingleThreadExecutor service_thread_;
   FakeNearbyConnectionsManager connections_manager_;
+  nearby::analytics::MockEventLogger mock_event_logger_;
   analytics::AnalyticsRecorderImpl analytics_recorder_;
   FakePreferenceManager preference_manager_;
   FakeNearbyIdentityClient identity_rpc_client_;

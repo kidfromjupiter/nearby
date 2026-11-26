@@ -31,7 +31,7 @@
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
 #include "internal/platform/clock.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/single_thread_executor.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
@@ -65,6 +65,8 @@ using ::nearby::sharing::service::proto::ConnectionResponseFrame;
 using ::nearby::sharing::service::proto::Frame;
 using ::nearby::sharing::service::proto::IntroductionFrame;
 using ::nearby::sharing::service::proto::V1Frame;
+
+constexpr absl::Duration kBindingResponseFrameTimeout = absl::Minutes(3);
 
 ConnectionLayerStatus ConvertToConnectionLayerStatus(Status status) {
   switch (status) {
@@ -131,7 +133,7 @@ std::optional<std::vector<uint8_t>> GetBluetoothMacAddressForShareTarget(
 }  // namespace
 
 OutgoingShareSession::OutgoingShareSession(
-    Clock* clock, TaskRunner& service_thread,
+    Clock* clock, SingleThreadExecutor& service_thread,
     NearbyConnectionsManager* connections_manager,
     analytics::AnalyticsRecorder& analytics_recorder, std::string endpoint_id,
     const ShareTarget& share_target,
@@ -166,7 +168,7 @@ bool OutgoingShareSession::InitiateSendAttachments(
   analytics_recorder().NewSendStart(session_id(),
                                     /*transfer_position=*/1,
                                     /*concurrent_connections=*/1,
-                                    share_target());
+                                    share_target(), os_type());
   text_payloads_.clear();
   wifi_credentials_payloads_.clear();
   file_payloads_.clear();
@@ -344,7 +346,7 @@ bool OutgoingShareSession::AcceptTransfer(
           .build());
   VLOG(1) << "Waiting for response frame from " << share_target().id;
   frames_reader()->ReadFrame(
-      nearby::sharing::service::proto::V1Frame::RESPONSE,
+      {nearby::sharing::service::proto::V1Frame::RESPONSE},
       [callback = std::move(response_callback)](bool is_timeout,
                                                 std::optional<V1Frame> frame) {
         if (!frame.has_value()) {
@@ -399,14 +401,16 @@ void OutgoingShareSession::SendAttachmentsCompleted(
   }
   int64_t sent_bytes = attachment_container().GetTotalAttachmentsSize() *
                        metadata.progress() / 100;
+  int64_t duration_millis =
+      connection_start_time_ == absl::UnixEpoch()
+          ? 0
+          : absl::ToInt64Milliseconds(clock().Now() - connection_start_time_);
 
   analytics_recorder().NewSendAttachmentsEnd(
       session_id(), sent_bytes, share_target(),
       ConvertToTransmissionStatus(metadata.status()),
       /*transfer_position=*/1,
-      /*concurrent_connections=*/1,
-      absl::ToInt64Milliseconds(clock().Now() - connection_start_time_),
-      /*referrer_package=*/std::nullopt,
+      /*concurrent_connections=*/1, duration_millis,
       ConvertToConnectionLayerStatus(connection_layer_status_), os_type());
 }
 
@@ -418,6 +422,7 @@ bool OutgoingShareSession::SendIntroduction(
   V1Frame* v1_frame = frame.mutable_v1();
   v1_frame->set_type(V1Frame::INTRODUCTION);
   IntroductionFrame* introduction_frame = v1_frame->mutable_introduction();
+  introduction_frame->set_use_case(IntroductionFrame::NEARBY_SHARE);
   introduction_frame->set_start_transfer(true);
   if (!FillIntroductionFrame(introduction_frame)) {
     return false;
@@ -428,6 +433,7 @@ bool OutgoingShareSession::SendIntroduction(
       session_id(), share_target(),
       /*transfer_position=*/1,
       /*concurrent_connections=*/1, os_type(),
+      IntroductionUseCaseToLoggingUseCase(introduction_frame->use_case()),
       nearby::sharing::cpp::common::GetPowerStatus());
   VLOG(1) << "Successfully wrote the introduction frame";
   ready_for_accept_ = true;
@@ -578,7 +584,7 @@ bool OutgoingShareSession::OnConnectResult(NearbyConnection* connection,
         /*transfer_position=*/1,
         /*concurrent_connections=*/1,
         absl::ToInt64Milliseconds(clock().Now() - connection_start_time_),
-        std::nullopt);
+        os_type());
     LOG(WARNING) << "Failed to initiate connection to share target "
                  << share_target().id;
     if (connection_layer_status_ == Status::kTimeout) {
@@ -601,7 +607,7 @@ bool OutgoingShareSession::OnConnectResult(NearbyConnection* connection,
       /*transfer_position=*/1,
       /*concurrent_connections=*/1,
       absl::ToInt64Milliseconds((clock().Now() - connection_start_time_)),
-      /*referrer_package=*/std::nullopt);
+      os_type());
   return true;
 }
 
@@ -668,9 +674,9 @@ void OutgoingShareSession::StartPeerBinding(
           .set_status(TransferMetadata::Status::kAwaitingRemoteAcceptance)
           .build());
   frames_reader()->ReadFrame(
-      nearby::sharing::service::proto::V1Frame::BINDINGS,
-      [callback = std::move(callback)](
-          bool is_timeout, std::optional<V1Frame> frame) mutable {
+      {nearby::sharing::service::proto::V1Frame::BINDINGS},
+      [callback = std::move(callback)](bool is_timeout,
+                                       std::optional<V1Frame> frame) mutable {
         BindingResponse failure_response;
         failure_response.set_status(BindingResponse::FAILURE);
         if (!frame.has_value()) {
@@ -685,7 +691,7 @@ void OutgoingShareSession::StartPeerBinding(
         // Peer binding flow completed successfully.
         std::move(callback)(frame->bindings().binding_response());
       },
-      kReadResponseFrameTimeout);
+      kBindingResponseFrameTimeout);
 }
 
 }  // namespace nearby::sharing

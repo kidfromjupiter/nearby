@@ -22,15 +22,7 @@
 #include "internal/platform/implementation/scheduled_executor.h"
 #include "internal/platform/runnable.h"
 
-/**
- * The impl class is an Obj-C class so that
- *  (a) the dispatch block can strongly retain it, and
- *  (b) for ease of declaring an atomic property.
- */
-@interface GNCOperationQueueImpl : NSObject
-@property(nonatomic) NSOperationQueue* queue;
-@property(atomic) BOOL shuttingDown;
-@end
+@class GNCOperationQueueImpl;
 
 namespace nearby {
 namespace apple {
@@ -49,9 +41,7 @@ class ScheduledExecutor : public api::ScheduledExecutor {
   // api::ScheduledExecutor:
   void Shutdown() override;
   std::shared_ptr<api::Cancelable> Schedule(Runnable&& runnable, absl::Duration duration) override;
-  void Execute(Runnable&& runnable) override;
-
-  bool DoSubmit(Runnable&& runnable);
+  bool Execute(Runnable&& runnable) override;
 
  private:
   void Shutdown(std::int64_t timeout_millis);

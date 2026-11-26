@@ -20,12 +20,11 @@
 #include "internal/platform/implementation/cancelable.h"
 #include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/platform.h"
-#include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/runnable.h"
 
 using ::nearby::Runnable;
 using ::nearby::api::ImplementationPlatform;
-using MultiThreadExecutor = ::nearby::api::SubmittableExecutor;
+using MultiThreadExecutor = ::nearby::api::Executor;
 
 @interface GNCMultiThreadExecutorTest : XCTestCase
 @property(atomic) int counter;
@@ -57,34 +56,6 @@ using MultiThreadExecutor = ::nearby::api::SubmittableExecutor;
   XCTAssertLessThanOrEqual(abs(self.counter - kIncrements), 0);
 }
 
-// Tests that the executor submits runnables as expected.
-- (void)testSubmit {
-  std::unique_ptr<MultiThreadExecutor> executor([self executor]);
-
-  // Submit two runnables that increment the counter.
-  const int kIncrements = 13;
-  for (int i = 0; i < kIncrements; i++) {
-    executor->DoSubmit([self]() { self.counter++; });
-    [NSThread sleepForTimeInterval:0.01];
-  }
-
-  // Check that the counter has the expected value after giving the runnables time to run.
-  XCTAssertLessThanOrEqual(abs(self.counter - kIncrements), 0);
-}
-
-// Tests that fails to submit when the executor is shut down.
-- (void)testFailtoSubmitAfterShutdown {
-  std::unique_ptr<MultiThreadExecutor> executor([self executor]);
-
-  executor->Shutdown();
-
-  XCTAssertFalse(executor->DoSubmit([self]() { self.counter++; }));
-
-  // Check that the counter has the expected value after giving the runnables time to run.
-  [NSThread sleepForTimeInterval:0.01];
-  XCTAssertEqual(self.counter, 0);
-}
-
 // Tests that when the executor is shut down, it waits for pending operations to finish, and no new
 // operations will be executed.
 - (void)testShutdownToAllowExistingTaskComplete {
@@ -100,7 +71,8 @@ using MultiThreadExecutor = ::nearby::api::SubmittableExecutor;
 
   executor->Shutdown();
 
-  executor->Execute([self]() { self.otherCounter++; });
+  XCTAssertFalse(executor->Execute(nullptr));
+  XCTAssertFalse(executor->Execute([self]() { self.otherCounter++; }));
 
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), queue, ^{
     XCTAssertLessThanOrEqual(self.counter, kRunnableCount);
@@ -109,6 +81,26 @@ using MultiThreadExecutor = ::nearby::api::SubmittableExecutor;
   });
 
   [self waitForExpectationsWithTimeout:0.5 handler:nil];
+}
+
+- (void)testExecuteDuringShutdownAndRepeatedShutdown {
+  std::unique_ptr<MultiThreadExecutor> executor([self executor]);
+  dispatch_semaphore_t started = dispatch_semaphore_create(0);
+
+  executor->Execute([self, started, &executor]() {
+    dispatch_semaphore_signal(started);
+    [NSThread sleepForTimeInterval:0.05];
+    executor->Execute([self]() { self.otherCounter++; });
+    self.counter++;
+  });
+
+  XCTAssertEqual(
+      dispatch_semaphore_wait(started, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)), 0);
+  executor->Shutdown();
+  executor->Shutdown();
+
+  XCTAssertEqual(self.counter, 1);
+  XCTAssertEqual(self.otherCounter, 0);
 }
 
 @end

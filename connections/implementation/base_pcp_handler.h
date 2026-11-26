@@ -27,6 +27,8 @@
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
@@ -39,7 +41,6 @@
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
 #include "connections/implementation/mediums/mediums.h"
-#include "connections/implementation/mediums/webrtc_peer_id.h"
 #include "connections/implementation/pcp.h"
 #include "connections/implementation/pcp_handler.h"
 #include "connections/implementation/webrtc_state.h"
@@ -60,15 +61,14 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/connection_info.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/future.h"
 #include "internal/platform/mac_address.h"
-#include "internal/platform/mutex.h"
 #include "internal/platform/nsd_service_info.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/scheduled_executor.h"
 #include "internal/platform/single_thread_executor.h"
+#include "internal/platform/wifi_aware_service_info.h"
 
 namespace nearby {
 namespace connections {
@@ -168,7 +168,7 @@ class BasePcpHandler : public PcpHandler,
   // @EndpointManagerThread
   void OnEndpointDisconnect(ClientProxy* client, const std::string& service_id,
                             const std::string& endpoint_id,
-                            CountDownLatch barrier,
+                            std::shared_ptr<absl::Notification> barrier,
                             DisconnectionReason reason) override;
 
   Status UpdateAdvertisingOptions(
@@ -259,12 +259,17 @@ class BasePcpHandler : public PcpHandler,
     NsdServiceInfo service_info;
   };
 
-  struct WebRtcEndpoint : public DiscoveredEndpoint {
-    WebRtcEndpoint(DiscoveredEndpoint endpoint, mediums::WebrtcPeerId peer_id)
-        : DiscoveredEndpoint(std::move(endpoint)),
-          peer_id(std::move(peer_id)) {}
+  struct WifiAwareEndpoint : public DiscoveredEndpoint {
+    WifiAwareEndpoint(DiscoveredEndpoint endpoint,
+                      const WifiAwareServiceInfo& service_info)
+        : DiscoveredEndpoint(std::move(endpoint)), service_info(service_info) {}
 
-    mediums::WebrtcPeerId peer_id;
+    WifiAwareServiceInfo service_info;
+  };
+
+  struct WebRtcEndpoint : public DiscoveredEndpoint {
+    explicit WebRtcEndpoint(DiscoveredEndpoint endpoint)
+        : DiscoveredEndpoint(std::move(endpoint)) {}
   };
 
   struct ConnectImplResult {
@@ -300,7 +305,8 @@ class BasePcpHandler : public PcpHandler,
       ClientProxy* client, const ByteArray& remote_endpoint_info,
       std::unique_ptr<EndpointChannel> endpoint_channel,
       location::nearby::proto::connections::Medium medium,
-      NearbyDevice::Type listening_device_type);  // throws Exception::IO
+      NearbyDevice::Type listening_device_type)
+      RUN_ON_PCP_HANDLER_THREAD();  // throws Exception::IO
 
   virtual bool HasOutgoingConnections(ClientProxy* client) const;
   virtual bool HasIncomingConnections(ClientProxy* client) const;
@@ -371,8 +377,8 @@ class BasePcpHandler : public PcpHandler,
   virtual location::nearby::proto::connections::Medium
   GetDefaultUpgradeMedium() = 0;
 
-  // Returns the first discovered endpoint for the given endpoint_id.
-  DiscoveredEndpoint* GetDiscoveredEndpoint(const std::string& endpoint_id)
+  // Returns true if an endpoint with endpoint_id has been discovered.
+  bool HasDiscoveredEndpoint(absl::string_view endpoint_id)
       ABSL_LOCKS_EXCLUDED(discovered_endpoint_mutex_);
 
   // Returns a vector of discovered endpoints, sorted in order of decreasing
@@ -400,10 +406,6 @@ class BasePcpHandler : public PcpHandler,
   // Returns a vector of ConnectionInfos generated from a StartOperationResult.
   std::vector<ConnectionInfoVariant> GetConnectionInfoFromResult(
       absl::string_view service_id, StartOperationResult result);
-
-  mediums::WebrtcPeerId CreatePeerIdFromAdvertisement(
-      const std::string& service_id, const std::string& endpoint_id,
-      const ByteArray& endpoint_info);
 
   SingleThreadExecutor* GetPcpHandlerThread()
       ABSL_LOCK_RETURNED(serial_executor_) {
@@ -537,11 +539,14 @@ class BasePcpHandler : public PcpHandler,
   static Exception WriteConnectionRequestFrame(
       NearbyDevice::Type device_type, absl::string_view device_proto_bytes,
       const ConnectionInfo& conection_info, EndpointChannel* endpoint_channel);
+
+  // This timeout should be at least as long as the Android GMSCore's timeout
+  // for initWifiInfo, which is currently 5 seconds.
+  // https://source.corp.google.com/piper///depot/google3/googledata/experiments/mobile/gmscore/nearby/features/connections_config.gcl;bpv=1;bpt=1;l=1187?gsn=connection_request_read_timeout_millis&gs=KYTHE%3A%2F%2Fkythe%3A%2F%2Fgoogle3%3Flang%3Dgcl%3Fpath%3Dgoogledata%2Fexperiments%2Fmobile%2Fgmscore%2Fnearby%2Ffeatures%2Fconnections_config.gcl%23IDENTIFIER%253AConnectionsConfig.connection_request_read_timeout_millis.
   static constexpr absl::Duration kConnectionRequestReadTimeout =
-      absl::Seconds(2);
+      absl::Seconds(5);
   static constexpr absl::Duration kRejectedConnectionCloseDelay =
       absl::Seconds(2);
-  static constexpr int kConnectionTokenLength = 8;
 
   // Returns true if the new endpoint is preferred over the old endpoint.
   bool IsPreferred(const BasePcpHandler::DiscoveredEndpoint& new_endpoint,
@@ -603,10 +608,6 @@ class BasePcpHandler : public PcpHandler,
   ExceptionOr<location::nearby::connections::OfflineFrame>
   ReadConnectionRequestFrame(EndpointChannel* channel);
 
-  // Returns an 8 characters length hashed string generated via a token byte
-  // array.
-  std::string GetHashedConnectionToken(const ByteArray& token_bytes);
-
   static void LogConnectionAttemptFailure(
       ClientProxy* client, Medium medium, const std::string& endpoint_id,
       bool is_incoming, absl::Time start_time,
@@ -622,7 +623,6 @@ class BasePcpHandler : public PcpHandler,
   // endpoint id. This is done by CancellationFlag.
   static bool Cancelled(ClientProxy* client, const std::string& endpoint_id);
 
-  void WaitForLatch(const std::string& method_name, CountDownLatch* latch);
   Status WaitForResult(const std::string& method_name, std::int64_t client_id,
                        Future<Status>* future);
   bool MediumSupportedByClientOptions(
@@ -665,7 +665,7 @@ class BasePcpHandler : public PcpHandler,
   AtomicBoolean closed_{false};
   ScheduledExecutor alarm_executor_;
   SingleThreadExecutor serial_executor_;
-  Mutex discovered_endpoint_mutex_;
+  absl::Mutex discovered_endpoint_mutex_;
 
   // A map of endpoint id -> PendingConnectionInfo. Entries in this map imply
   // that there is an active connection to the endpoint and we're waiting for

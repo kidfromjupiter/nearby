@@ -22,11 +22,11 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
-#include "internal/platform/mutex.h"
 #include "proto/connections_enums.pb.h"
 
 namespace nearby::connections {
@@ -106,6 +106,8 @@ class EndpointChannelManager final {
 
   // Check if any endpoint uses WLAN Medium
   bool isWifiLanConnected() const ABSL_LOCKS_EXCLUDED(mutex_);
+  // Check if any endpoint uses WIFI_AWARE Medium
+  bool isWifiAwareConnected() const ABSL_LOCKS_EXCLUDED(mutex_);
   void UpdateSafeToDisconnectForEndpoint(const std::string& endpoint_id,
                                          bool safe_to_disconnect_enabled)
       ABSL_LOCKS_EXCLUDED(mutex_);
@@ -133,8 +135,8 @@ class EndpointChannelManager final {
     class EndpointData {
      public:
       EndpointData() = default;
-      EndpointData(EndpointData&&) = default;
-      EndpointData& operator=(EndpointData&&) = default;
+      EndpointData(const EndpointData&) = delete;
+      EndpointData& operator=(const EndpointData&) = delete;
       ~EndpointData() {
         if (channel_ != nullptr) {
           channel_->Close(disconnect_reason_);
@@ -184,9 +186,8 @@ class EndpointChannelManager final {
       DisconnectionReason disconnect_reason_ =
           DisconnectionReason::UNKNOWN_DISCONNECTION_REASON;
       bool safe_to_disconnect_enabled_ = false;
-      mutable Mutex timeout_to_disconnected_mutex_;
-      ConditionVariable timeout_to_disconnected_{
-          &timeout_to_disconnected_mutex_};
+      mutable absl::Mutex timeout_to_disconnected_mutex_;
+      absl::CondVar timeout_to_disconnected_;
       bool timeout_to_disconnected_enabled_
           ABSL_GUARDED_BY(timeout_to_disconnected_mutex_) = false;
       bool timeout_to_disconnected_notified_
@@ -222,6 +223,7 @@ class EndpointChannelManager final {
 
     int GetConnectedEndpointsCount() const { return endpoints_.size(); }
     bool isWifiLanConnected() const;
+    bool isWifiAwareConnected() const;
     void MarkEndpointStopWaitToDisconnect(absl::string_view endpoint_id,
                                           bool is_safe_to_disconnect,
                                           bool notify_stop_waiting);
@@ -242,7 +244,7 @@ class EndpointChannelManager final {
       std::shared_ptr<EndpointChannel> channel, bool enable_encryption)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  mutable Mutex mutex_;
+  mutable absl::Mutex mutex_;
   ChannelState channel_state_ ABSL_GUARDED_BY(mutex_);
 };
 

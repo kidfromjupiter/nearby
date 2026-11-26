@@ -23,6 +23,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #if !defined(NC_OSS_BUILD)
@@ -69,6 +70,9 @@ class OfflineServiceController;
 }  // namespace nearby::connections
 
 namespace {
+
+using ::nearby::connections::ClientEvent;
+
 class FlagReaderWrapper : public nearby::flags::FlagReader {
  public:
   explicit FlagReaderWrapper(READER_CONTEXT context,
@@ -152,7 +156,7 @@ class NcEventLogger : public ::nearby::analytics::EventLogger {
  private:
   const NC_EVENT_LOGGER* event_logger_;
 };
-#else  // !defined(NC_OSS_BUILD)
+#else   // !defined(NC_OSS_BUILD)
 class NcEventLogger;
 #endif  // !defined(NC_OSS_BUILD)
 
@@ -279,7 +283,7 @@ NcCreateServiceWithEventLogger(const NC_EVENT_LOGGER* event_logger) {
   kNcContextMap->insert({nc_context.core, nc_context});
   return nc_context.core;
 }
-#else  // !defined(NC_OSS_BUILD)
+#else   // !defined(NC_OSS_BUILD)
 NC_INSTANCE NcCreateService() {
   NcContext nc_context;
   nc_context.router = new ::nearby::connections::ServiceControllerRouter();
@@ -330,6 +334,11 @@ void NcStartAdvertising(
       advertising_options->common_options.allowed_mediums[NC_MEDIUM_BLUETOOTH];
   cpp_advertising_options.allowed.wifi_lan =
       advertising_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN];
+  cpp_advertising_options.allowed.wifi_aware_r4 =
+      advertising_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE] ||
+      advertising_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE_R4];
   cpp_advertising_options.allowed.wifi_direct =
       advertising_options->common_options
           .allowed_mediums[NC_MEDIUM_WIFI_DIRECT];
@@ -440,6 +449,11 @@ void NcStartDiscovery(NC_INSTANCE instance, const NC_DATA* service_id,
       discovery_options->common_options.allowed_mediums[NC_MEDIUM_BLE];
   cpp_discovery_options.allowed.wifi_lan =
       discovery_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN];
+  cpp_discovery_options.allowed.wifi_aware_r4 =
+      discovery_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE] ||
+      discovery_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE_R4];
   cpp_discovery_options.allowed.wifi_hotspot =
       discovery_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT];
   cpp_discovery_options.allowed.web_rtc =
@@ -554,6 +568,11 @@ void NcRequestConnection(
       connection_options->common_options.allowed_mediums[NC_MEDIUM_WEB_RTC];
   cpp_connection_options.allowed.wifi_lan =
       connection_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN];
+  cpp_connection_options.allowed.wifi_aware_r4 =
+      connection_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE] ||
+      connection_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_AWARE_R4];
   cpp_connection_options.allowed.wifi_hotspot =
       connection_options->common_options
           .allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT];
@@ -687,6 +706,7 @@ void NcSendPayload(NC_INSTANCE instance, size_t endpoint_ids_size,
   }
 
   std::vector<std::string> endpoint_ids_vector;
+  endpoint_ids_vector.reserve(endpoint_ids_size);
   for (size_t i = 0; i < endpoint_ids_size; ++i) {
     endpoint_ids_vector.push_back(convertIntToString(endpoint_ids[i]));
   }
@@ -817,4 +837,44 @@ void NcSetPhenotypeFlagReader(READER_CONTEXT context,
   static absl::NoDestructor<FlagReaderWrapper> kNearbyFlags(
       context, phenotype_flag_reader);
   nearby::NearbyFlags::GetInstance().SetFlagReader(*kNearbyFlags);
+}
+
+void NcRegisterEventHandler(NC_INSTANCE instance,
+                            NcCallbackEventHandler event_handler,
+                            CALLER_CONTEXT context) {
+  NcContext* nc_context = GetContext(instance);
+  if (nc_context == nullptr) {
+    LOG(WARNING) << "Trying to register event handler on not existent service "
+                 << instance;
+    return;
+  }
+
+  if (event_handler == nullptr) {
+    nc_context->core->UnregisterEventHandler();
+    return;
+  }
+
+  nc_context->core->RegisterEventHandler(
+      [instance, event_handler, context](const ClientEvent& event) {
+        NC_EVENT nc_event{};
+        nc_event.endpoint_id = convertStringToInt(event.endpoint_id);
+        if (const auto* prompt =
+                std::get_if<ClientEvent::JoinHotspotPrompt>(&event.data)) {
+          nc_event.type = NC_EVENT_TYPE_JOIN_HOTSPOT_PROMPT;
+          nc_event.data.data = const_cast<char*>(prompt->ssid.data());
+          nc_event.data.size = prompt->ssid.size();
+        } else if (const auto* pin =
+                       std::get_if<ClientEvent::DisplayPin>(&event.data)) {
+          nc_event.type = NC_EVENT_TYPE_DISPLAY_PIN;
+          nc_event.data.data = const_cast<char*>(pin->pin.data());
+          nc_event.data.size = pin->pin.size();
+        } else if (std::holds_alternative<ClientEvent::EnterPin>(event.data)) {
+          nc_event.type = NC_EVENT_TYPE_ENTER_PIN;
+          nc_event.data.data = nullptr;
+          nc_event.data.size = 0;
+        } else {
+          return true;
+        }
+        return event_handler(instance, &nc_event, context);
+      });
 }

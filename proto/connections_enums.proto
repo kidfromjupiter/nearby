@@ -91,6 +91,7 @@ enum Medium {
   USB = 11;
   WEB_RTC_NON_CELLULAR = 12;
   AWDL = 13;
+  WIFI_AWARE_R4 = 14;
 }
 // LINT.ThenChange(
 //     //depot/google3/java/com/google/android/gmscore/integ/client/nearby/src/com/google/android/gms/nearby/connection/Medium.java,
@@ -100,7 +101,8 @@ enum Medium {
 //     //depot/google3/third_party/nearby/connections/c/nc_types.h,
 //     //depot/google3/logs/proto/wireless/android/backup/os_migration_log.proto:BandwidthChangedEvent.Medium,
 //     //depot/google3/java/com/google/android/gmscore/integ/modules/smartdevice/src/com/google/android/gms/smartdevice/logging/gil/SemanticLogger.kt,
-//     //depot/google3/javatests/com/google/android/gmscore/integ/modules/smartdevice/tests/robolectric/src/com/google/android/gms/smartdevice/logging/gil/SemanticLoggerTest.kt
+//     //depot/google3/javatests/com/google/android/gmscore/integ/modules/smartdevice/tests/robolectric/src/com/google/android/gms/smartdevice/logging/gil/SemanticLoggerTest.kt,
+//     //depot/google3/third_party/nearby/sharing/nearby_connections_types.h
 // )
 
 // LINT.IfChange
@@ -1323,6 +1325,8 @@ enum OperationResultCode {
   // Outgoing AWDL channel creation failure (IOException on
   // socket#getInputStream and socket#getOutputStream)
   NEARBY_AWDL_ENDPOINT_CHANNEL_CREATION_FAILURE = 4612;
+  // Failed to verify paired key during connection setup
+  NEARBY_PAIRED_KEY_VERIFICATION_FAILURE = 4613;
 
   // Section of CATEGORY_DCT_ERROR, from 5000
   // BLE is disabled
@@ -1495,6 +1499,16 @@ enum DctPayloadType {
   DCT_PAYLOAD_TYPE_FILES_RESPONSE = 3;
   // A one-way message payload.
   DCT_PAYLOAD_TYPE_ONE_WAY_MESSAGE = 4;
+}
+
+// Device capability for OS information.
+enum OsType {
+  UNKNOWN_OS_TYPE = 0;
+  ANDROID = 1;
+  CHROME_OS = 2;
+  WINDOWS = 3;
+  APPLE = 4;
+  LINUX = 100;  // g3 test environment
 }
 // LINT.ThenChange(
 //     //depot/google3/wireless/android/stats/platform/westworld/public/protos/enums/android/nearby/connections/enums.proto

@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <variant>
 
 // This file defines all the protocol listeners and their parameter structures.
 // Listeners are defined as collections of std::function<T> instances, which is
@@ -143,7 +144,7 @@ struct DiscoveryListener {
   // service_id    - The ID of the service advertised by the remote endpoint.
   absl::AnyInvocable<void(const std::string& endpoint_id,
                           const ByteArray& endpoint_info,
-                          const std::string& service_id)>
+                          const std::string& service_id) const>
       endpoint_found_cb =
           [](const std::string&, const ByteArray&, const std::string&) {};
 
@@ -152,15 +153,16 @@ struct DiscoveryListener {
   // #onEndpointFound(String, DiscoveredEndpointInfo)}.
   //
   // endpoint_id - The ID of the remote endpoint that was lost.
-  absl::AnyInvocable<void(const std::string& endpoint_id)> endpoint_lost_cb =
-      [](const std::string&) {};
+  absl::AnyInvocable<void(const std::string& endpoint_id) const>
+      endpoint_lost_cb = [](const std::string&) {};
 
   // Called when a remote endpoint is found with an updated distance.
   //
   // arguments:
   //   endpoint_id - The ID of the remote endpoint that was lost.
   //   info        - The distance info, encoded as enum value.
-  absl::AnyInvocable<void(const std::string& endpoint_id, DistanceInfo info)>
+  absl::AnyInvocable<void(const std::string& endpoint_id, DistanceInfo info)
+                         const>
       endpoint_distance_changed_cb = [](const std::string&, DistanceInfo) {};
 };
 
@@ -184,10 +186,34 @@ struct PayloadListener {
   // info -  The PayloadProgressInfo structure describing the status of
   //         the transfer.
   absl::AnyInvocable<void(absl::string_view endpoint_id,
-                          const PayloadProgressInfo& info)>
+                          const PayloadProgressInfo& info) const>
       payload_progress_cb =
           [](absl::string_view, const PayloadProgressInfo&) {};
 };
+
+// An event that requires a decision from the client.
+struct ClientEvent {
+  // The local device is about to join the remote endpoint's Wi-Fi hotspot.
+  struct JoinHotspotPrompt {
+    std::string ssid;
+  };
+  // Reserved.
+  struct DisplayPin {
+    std::string pin;
+  };
+  // Reserved.
+  struct EnterPin {};
+
+  using Data = std::variant<JoinHotspotPrompt, DisplayPin, EnterPin>;
+
+  std::string endpoint_id;
+  Data data;
+};
+
+// Handles a `ClientEvent` synchronously. Returns true if the operation that
+// triggered the event may proceed, false to cancel it. The handler blocks the
+// calling thread until it returns.
+using ClientEventHandler = absl::AnyInvocable<bool(const ClientEvent& event)>;
 
 }  // namespace connections
 }  // namespace nearby

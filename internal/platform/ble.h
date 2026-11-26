@@ -27,6 +27,7 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
@@ -36,7 +37,6 @@
 #include "internal/platform/input_stream.h"
 #include "internal/platform/listeners.h"
 #include "internal/platform/logging.h"
-#include "internal/platform/mutex.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/uuid.h"
 
@@ -124,13 +124,18 @@ class BleSocket final {
 
   // Sets the close notifier by client side.
   void SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
+    absl::MutexLock lock(state_->mutex);
     state_->close_notifier = std::move(notifier);
   }
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   Exception Close() {
-    if (state_->close_notifier != nullptr) {
-      absl::AnyInvocable<void()> notifier = std::move(state_->close_notifier);
+    absl::AnyInvocable<void()> notifier;
+    {
+      absl::MutexLock lock(state_->mutex);
+      notifier = std::move(state_->close_notifier);
+    }
+    if (notifier != nullptr) {
       notifier();
     }
     return state_->socket->Close();
@@ -159,8 +164,9 @@ class BleSocket final {
 
  private:
   struct SharedState {
+    absl::Mutex mutex;
     std::unique_ptr<api::ble::BleSocket> socket;
-    absl::AnyInvocable<void()> close_notifier;
+    absl::AnyInvocable<void()> close_notifier ABSL_GUARDED_BY(mutex);
   };
   std::shared_ptr<SharedState> state_ = std::make_shared<SharedState>();
   BlePeripheral peripheral_;
@@ -225,9 +231,10 @@ class GattServer final {
   std::optional<api::ble::GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
       const api::ble::GattCharacteristic::Permission permission,
-      const api::ble::GattCharacteristic::Property property) {
+      const api::ble::GattCharacteristic::Property property,
+      const ByteArray& initial_value) {
     return impl_->CreateCharacteristic(service_uuid, characteristic_uuid,
-                                       permission, property);
+                                       permission, property, initial_value);
   }
 
   bool UpdateCharacteristic(const api::ble::GattCharacteristic& characteristic,
@@ -336,13 +343,18 @@ class BleL2capSocket final {
 
   // Sets the close notifier by client side.
   void SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
+    absl::MutexLock lock(state_->mutex);
     state_->close_notifier = std::move(notifier);
   }
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   Exception Close() {
-    if (state_->close_notifier != nullptr) {
-      absl::AnyInvocable<void()> notifier = std::move(state_->close_notifier);
+    absl::AnyInvocable<void()> notifier;
+    {
+      absl::MutexLock lock(state_->mutex);
+      notifier = std::move(state_->close_notifier);
+    }
+    if (notifier != nullptr) {
       notifier();
     }
     return state_->socket->Close();
@@ -371,8 +383,9 @@ class BleL2capSocket final {
 
  private:
   struct SharedState {
+    absl::Mutex mutex;
     std::unique_ptr<api::ble::BleL2capSocket> socket;
-    absl::AnyInvocable<void()> close_notifier;
+    absl::AnyInvocable<void()> close_notifier ABSL_GUARDED_BY(mutex);
   };
   std::shared_ptr<SharedState> state_ = std::make_shared<SharedState>();
   BlePeripheral peripheral_;
@@ -566,7 +579,7 @@ class BleMedium final {
       const std::string& ble_peripheral_native_id);
 
  private:
-  Mutex mutex_;
+  absl::Mutex mutex_;
   std::unique_ptr<api::ble::BleMedium> impl_;
   BluetoothAdapter& adapter_;
   ServerGattConnectionCallback server_gatt_connection_callback_

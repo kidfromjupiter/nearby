@@ -41,6 +41,23 @@
       nearby::connections::config_package_nearby::nearby_connections_feature::
           kEnableSharedPeripheralManager,
       false);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableWifiAware,
+      false);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableAwdl, false);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kSynchronizeNwFrameworkSocketWriteTimeout,
+      false);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kGuardNwFrameworkSocketReadCondition,
+      false);
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kCloseNwFrameworkSocketSafely,
+      false);
 
   [super tearDown];
 }
@@ -113,6 +130,79 @@
           kEnableSharedPeripheralManager,
       NO);
   XCTAssertFalse([GNCFeatureFlags sharedPeripheralManagerEnabled]);
+}
+
+- (void)testWifiAwareEnabled_WhenFlagIsTrue {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableWifiAware,
+      YES);
+  XCTAssertTrue([GNCFeatureFlags wifiAwareEnabled]);
+}
+
+- (void)testWifiAwareEnabled_WhenFlagIsFalse {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableWifiAware, NO);
+  XCTAssertFalse([GNCFeatureFlags wifiAwareEnabled]);
+}
+
+- (void)testAwdlEnabled_WhenFlagIsTrue {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableAwdl, true);
+  XCTAssertTrue([GNCFeatureFlags awdlEnabled]);
+}
+
+- (void)testAwdlEnabled_WhenFlagIsFalse {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableAwdl, false);
+  XCTAssertFalse([GNCFeatureFlags awdlEnabled]);
+}
+
+- (void)testSynchronizeNWFrameworkSocketWriteTimeoutEnabled_WhenFlagIsTrue {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kSynchronizeNwFrameworkSocketWriteTimeout,
+      YES);
+  XCTAssertTrue([GNCFeatureFlags synchronizeNWFrameworkSocketWriteTimeoutEnabled]);
+}
+
+- (void)testSynchronizeNWFrameworkSocketWriteTimeoutEnabled_WhenFlagIsFalse {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kSynchronizeNwFrameworkSocketWriteTimeout,
+      NO);
+  XCTAssertFalse([GNCFeatureFlags synchronizeNWFrameworkSocketWriteTimeoutEnabled]);
+}
+
+- (void)testGuardNWFrameworkSocketReadConditionEnabled_WhenFlagIsTrue {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kGuardNwFrameworkSocketReadCondition,
+      YES);
+  XCTAssertTrue([GNCFeatureFlags guardNWFrameworkSocketReadConditionEnabled]);
+}
+
+- (void)testGuardNWFrameworkSocketReadConditionEnabled_WhenFlagIsFalse {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kGuardNwFrameworkSocketReadCondition,
+      NO);
+  XCTAssertFalse([GNCFeatureFlags guardNWFrameworkSocketReadConditionEnabled]);
+}
+
+- (void)testCloseNWFrameworkSocketSafelyEnabled_WhenFlagIsTrue {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kCloseNwFrameworkSocketSafely,
+      YES);
+  XCTAssertTrue([GNCFeatureFlags closeNWFrameworkSocketSafelyEnabled]);
+}
+
+- (void)testCloseNWFrameworkSocketSafelyEnabled_WhenFlagIsFalse {
+  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kCloseNwFrameworkSocketSafely,
+      NO);
+  XCTAssertFalse([GNCFeatureFlags closeNWFrameworkSocketSafelyEnabled]);
 }
 
 @end

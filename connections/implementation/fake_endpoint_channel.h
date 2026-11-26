@@ -18,8 +18,11 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/endpoint_channel.h"
@@ -45,8 +48,13 @@ class FakeEndpointChannel : public EndpointChannel {
     read_timestamp_ = SystemClock::ElapsedRealtime();
     return read_output_;
   }
-  Exception Write(absl::string_view data) override {
+  Exception Write(absl::string_view data)
+      ABSL_LOCKS_EXCLUDED(write_mutex_) override {
     write_timestamp_ = SystemClock::ElapsedRealtime();
+    {
+      absl::MutexLock lock(write_mutex_);
+      written_frames_.push_back(std::string(data));
+    }
     return write_output_;
   }
   void Close() override { is_closed_ = true; }
@@ -77,9 +85,11 @@ class FakeEndpointChannel : public EndpointChannel {
   std::string GetName() const override { return "fake-channel-" + service_id_; }
   Medium GetMedium() const override { return medium_; }
   int GetMaxTransmitPacketSize() const override { return 512; }
-  void EnableEncryption(std::shared_ptr<EncryptionContext> context) override {}
-  void DisableEncryption() override {}
-  bool IsEncrypted() override { return false; }
+  void EnableEncryption(std::shared_ptr<EncryptionContext> context) override {
+    is_encrypted_ = (context != nullptr);
+  }
+  void DisableEncryption() override { is_encrypted_ = false; }
+  bool IsEncrypted() override { return is_encrypted_; }
   ExceptionOr<ByteArray> TryDecrypt(const ByteArray& data) override {
     return Exception::kFailed;
   }
@@ -100,6 +110,11 @@ class FakeEndpointChannel : public EndpointChannel {
 
   void set_read_output(ExceptionOr<ByteArray> output) { read_output_ = output; }
   void set_write_output(Exception output) { write_output_ = output; }
+  std::vector<std::string> GetWrittenFrames() const
+      ABSL_LOCKS_EXCLUDED(write_mutex_) {
+    absl::MutexLock lock(write_mutex_);
+    return written_frames_;
+  }
   bool is_closed() const { return is_closed_; }
   location::nearby::proto::connections::DisconnectionReason
   disconnection_reason() const {
@@ -109,12 +124,15 @@ class FakeEndpointChannel : public EndpointChannel {
  private:
   ExceptionOr<ByteArray> read_output_;
   Exception write_output_{Exception::kSuccess};
+  mutable absl::Mutex write_mutex_;
+  std::vector<std::string> written_frames_ ABSL_GUARDED_BY(write_mutex_);
   Medium medium_;
   std::string service_id_;
   absl::Time read_timestamp_ = absl::InfinitePast();
   absl::Time write_timestamp_ = absl::InfinitePast();
   bool is_closed_ = false;
   bool is_paused_ = false;
+  bool is_encrypted_ = false;
   location::nearby::proto::connections::DisconnectionReason
       disconnection_reason_;
   std::string local_endpoint_id_;

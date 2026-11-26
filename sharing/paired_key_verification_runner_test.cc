@@ -30,10 +30,11 @@
 #include "gtest/gtest.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
-#include "internal/platform/task_runner.h"
+#include "absl/types/span.h"
+#include "internal/platform/single_thread_executor.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
-#include "internal/test/fake_task_runner.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/certificates/fake_nearby_share_certificate_manager.h"
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
@@ -142,7 +143,7 @@ const absl::Duration kTimeout = absl::Seconds(1);
 
 class MockIncomingFramesReader : public IncomingFramesReader {
  public:
-  MockIncomingFramesReader(TaskRunner& service_thread,
+  MockIncomingFramesReader(SingleThreadExecutor& service_thread,
                            NearbyConnection* connection)
       : IncomingFramesReader(service_thread, connection) {}
 
@@ -153,7 +154,7 @@ class MockIncomingFramesReader : public IncomingFramesReader {
               (override));
 
   MOCK_METHOD(void, ReadFrame,
-              (service::proto::V1Frame_FrameType frame_type,
+              (absl::Span<const service::proto::V1Frame::FrameType> frame_types,
                absl::AnyInvocable<void(bool is_timeout, std::optional<V1Frame>)>
                    callback,
                absl::Duration timeout),
@@ -240,9 +241,12 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
   }
 
   void SetUpPairedKeyEncryptionFrame(ReturnFrameType frame_type) {
-    EXPECT_CALL(frames_reader_,
-                ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_ENCRYPTION),
-                          testing::_, testing::Eq(kTimeout)))
+    EXPECT_CALL(
+        frames_reader_,
+        ReadFrame(testing::Matcher<absl::Span<const V1Frame::FrameType>>(
+                      testing::ElementsAre(V1Frame::PAIRED_KEY_ENCRYPTION,
+                                           V1Frame::CANCEL)),
+                  testing::_, testing::Eq(kTimeout)))
         .WillOnce(testing::WithArg<1>(
             [frame_type](absl::AnyInvocable<void(bool is_timeout,
                                                  std::optional<V1Frame>)>
@@ -302,9 +306,12 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
       ReturnFrameType frame_type,
       PairedKeyResultFrame::Status status = PairedKeyResultFrame::UNKNOWN,
       OSType os_type = OSType::UNKNOWN_OS_TYPE) {
-    EXPECT_CALL(frames_reader_,
-                ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_RESULT), testing::_,
-                          testing::Eq(kTimeout)))
+    EXPECT_CALL(
+        frames_reader_,
+        ReadFrame(testing::Matcher<absl::Span<const V1Frame::FrameType>>(
+                      testing::ElementsAre(V1Frame::PAIRED_KEY_RESULT,
+                                           V1Frame::CANCEL)),
+                  testing::_, testing::Eq(kTimeout)))
         .WillOnce(testing::WithArg<1>(
             [=](absl::AnyInvocable<void(bool is_timeout,
                                         std::optional<V1Frame>)>
@@ -348,7 +355,7 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
 
  private:
   FakeClock fake_clock_;
-  FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
+  TestSingleThreadExecutor fake_task_runner_{&fake_clock_};
   FakeDeviceInfo fake_device_info_;
   FakeNearbyConnectionsManager fake_connections_manager_;
   NearbyConnectionImpl connection_;

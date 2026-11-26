@@ -15,19 +15,24 @@
 #include "internal/platform/single_thread_executor.h"
 
 #include <atomic>
+#include <memory>
 #include <string>
+#include <thread>  // NOLINT(build/c++11)
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "absl/base/nullability.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/synchronization/blocking_counter.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "internal/platform/count_down_latch.h"
-#include "internal/platform/exception.h"
-#include "internal/platform/future.h"
+#include "internal/platform/timer.h"
 
 namespace nearby {
+namespace {
 
 TEST(SingleThreadExecutorTest, ConsructorDestructorWorks) {
   SingleThreadExecutor executor;
@@ -37,10 +42,10 @@ TEST(SingleThreadExecutorTest, CanExecute) {
   absl::CondVar cond;
   std::atomic_bool done = false;
   SingleThreadExecutor executor;
-  executor.Execute([&done, &cond]() {
+  EXPECT_TRUE(executor.Execute([&done, &cond]() {
     done = true;
     cond.SignalAll();
-  });
+  }));
   absl::Mutex mutex;
   {
     absl::MutexLock lock(mutex);
@@ -55,10 +60,10 @@ TEST(SingleThreadExecutorTest, CanExecuteNamedTask) {
   absl::CondVar cond;
   std::atomic_bool done = false;
   SingleThreadExecutor executor;
-  executor.Execute("my task", [&done, &cond]() {
+  EXPECT_TRUE(executor.Execute("my task", [&done, &cond]() {
     done = true;
     cond.SignalAll();
-  });
+  }));
   absl::Mutex mutex;
   {
     absl::MutexLock lock(mutex);
@@ -94,15 +99,6 @@ TEST(SingleThreadExecutorTest, JobsExecuteInOrder) {
   EXPECT_EQ(results, (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}));
 }
 
-TEST(SingleThreadExecutorTest, CanSubmit) {
-  SingleThreadExecutor executor;
-  Future<bool> future;
-  bool submitted =
-      executor.Submit<bool>([]() { return ExceptionOr<bool>{true}; }, &future);
-  EXPECT_TRUE(submitted);
-  EXPECT_TRUE(future.Get().result());
-}
-
 TEST(SingleThreadExecutorTest, ShutdownWaitsForRunningTasks) {
   SingleThreadExecutor executor;
   std::atomic_int value = 0;
@@ -118,21 +114,25 @@ TEST(SingleThreadExecutorTest, ShutdownWaitsForRunningTasks) {
 
 TEST(SingleThreadExecutorTest, ExecuteAfterShutdownFails) {
   SingleThreadExecutor executor;
+  EXPECT_FALSE(executor.Execute(nullptr));
+  EXPECT_FALSE(executor.Execute("empty", nullptr));
 
   executor.Shutdown();
-  executor.Execute([&]() { FAIL() << "Task should not run"; });
+  EXPECT_FALSE(executor.Execute([&]() { FAIL() << "Task should not run"; }));
+  EXPECT_FALSE(
+      executor.Execute("named", [&]() { FAIL() << "Task should not run"; }));
 }
 
 TEST(SingleThreadExecutorTest, ExecuteDuringShutdownFails) {
-  CountDownLatch latch(1);
+  absl::Notification notification;
   SingleThreadExecutor executor;
 
   executor.Execute([&]() {
-    latch.CountDown();
+    notification.Notify();
     absl::SleepFor(absl::Seconds(1));
     executor.Execute([&]() { FAIL() << "Task should not run"; });
   });
-  latch.Await();
+  notification.WaitForNotification();
   executor.Shutdown();
 }
 
@@ -153,22 +153,221 @@ TEST(SingleThreadExecutorTest, ThreadCheck_ExecuteRunnable) {
       });
 }
 
-TEST(SingleThreadExecutorTest, ThreadCheck_SubmitCallable) {
-  ThreadCheckTestClass test_class;
-  test_class.executor.Execute(
-      [&test_class]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(test_class.executor) {
-        test_class.incValue();
-      });
-  Future<int> future;
+TEST(SingleThreadExecutorTest, DelayedExecute) {
+  SingleThreadExecutor executor;
+  std::atomic_bool first_task_started = false;
+  absl::BlockingCounter counter(2);
 
-  bool submitted = test_class.executor.Submit<int>(
-      [&test_class]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(test_class.executor) {
-        return ExceptionOr<int>{test_class.getValue()};
-      },
-      &future);
+  EXPECT_TRUE(executor.DelayedExecute(absl::Milliseconds(100), [&]() {
+    first_task_started.store(true, std::memory_order_seq_cst);
+    counter.DecrementCount();
+  }));
 
-  EXPECT_TRUE(submitted);
-  EXPECT_EQ(future.Get().result(), 1);
+  executor.Execute([&]() {
+    EXPECT_FALSE(first_task_started.load(std::memory_order_seq_cst));
+    counter.DecrementCount();
+  });
+
+  counter.Wait();
+  EXPECT_TRUE(first_task_started.load(std::memory_order_seq_cst));
 }
 
+TEST(SingleThreadExecutorTest, TwoDelayedExecuteTasks) {
+  SingleThreadExecutor executor;
+  std::atomic_bool first_task_started = false;
+  absl::BlockingCounter counter(2);
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::Milliseconds(500), [&]() {
+    first_task_started.store(true, std::memory_order_seq_cst);
+    counter.DecrementCount();
+  }));
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::Milliseconds(1), [&]() {
+    EXPECT_FALSE(first_task_started.load(std::memory_order_seq_cst));
+    counter.DecrementCount();
+  }));
+
+  counter.Wait();
+  EXPECT_TRUE(first_task_started.load(std::memory_order_seq_cst));
+}
+
+TEST(SingleThreadExecutorTest, DelayedExecuteEmptyTask) {
+  SingleThreadExecutor executor;
+  EXPECT_TRUE(executor.DelayedExecute(absl::Milliseconds(100), nullptr));
+}
+
+TEST(SingleThreadExecutorTest, DelayedExecuteAfterShutdownFails) {
+  SingleThreadExecutor executor;
+  executor.Shutdown();
+
+  EXPECT_FALSE(executor.DelayedExecute(
+      absl::Milliseconds(50), [&]() { FAIL() << "Task should not run"; }));
+}
+
+TEST(SingleThreadExecutorTest, ShutdownCancelsPendingDelayedExecute) {
+  SingleThreadExecutor executor;
+  std::atomic_bool called = false;
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::Seconds(10), [&]() {
+    called.store(true, std::memory_order_seq_cst);
+  }));
+  executor.Shutdown();
+
+  EXPECT_FALSE(called.load(std::memory_order_seq_cst));
+}
+
+TEST(SingleThreadExecutorTest, DelayedExecuteZeroDelay) {
+  SingleThreadExecutor executor;
+  absl::Notification done;
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::ZeroDuration(),
+                                      [&done]() { done.Notify(); }));
+
+  EXPECT_TRUE(done.WaitForNotificationWithTimeout(absl::Seconds(5)));
+}
+
+TEST(SingleThreadExecutorTest, DelayedExecuteNegativeDelayExecutesImmediately) {
+  SingleThreadExecutor executor;
+  absl::BlockingCounter counter(2);
+
+  EXPECT_TRUE(executor.DelayedExecute(
+      -absl::Seconds(1), [&counter]() { counter.DecrementCount(); }));
+  EXPECT_TRUE(executor.DelayedExecute(
+      -absl::InfiniteDuration(), [&counter]() { counter.DecrementCount(); }));
+
+  counter.Wait();
+}
+
+TEST(SingleThreadExecutorTest, MultipleShutdownCallsAreIdempotent) {
+  SingleThreadExecutor executor;
+  std::atomic_bool called = false;
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::Seconds(10), [&called]() {
+    called.store(true, std::memory_order_seq_cst);
+  }));
+  executor.Shutdown();
+  executor.Shutdown();
+
+  EXPECT_FALSE(called.load(std::memory_order_seq_cst));
+}
+
+TEST(SingleThreadExecutorTest, DelayedExecuteLargeDelayDoesNotFireImmediately) {
+  SingleThreadExecutor executor;
+  std::atomic_bool called = false;
+  absl::Notification fence_done;
+
+  EXPECT_TRUE(executor.DelayedExecute(absl::Hours(24 * 30), [&called]() {
+    called.store(true, std::memory_order_seq_cst);
+  }));
+  EXPECT_TRUE(executor.DelayedExecute(absl::InfiniteDuration(), [&called]() {
+    called.store(true, std::memory_order_seq_cst);
+  }));
+  executor.Execute([&fence_done]() { fence_done.Notify(); });
+
+  EXPECT_TRUE(fence_done.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  absl::SleepFor(absl::Milliseconds(50));
+  executor.Shutdown();
+  EXPECT_FALSE(called.load(std::memory_order_seq_cst));
+}
+
+TEST(SingleThreadExecutorTest, ShutdownConcurrentWithDelayedExecuteCallbacks) {
+  // Stress-tests that concurrent timer callbacks racing with Shutdown() and
+  // destruction do not deadlock or trigger use-after-free.
+  constexpr int kIterations = 50;
+  constexpr int kTimersPerIteration = 20;
+  std::atomic_int immediate_count = 0;
+  std::atomic_int delayed_count = 0;
+  for (int iter = 0; iter < kIterations; ++iter) {
+    SingleThreadExecutor executor;
+    executor.Execute([&immediate_count]() {
+      immediate_count.fetch_add(1, std::memory_order_relaxed);
+    });
+    for (int i = 0; i < kTimersPerIteration; ++i) {
+      EXPECT_TRUE(executor.DelayedExecute(
+          absl::Milliseconds(i % 3), [&delayed_count]() {
+            delayed_count.fetch_add(1, std::memory_order_relaxed);
+          }));
+    }
+    absl::SleepFor(absl::Milliseconds(1));
+    executor.Shutdown();
+  }
+  EXPECT_EQ(immediate_count.load(std::memory_order_relaxed), kIterations);
+  EXPECT_LE(delayed_count.load(std::memory_order_relaxed),
+            kIterations * kTimersPerIteration);
+}
+
+TEST(SingleThreadExecutorTest, ThreadCheck_DelayedExecuteRunnable) {
+  ThreadCheckTestClass test_class;
+  absl::Notification notification;
+
+  EXPECT_TRUE(test_class.executor.DelayedExecute(
+      absl::Milliseconds(10),
+      [&test_class,
+       &notification]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(test_class.executor) {
+        test_class.incValue();
+        EXPECT_EQ(test_class.getValue(), 1);
+        notification.Notify();
+      }));
+  EXPECT_TRUE(notification.WaitForNotificationWithTimeout(absl::Seconds(5)));
+}
+
+class FailingTimer : public Timer {
+ public:
+  bool Start(int delay, int period,
+             absl::AnyInvocable<void()> callback) override {
+    return false;
+  }
+  void Stop() override {}
+  bool IsRunning() override { return false; }
+};
+
+class FailingTimerSingleThreadExecutor : public SingleThreadExecutor {
+ protected:
+  absl_nonnull std::unique_ptr<Timer> CreateTimer() override {
+    return std::make_unique<FailingTimer>();
+  }
+};
+
+TEST(SingleThreadExecutorTest, DelayedExecuteTimerStartFailureReturnsFalse) {
+  FailingTimerSingleThreadExecutor executor;
+
+  EXPECT_FALSE(executor.DelayedExecute(
+      absl::Milliseconds(10), []() { FAIL() << "Task should not run"; }));
+}
+
+TEST(SingleThreadExecutorTest, ConcurrentExecuteAndShutdown) {
+  constexpr int kIterations = 25;
+  constexpr int kProducerThreads = 4;
+  constexpr int kTasksPerThread = 50;
+
+  for (int iter = 0; iter < kIterations; ++iter) {
+    SingleThreadExecutor executor;
+    std::atomic_bool after_shutdown = false;
+    std::atomic_bool ran_after_shutdown = false;
+    std::vector<std::thread> producers;
+    producers.reserve(kProducerThreads);
+
+    for (int t = 0; t < kProducerThreads; ++t) {
+      producers.emplace_back([&]() {
+        for (int i = 0; i < kTasksPerThread; ++i) {
+          executor.Execute([&]() {
+            if (after_shutdown.load(std::memory_order_acquire)) {
+              ran_after_shutdown.store(true, std::memory_order_relaxed);
+            }
+          });
+        }
+      });
+    }
+
+    executor.Shutdown();
+    after_shutdown.store(true, std::memory_order_release);
+
+    for (std::thread& producer : producers) {
+      producer.join();
+    }
+    EXPECT_FALSE(ran_after_shutdown.load(std::memory_order_relaxed));
+  }
+}
+
+}  // namespace
 }  // namespace nearby

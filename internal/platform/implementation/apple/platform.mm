@@ -20,16 +20,14 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "internal/base/files.h"
 #import "internal/platform/implementation/apple/Log/GNCLogger.h"
 #include "internal/platform/implementation/apple/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/apple/atomic_boolean.h"
-#include "internal/platform/implementation/apple/atomic_uint32.h"
 #include "internal/platform/implementation/apple/awdl.h"
 #include "internal/platform/implementation/apple/ble.h"
-#include "internal/platform/implementation/apple/condition_variable.h"
-#include "internal/platform/implementation/apple/count_down_latch.h"
 #include "internal/platform/implementation/apple/device_info.h"
 #import "internal/platform/implementation/apple/multi_thread_executor.h"
 #include "internal/platform/implementation/apple/mutex.h"
@@ -39,8 +37,10 @@
 #include "internal/platform/implementation/apple/timer.h"
 #import "internal/platform/implementation/apple/utils.h"
 #include "internal/platform/implementation/apple/wifi.h"
+#include "internal/platform/implementation/apple/wifi_aware.h"
 #include "internal/platform/implementation/apple/wifi_hotspot.h"
 #include "internal/platform/implementation/apple/wifi_lan.h"
+#include "internal/platform/implementation/executor.h"
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/payload_id.h"
@@ -48,16 +48,28 @@
 namespace nearby {
 namespace api {
 
-std::string ImplementationPlatform::GetCustomSavePath(const std::string& parent_folder,
+std::string ImplementationPlatform::GetCustomSavePath(const std::string& save_path,
+                                                      const std::string& parent_folder,
                                                       const std::string& file_name) {
-  // Collapse any path escaping characters.
-  NSString* parentFolderRaw = @(parent_folder.c_str());
-  if (parentFolderRaw == nil) {
+  NSString* baseSavePath = save_path.empty() ? NSTemporaryDirectory() : @(save_path.c_str());
+  if (baseSavePath == nil) {
     return std::string();
   }
-  NSString* parentFolder = [parentFolderRaw stringByReplacingOccurrencesOfString:@"../"
-                                                                      withString:@""];
+  if (!parent_folder.empty()) {
+    NSString* parentFolderSegment = @(parent_folder.c_str());
+    if (parentFolderSegment == nil) {
+      return std::string();
+    }
+    baseSavePath = [baseSavePath stringByAppendingPathComponent:parentFolderSegment];
+  }
+  // Collapse any path escaping characters.
+  NSString* parentFolder = [baseSavePath stringByReplacingOccurrencesOfString:@"../"
+                                                                   withString:@""];
   NSURL* parentFolderURL = [NSURL fileURLWithPath:parentFolder];
+
+  if (file_name.empty()) {
+    return parentFolderURL.path.UTF8String;
+  }
 
   // The only reserved character in a file name on macOS is the forward-slash. It's unclear if iOS
   // has any additional restrictions.
@@ -82,25 +94,21 @@ std::string ImplementationPlatform::GetCustomSavePath(const std::string& parent_
   NSURL* url = [parentFolderURL URLByAppendingPathComponent:fileName];
 
   NSInteger index = 1;
-  while ([NSFileManager.defaultManager fileExistsAtPath:url.path]) {
+  NSFileManager* fileManager = [NSFileManager defaultManager];
+  while ([fileManager fileExistsAtPath:url.path]) {
     index++;
-    NSString* fileName =
-        [NSString stringWithFormat:@"%@ %@.%@", baseName, [@(index) stringValue], extension];
-    url = [parentFolderURL URLByAppendingPathComponent:fileName];
+    NSString* duplicateFileName =
+        extension.length > 0
+            ? [NSString stringWithFormat:@"%@ %@.%@", baseName, [@(index) stringValue], extension]
+            : [NSString stringWithFormat:@"%@ %@", baseName, [@(index) stringValue]];
+    url = [parentFolderURL URLByAppendingPathComponent:duplicateFileName];
   }
+
+  GNCLoggerInfo(@"ImplementationPlatform::GetCustomSavePath: save_path='%@', parent_folder='%@', "
+                @"file_name='%@' -> '%@'",
+                @(save_path.c_str()), @(parent_folder.c_str()), @(file_name.c_str()), url.path);
 
   return url.path.UTF8String;
-}
-
-std::string ImplementationPlatform::GetDownloadPath(const std::string& parent_folder,
-                                                    const std::string& file_name) {
-  NSString* parentFolderRaw = @(parent_folder.c_str());
-  if (parentFolderRaw == nil) {
-    return std::string();
-  }
-  NSString* customSavePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:parentFolderRaw];
-  return GetCustomSavePath(customSavePath.UTF8String, file_name);
 }
 
 OSName ImplementationPlatform::GetCurrentOS() { return OSName::kApple; }
@@ -110,41 +118,12 @@ std::unique_ptr<AtomicBoolean> ImplementationPlatform::CreateAtomicBoolean(bool 
   return std::make_unique<apple::AtomicBoolean>(initial_value);
 }
 
-std::unique_ptr<AtomicUint32> ImplementationPlatform::CreateAtomicUint32(
-    std::uint32_t initial_value) {
-  return std::make_unique<apple::AtomicUint32>(initial_value);
-}
-
-std::unique_ptr<CountDownLatch> ImplementationPlatform::CreateCountDownLatch(std::int32_t count) {
-  return std::make_unique<apple::CountDownLatch>(count);
-}
-
-std::unique_ptr<Mutex> ImplementationPlatform::CreateMutex(Mutex::Mode mode) {
-  // iOS does not support unchecked Mutex in debug mode, therefore
-  // apple::Mutex is used for both kRegular and kRegularNoCheck.
-  if (mode == Mutex::Mode::kRecursive) {
-    return std::make_unique<apple::RecursiveMutex>();
-  } else {
-    return std::make_unique<apple::Mutex>();
-  }
-}
-
-std::unique_ptr<ConditionVariable> ImplementationPlatform::CreateConditionVariable(Mutex* mutex) {
-  return std::make_unique<apple::ConditionVariable>(static_cast<apple::Mutex*>(mutex));
-}
-
-ABSL_DEPRECATED("This interface will be deleted in the near future.")
-std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(PayloadId payload_id) {
-  return nullptr;
+std::unique_ptr<RecursiveMutex> ImplementationPlatform::CreateRecursiveMutex() {
+  return std::make_unique<apple::RecursiveMutex>();
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(const std::string& file_path) {
   return shared::IOFile::CreateInputFile(file_path);
-}
-
-ABSL_DEPRECATED("This interface will be deleted in the near future.")
-std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(PayloadId payload_id) {
-  return nullptr;
 }
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(const std::string& file_path) {
@@ -161,11 +140,11 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(const std::
 }
 
 // Java-like Executors
-std::unique_ptr<SubmittableExecutor> ImplementationPlatform::CreateSingleThreadExecutor() {
+std::unique_ptr<Executor> ImplementationPlatform::CreateSingleThreadExecutor() {
   return std::make_unique<apple::SingleThreadExecutor>();
 }
 
-std::unique_ptr<SubmittableExecutor> ImplementationPlatform::CreateMultiThreadExecutor(
+std::unique_ptr<Executor> ImplementationPlatform::CreateMultiThreadExecutor(
     int max_concurrency) {
   return std::make_unique<apple::MultiThreadExecutor>(max_concurrency);
 }
@@ -197,6 +176,13 @@ std::unique_ptr<WifiLanMedium> ImplementationPlatform::CreateWifiLanMedium() {
   return std::make_unique<apple::WifiLanMedium>();
 }
 
+std::unique_ptr<WifiAwareMedium> ImplementationPlatform::CreateWifiAwareMedium() {
+#if TARGET_OS_IOS && !defined(GITHUB_BUILD)
+  return std::make_unique<apple::WifiAwareMedium>();
+#else
+  return nullptr;
+#endif
+}
 std::unique_ptr<AwdlMedium> ImplementationPlatform::CreateAwdlMedium() {
   return std::make_unique<apple::AwdlMedium>();
 }

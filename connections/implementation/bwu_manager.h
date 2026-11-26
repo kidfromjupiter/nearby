@@ -22,17 +22,19 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
+#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/mediums/ble.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/medium_selector.h"
+#include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancelable_alarm.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/scheduled_executor.h"
@@ -99,7 +101,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void OnEndpointDisconnect(ClientProxy* client_proxy,
                             const std::string& service_id,
                             const std::string& endpoint_id,
-                            CountDownLatch barrier,
+                            std::shared_ptr<absl::Notification> barrier,
                             DisconnectionReason reason) override;
 
   void Shutdown();
@@ -124,15 +126,51 @@ class BwuManager : public EndpointManager::FrameProcessor {
   bool IsUpgradeOngoing(const std::string& endpoint_id);
   Config GetConfig() const { return config_; }
 
+  // Returns `mediums` without the ones this device refuses to upgrade to, so
+  // that they are not advertised to the remote device in the
+  // ConnectionRequest. Currently this removes WIFI_LAN and WIFI_HOTSPOT when
+  // the matching `allow_upgrade_to` field is false (see kEnableWifiLanUpgrade
+  // and kEnableWifiHotspotClient).
+  std::vector<Medium> StripOutDisallowedUpgradeMediums(
+      std::vector<Medium> mediums) const;
+
+  // Returns the local endpoint's MediumRole populated from `mediums_`.
+  location::nearby::connections::MediumRole GetLocalMediumRole(
+      ClientProxy* client) const;
+
  private:
+  enum class RoleSwitchState {
+    kSwitching,
+    kSwitched,
+  };
+
   static constexpr absl::Duration kReadClientIntroductionFrameTimeout =
       absl::Seconds(5);
 
   void InitBwuHandlers();
   void RunOnBwuManagerThread(const std::string& name, Runnable runnable);
+  void InitiateBwuForEndpoint(ClientProxy* client,
+                              const std::string& endpoint_id, Medium new_medium,
+                              bool allow_role_switch);
+  void RequestRoleSwitchForEndpoint(ClientProxy* client,
+                                    const std::string& endpoint_id,
+                                    EndpointChannel* channel,
+                                    Medium channel_medium,
+                                    Medium proposed_medium);
+  void InitializeLocalUpgradeForEndpoint(ClientProxy* client,
+                                         const std::string& endpoint_id,
+                                         EndpointChannel* channel,
+                                         BwuHandler* handler,
+                                         Medium channel_medium,
+                                         Medium proposed_medium,
+                                         bool is_role_switched);
+  bool IsRoleSwitched(const std::string& endpoint_id) const;
+  bool IsRoleSwitching(const std::string& endpoint_id) const;
   std::vector<Medium> StripOutUnavailableMediums(
+      ClientProxy* client, const std::string& endpoint_id,
       const std::vector<Medium>& mediums) const;
-  Medium ChooseBestUpgradeMedium(const std::string& endpoint_id,
+  Medium ChooseBestUpgradeMedium(ClientProxy* client,
+                                 const std::string& endpoint_id,
                                  const std::vector<Medium>& mediums) const;
 
   // BaseBwuHandler
@@ -145,7 +183,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
       ClientProxy* client,
       const location::nearby::connections::BandwidthUpgradeNegotiationFrame&
           frame,
-      const string& endpoint_id);
+      const std::string& endpoint_id);
 
   // Called to revert any state changed in the course of setting up the upgraded
   // medium for an endpoint.
@@ -193,9 +231,6 @@ class BwuManager : public EndpointManager::FrameProcessor {
           ClientIntroduction& introduction);
   bool ReadClientIntroductionAckFrame(EndpointChannel* endpoint_channel);
   bool WriteClientIntroductionAckFrame(EndpointChannel* endpoint_channel);
-  void ProcessEndpointDisconnection(ClientProxy* client,
-                                    const std::string& endpoint_id,
-                                    CountDownLatch* barrier);
   void ProcessUpgradeFailureEvent(
       ClientProxy* client, const std::string& endpoint_id,
       const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
@@ -222,15 +257,20 @@ class BwuManager : public EndpointManager::FrameProcessor {
   bool NeedToSwitchRole(
       ClientProxy* client, const std::string& endpoint_id, Medium medium,
       const location::nearby::connections::MediumRole& medium_role,
-      const location::nearby::connections::OsInfo& remote_os_info);
+      const location::nearby::connections::OsInfo& remote_os_info) const;
+  bool CanSwitchRoleForMedium(ClientProxy* client,
+                              const std::string& endpoint_id,
+                              Medium medium) const;
 
   void ProcessUpgradePathRequest(
       ClientProxy* client, const std::string& endpoint_id,
       const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
           UpgradePathInfo& upgrade_path_info);
 
-  bool CanHost(ClientProxy* client,
-               const location::nearby::connections::MediumRole& medium_role);
+  bool CanHost(
+      const location::nearby::connections::MediumRole& local_medium_role,
+      const location::nearby::connections::MediumRole& remote_medium_role,
+      Medium medium) const;
 
   virtual const location::nearby::connections::OsInfo& GetLocalOsInfo(
       ClientProxy* client) const;
@@ -261,6 +301,14 @@ class BwuManager : public EndpointManager::FrameProcessor {
   absl::flat_hash_map<std::string, std::shared_ptr<EndpointChannel>>
       previous_endpoint_channels_;
   absl::flat_hash_set<std::string> successfully_upgraded_endpoints_;
+
+  // Tracks the BWU role-switch state for each endpoint: kSwitching when the
+  // local device has sent UPGRADE_PATH_REQUEST and is waiting for the peer's
+  // UPGRADE_PATH_AVAILABLE, and kSwitched once BWU host and client roles have
+  // been switched.
+  absl::flat_hash_map<std::string, RoleSwitchState>
+      endpoint_role_switch_states_;
+
   // Maps endpointId -> ClientProxy for which
   // initiateBwuForEndpoint() has been called but which have not
   // yet completed the upgrade via onIncomingConnection().

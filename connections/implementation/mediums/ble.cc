@@ -29,6 +29,7 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
@@ -45,6 +46,7 @@
 #include "connections/power_level.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/ble.h"
+#include "internal/platform/borrowable.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
@@ -54,8 +56,6 @@
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/logging.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/uuid.h"
@@ -74,7 +74,7 @@ constexpr int kDummyServiceIdLength = 128;
 
 // Tell the thread annotation static analysis that `m` is already exclusively
 // locked. Used because the analysis is not interprocedural.
-void AssumeHeld(Mutex& m) ABSL_ASSERT_EXCLUSIVE_LOCK(m) {}
+void AssumeHeld(absl::Mutex& m) ABSL_ASSERT_EXCLUSIVE_LOCK(m) {}
 
 }  // namespace
 
@@ -103,22 +103,47 @@ Ble::~Ble() {
     StopAcceptingConnections(server_sockets_.begin()->first);
   }
   while (!l2cap_server_sockets_.empty()) {
-    StopAcceptingL2capConnections(l2cap_server_sockets_.begin()->first);
+    std::string service_id = l2cap_server_sockets_.begin()->first;
+    StopAcceptingL2capConnections(service_id);
+  }
+
+  lender_.Release();
+
+  absl::flat_hash_map<
+      std::string,
+      absl::flat_hash_map<api::ble::BleL2capSocket*, BleL2capSocket>>
+      pending_l2cap_sockets;
+  absl::flat_hash_map<
+      std::string,
+      absl::flat_hash_map<api::ble::BleL2capSocket*, BleL2capSocket>>
+      incoming_l2cap_sockets;
+  {
+    absl::MutexLock lock(mutex_);
+    pending_l2cap_sockets = std::move(l2cap_pending_incoming_sockets_);
+    l2cap_pending_incoming_sockets_.clear();
+    incoming_l2cap_sockets = std::move(l2cap_incoming_service_id_to_sockets_);
+    l2cap_incoming_service_id_to_sockets_.clear();
+  }
+  for (auto& [service_id, sockets] : pending_l2cap_sockets) {
+    for (auto& [socket_ptr, socket] : sockets) {
+      socket.Close();
+    }
+  }
+  for (auto& [service_id, sockets] : incoming_l2cap_sockets) {
+    for (auto& [socket_ptr, socket] : sockets) {
+      socket.SetCloseNotifier(nullptr);
+      socket.Close();
+    }
   }
 
   serial_executor_.Shutdown();
   alarm_executor_.Shutdown();
   accept_loops_runner_.Shutdown();
-
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableAdvertisingForInstantOnLost)) {
-    instant_on_lost_manager_.Shutdown();
-  }
+  instant_on_lost_manager_.Shutdown();
 }
 
 bool Ble::IsAvailable() const {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   return IsAvailableLocked();
 }
@@ -127,7 +152,7 @@ ErrorOr<bool> Ble::StartAdvertising(const std::string& service_id,
                                     PowerLevel power_level,
                                     AdvertisingType advertising_type,
                                     const ByteArray& advertisement_bytes) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (advertisement_bytes.Empty()) {
     LOG(INFO)
@@ -225,7 +250,7 @@ ErrorOr<bool> Ble::StartAdvertising(const std::string& service_id,
 }
 
 bool Ble::StopAdvertising(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (!IsAdvertisingLocked(service_id)) {
     LOG(INFO) << "Cannot stop BLE advertising for service_id=" << service_id
               << " because it never started.";
@@ -275,23 +300,19 @@ bool Ble::StopAdvertising(const std::string& service_id) {
     StopAdvertisementGattServerLocked();
   }
 
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableAdvertisingForInstantOnLost)) {
-    instant_on_lost_manager_.OnAdvertisingStopped(service_id);
-  }
+  instant_on_lost_manager_.OnAdvertisingStopped(service_id);
 
   return true;
 }
 
 bool Ble::IsAdvertising(const std::string& service_id) const {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   return IsAdvertisingLocked(service_id);
 }
 
 bool Ble::IsAdvertisingForLegacyDevice(const std::string& service_id) const {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   return IsAdvertisingForLegacyDeviceLocked(service_id);
 }
@@ -301,7 +322,7 @@ ErrorOr<bool> Ble::StartLegacyAdvertising(
     const std::string& fast_advertisement_service_uuid) {
   LOG(INFO) << "StartLegacyAdvertising: " << input_service_id
             << ", local_endpoint_id: " << local_endpoint_id;
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (!radio_.IsEnabled()) {
     LOG(INFO) << "Can't start BLE legacy advertising because "
@@ -329,7 +350,7 @@ ErrorOr<bool> Ble::StartLegacyAdvertising(
           {.tx_power_level = TxPowerLevel::kMedium, .is_connectable = true},
           api::ble::BleMedium::AdvertisingCallback{
               .start_advertising_result =
-                  [this, &service_id](absl::Status status) mutable {
+                  [this, service_id](absl::Status status) mutable {
                     AssumeHeld(mutex_);
                     if (status.ok()) {
                       LOG(INFO) << "BLE advertising for legacy device started "
@@ -358,7 +379,7 @@ ErrorOr<bool> Ble::StartLegacyAdvertising(
 
 bool Ble::StopLegacyAdvertising(const std::string& input_service_id) {
   LOG(INFO) << "StopLegacyAdvertising:" << input_service_id;
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   std::string service_id = input_service_id + "-Legacy";
   auto legacy_device_advertising_session =
@@ -383,7 +404,7 @@ bool Ble::StopLegacyAdvertising(const std::string& input_service_id) {
 
 void Ble::AddAlternateUuidForService(uint16_t uuid,
                                      const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   medium_.AddAlternateUuidForService(uuid, service_id);
 }
 
@@ -391,7 +412,7 @@ ErrorOr<bool> Ble::StartScanning(const std::string& service_id, Pcp pcp,
                                  PowerLevel power_level,
                                  bool include_dct_advertisement,
                                  DiscoveredPeripheralCallback callback) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (service_id.empty()) {
     LOG(INFO) << "Can not start BLE scanning with empty service id.";
@@ -447,7 +468,7 @@ ErrorOr<bool> Ble::StartScanning(const std::string& service_id, Pcp pcp,
                            BleAdvertisementData advertisement_data) {
                       RunOnBleThread([this, peripheral = std::move(peripheral),
                                       advertisement_data]() {
-                        MutexLock lock(&mutex_);
+                        absl::MutexLock lock(mutex_);
                         discovered_peripheral_tracker_
                             .ProcessFoundBleAdvertisement(
                                 std::move(peripheral), advertisement_data,
@@ -488,7 +509,7 @@ ErrorOr<bool> Ble::StartScanning(const std::string& service_id, Pcp pcp,
                            BleAdvertisementData advertisement_data) {
                       RunOnBleThread([this, peripheral = std::move(peripheral),
                                       advertisement_data]() {
-                        MutexLock lock(&mutex_);
+                        absl::MutexLock lock(mutex_);
                         discovered_peripheral_tracker_
                             .ProcessFoundBleAdvertisement(
                                 std::move(peripheral), advertisement_data,
@@ -528,7 +549,7 @@ ErrorOr<bool> Ble::StartScanning(const std::string& service_id, Pcp pcp,
   lost_alarm_ = std::make_unique<CancelableAlarm>(
       "BLE.StartScanning() onLost",
       [this]() {
-        MutexLock lock(&mutex_);
+        absl::MutexLock lock(mutex_);
         discovered_peripheral_tracker_.ProcessLostGattAdvertisements();
       },
       peripheral_lost_timeout, &alarm_executor_, /*is_recurring=*/true);
@@ -538,54 +559,65 @@ ErrorOr<bool> Ble::StartScanning(const std::string& service_id, Pcp pcp,
 }
 
 bool Ble::StopScanning(const std::string& service_id) {
-  MutexLock lock(&mutex_);
-  if (FeatureFlags::GetInstance().GetFlags().enable_ble_v2_async_scanning) {
-    return StopAsyncScanningLocked(service_id);
+  std::unique_ptr<CancelableAlarm> alarm_to_cancel;
+  bool medium_stopped = true;
+  {
+    absl::MutexLock lock(mutex_);
+    if (FeatureFlags::GetInstance().GetFlags().enable_ble_v2_async_scanning) {
+      if (!StopAsyncScanningLocked(service_id)) {
+        return false;
+      }
+      if (service_ids_to_scanning_sessions_.empty()) {
+        alarm_to_cancel = std::move(lost_alarm_);
+      }
+    } else {
+      if (!IsScanningLocked(service_id)) {
+        LOG(INFO) << "Can't turn off BLE scanning because we never "
+                     "started scanning.";
+        return false;
+      }
+
+      discovered_peripheral_tracker_.StopTracking(service_id);
+      LOG(INFO) << "Turned off BLE scanning with service id=" << service_id;
+
+      scanned_service_ids_.erase(service_id);
+
+      // If still has scanner, don't stop the client scanning.
+      if (!scanned_service_ids_.empty()) {
+        return true;
+      }
+
+      // If no more scanning activities, then stop client scanning.
+      LOG(INFO) << "Turned off BLE client scanning";
+      alarm_to_cancel = std::move(lost_alarm_);
+      medium_stopped = medium_.StopScanning();
+    }
   }
-
-  if (!IsScanningLocked(service_id)) {
-    LOG(INFO) << "Can't turn off BLE scanning because we never "
-                 "started scanning.";
-    return false;
+  if (alarm_to_cancel != nullptr) {
+    alarm_to_cancel->Cancel();
   }
-
-  discovered_peripheral_tracker_.StopTracking(service_id);
-  LOG(INFO) << "Turned off BLE scanning with service id=" << service_id;
-
-  scanned_service_ids_.erase(service_id);
-
-  // If still has scanner, don't stop the client scanning.
-  if (!scanned_service_ids_.empty()) {
-    return true;
-  }
-
-  // If no more scanning activities, then stop client scanning.
-  LOG(INFO) << "Turned off BLE client scanning";
-  if (lost_alarm_->IsValid()) {
-    lost_alarm_->Cancel();
-  }
-  return medium_.StopScanning();
+  return medium_stopped;
 }
 
 bool Ble::PauseMediumScanning() {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return medium_.PauseMediumScanning();
 }
 
 bool Ble::ResumeMediumScanning() {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return medium_.ResumeMediumScanning();
 }
 
 bool Ble::IsScanning(const std::string& service_id) const {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   return IsScanningLocked(service_id);
 }
 
 ErrorOr<bool> Ble::StartAcceptingConnections(
     const std::string& service_id, AcceptedConnectionCallback callback) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (service_id.empty()) {
     LOG(WARNING)
@@ -641,9 +673,9 @@ ErrorOr<bool> Ble::StartAcceptingConnections(
           }
           LOG(INFO) << "The client Ble GATT socket has been accepted.";
           {
-            MutexLock lock(&mutex_);
+            absl::MutexLock lock(mutex_);
             client_socket.SetCloseNotifier([this, service_id]() {
-              MutexLock lock(&mutex_);
+              absl::MutexLock lock(mutex_);
               incoming_sockets_.erase(service_id);
             });
             incoming_sockets_.insert({service_id, client_socket});
@@ -661,7 +693,7 @@ ErrorOr<bool> Ble::StartAcceptingConnections(
 // TODO(mingshiouwu): Add unit test for ble_l2cap flow
 ErrorOr<int> Ble::StartAcceptingL2capConnections(
     const std::string& service_id, AcceptedL2capConnectionCallback callback) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (service_id.empty()) {
     LOG(WARNING)
         << "Refusing to start accepting Ble L2CAP connections with empty "
@@ -722,14 +754,21 @@ ErrorOr<int> Ble::StartAcceptingL2capConnections(
             break;
           }
           LOG(INFO) << "The client L2CAP socket has been accepted.";
+          bool is_accepting = false;
           {
-            MutexLock lock(&mutex_);
-            client_socket.SetCloseNotifier([this, service_id]() {
-              MutexLock lock(&mutex_);
-              incoming_sockets_.erase(service_id);
-            });
-            l2cap_incoming_service_id_to_sockets_.insert(
-                {service_id, client_socket});
+            absl::MutexLock lock(mutex_);
+            const auto server_it = l2cap_server_sockets_.find(service_id);
+            is_accepting =
+                server_it != l2cap_server_sockets_.end() &&
+                &server_it->second.GetImpl() == &server_socket.GetImpl();
+            if (is_accepting) {
+              RegisterIncomingL2capSocketLocked(service_id, client_socket);
+            }
+          }
+          if (!is_accepting) {
+            client_socket.Close();
+            server_socket.Close();
+            break;
           }
           if (callback) {
             callback(std::move(client_socket), service_id);
@@ -744,7 +783,7 @@ ErrorOr<int> Ble::StartAcceptingL2capConnections(
 
 ErrorOr<bool> Ble::StartAcceptingConnections(
     const std::string& service_id, AcceptedConnectionCallback2 callback) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (service_id.empty()) {
     LOG(WARNING)
@@ -773,51 +812,53 @@ ErrorOr<bool> Ble::StartAcceptingConnections(
   }
 
   BleServerSocket server_socket = medium_.OpenServerSocket(service_id);
-  if (server_socket.IsValid()) {
-    // Mark the fact that there's an in-progress Ble server accepting
-    // connections.
-    auto owned_server_socket =
-        server_sockets_.insert({service_id, std::move(server_socket)})
-            .first->second;
-    // Start the accept loop on a dedicated thread - this stays alive and
-    // listening for new incoming connections until
-    // StopAcceptingL2capConnections() is invoked.
-    accept_loops_runner_.Execute(
-        "ble-accept",
-        [this, service_id, callback = std::move(callback),
-         server_socket = std::move(owned_server_socket)]() mutable {
-          while (true) {
-            BleSocket client_socket = server_socket.Accept();
-            if (!client_socket.IsValid()) {
-              LOG(WARNING) << "The client socket to accept is invalid.";
-              server_socket.Close();
-              break;
-            } else {
-              LOG(INFO) << "The client Ble GATT socket has been accepted.";
-            }
-            {
-              MutexLock lock(&mutex_);
-              client_socket.SetCloseNotifier([this, service_id]() {
-                MutexLock lock(&mutex_);
-                incoming_sockets_.erase(service_id);
-              });
-              incoming_sockets_.insert({service_id, client_socket});
-            }
-            if (callback) {
-              auto ble_socket = mediums::BleSocket::CreateWithBleSocket(
-                  std::move(client_socket),
-                  mediums::bleutils::GenerateHash(
-                      service_id,
-                      mediums::BleAdvertisement::kServiceIdHashLength));
-              callback(std::move(ble_socket), service_id);
-            }
-          }
-        });
-  } else {
-    LOG(INFO)
+  if (!server_socket.IsValid()) {
+    LOG(ERROR)
         << "Failed to start accepting Ble GATT connections for service_id="
         << service_id;
+    return {Error(
+        OperationResultCode::CONNECTIVITY_BLE_SERVER_SOCKET_CREATION_FAILURE)};
   }
+  // Mark the fact that there's an in-progress Ble server accepting
+  // connections.
+  auto owned_server_socket =
+      server_sockets_.insert({service_id, std::move(server_socket)})
+          .first->second;
+  // Start the accept loop on a dedicated thread - this stays alive and
+  // listening for new incoming connections until
+  // StopAcceptingL2capConnections() is invoked.
+  accept_loops_runner_.Execute(
+      "ble-accept",
+      [this, service_id = service_id, callback = std::move(callback),
+       server_socket = std::move(owned_server_socket)]() mutable {
+        while (true) {
+          BleSocket client_socket = server_socket.Accept();
+          if (!client_socket.IsValid()) {
+            LOG(WARNING) << "The client socket to accept is invalid.";
+            server_socket.Close();
+            break;
+          } else {
+            LOG(INFO) << "The client Ble GATT socket has been accepted.";
+          }
+          {
+            absl::MutexLock lock(mutex_);
+            client_socket.SetCloseNotifier([this, service_id = service_id]() {
+              absl::MutexLock lock(mutex_);
+              incoming_sockets_.erase(service_id);
+            });
+            incoming_sockets_.insert({service_id, client_socket});
+          }
+          if (callback) {
+            auto ble_socket = mediums::BleSocket::CreateWithBleSocket(
+                std::move(client_socket),
+                mediums::bleutils::GenerateHash(
+                    service_id,
+                    mediums::BleAdvertisement::kServiceIdHashLength));
+            callback(std::move(ble_socket), service_id);
+          }
+        }
+      });
+
   LOG(INFO) << "Start accepting Ble GATT connections for service_id="
             << service_id;
   return {true};
@@ -825,7 +866,7 @@ ErrorOr<bool> Ble::StartAcceptingConnections(
 
 ErrorOr<int> Ble::StartAcceptingL2capConnections(
     const std::string& service_id, AcceptedConnectionCallback2 callback) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (service_id.empty()) {
     LOG(WARNING)
         << "Refusing to start accepting Ble L2CAP connections with empty "
@@ -887,29 +928,64 @@ ErrorOr<int> Ble::StartAcceptingL2capConnections(
           } else {
             LOG(INFO) << "The client L2CAP socket has been accepted.";
           }
+          api::ble::BleL2capSocket* socket_ptr = &client_socket.GetImpl();
+          bool is_accepting = false;
           {
-            MutexLock lock(&mutex_);
-            client_socket.SetCloseNotifier([this, service_id]() {
-              MutexLock lock(&mutex_);
-              incoming_sockets_.erase(service_id);
-            });
-            l2cap_incoming_service_id_to_sockets_.insert(
-                {service_id, client_socket});
+            absl::MutexLock lock(mutex_);
+            const auto server_it = l2cap_server_sockets_.find(service_id);
+            is_accepting =
+                server_it != l2cap_server_sockets_.end() &&
+                &server_it->second.GetImpl() == &server_socket.GetImpl();
+            if (is_accepting) {
+              l2cap_pending_incoming_sockets_[service_id].insert(
+                  {socket_ptr, client_socket});
+            }
+          }
+          if (!is_accepting) {
+            client_socket.Close();
+            server_socket.Close();
+            break;
+          }
+          std::unique_ptr<mediums::BleSocket> ble_socket =
+              mediums::BleSocket::CreateWithL2capSocket(
+                  client_socket,
+                  mediums::bleutils::GenerateHash(
+                      service_id,
+                      mediums::BleAdvertisement::kServiceIdHashLength));
+          Exception exception =
+              ble_socket->ProcessIncomingL2capPacketValidation();
+          bool is_accepting_after_validation = false;
+          {
+            absl::MutexLock lock(mutex_);
+            bool was_pending = false;
+            auto pending_it = l2cap_pending_incoming_sockets_.find(service_id);
+            if (pending_it != l2cap_pending_incoming_sockets_.end()) {
+              was_pending = pending_it->second.erase(socket_ptr) > 0;
+              if (pending_it->second.empty()) {
+                l2cap_pending_incoming_sockets_.erase(pending_it);
+              }
+            }
+            const auto server_it = l2cap_server_sockets_.find(service_id);
+            is_accepting_after_validation =
+                was_pending && server_it != l2cap_server_sockets_.end() &&
+                &server_it->second.GetImpl() == &server_socket.GetImpl();
+            if (exception.Ok() && is_accepting_after_validation) {
+              RegisterIncomingL2capSocketLocked(service_id, client_socket);
+            }
+          }
+          if (!is_accepting_after_validation) {
+            ble_socket->Close();
+            server_socket.Close();
+            break;
+          }
+          if (!exception.Ok()) {
+            LOG(WARNING)
+                << "Failed to process incoming L2CAP packet validation: "
+                << exception.value;
+            ble_socket->Close();
+            continue;
           }
           if (callback) {
-            auto ble_socket = mediums::BleSocket::CreateWithL2capSocket(
-                std::move(client_socket),
-                mediums::bleutils::GenerateHash(
-                    service_id,
-                    mediums::BleAdvertisement::kServiceIdHashLength));
-            Exception exception =
-                ble_socket->ProcessIncomingL2capPacketValidation();
-            if (!exception.Ok()) {
-              LOG(WARNING)
-                  << "Failed to process incoming L2CAP packet validation: "
-                  << exception.value;
-              return;
-            }
             callback(std::move(ble_socket), service_id);
           }
         }
@@ -921,7 +997,7 @@ ErrorOr<int> Ble::StartAcceptingL2capConnections(
 }
 
 bool Ble::StopAcceptingConnections(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   const auto it = server_sockets_.find(service_id);
   if (it == server_sockets_.end()) {
@@ -956,7 +1032,7 @@ bool Ble::StopAcceptingConnections(const std::string& service_id) {
 }
 
 bool Ble::StopAcceptingL2capConnections(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   const auto it = l2cap_server_sockets_.find(service_id);
   if (it == l2cap_server_sockets_.end()) {
@@ -980,10 +1056,19 @@ bool Ble::StopAcceptingL2capConnections(const std::string& service_id) {
   // BleL2capServerSocket, remove it from l2cap_server_sockets_ so that it
   // frees up this service for another round.
 
+  auto pending_it = l2cap_pending_incoming_sockets_.find(item.key());
+  if (pending_it != l2cap_pending_incoming_sockets_.end()) {
+    auto pending_sockets = std::move(pending_it->second);
+    l2cap_pending_incoming_sockets_.erase(pending_it);
+    for (auto& [socket_ptr, socket] : pending_sockets) {
+      socket.Close();
+    }
+  }
+
   // Finally, close the BleL2capServerSocket.
   if (!listening_socket.Close().Ok()) {
     LOG(INFO) << "Failed to close Ble L2CAP server socket for service_id="
-              << service_id;
+              << item.key();
     return false;
   }
 
@@ -991,19 +1076,19 @@ bool Ble::StopAcceptingL2capConnections(const std::string& service_id) {
 }
 
 bool Ble::IsAcceptingConnections(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return IsAcceptingConnectionsLocked(service_id);
 }
 
 bool Ble::IsAcceptingL2capConnections(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return IsAcceptingL2capConnectionsLocked(service_id);
 }
 
 ErrorOr<BleSocket> Ble::Connect(const std::string& service_id,
                                 const BlePeripheral& peripheral,
                                 CancellationFlag* cancellation_flag) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   // Socket to return. To allow for NRVO to work, it has to be a single object.
   BleSocket socket;
 
@@ -1040,7 +1125,7 @@ ErrorOr<BleSocket> Ble::Connect(const std::string& service_id,
 ErrorOr<BleL2capSocket> Ble::ConnectOverL2cap(
     const std::string& service_id, const BlePeripheral& peripheral,
     CancellationFlag* cancellation_flag) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (service_id.empty()) {
     LOG(WARNING) << "Refusing to create client Ble L2CAP socket because "
@@ -1076,7 +1161,7 @@ ErrorOr<BleL2capSocket> Ble::ConnectOverL2cap(
 ErrorOr<std::unique_ptr<mediums::BleSocket>> Ble::Connect2(
     const std::string& service_id, const BlePeripheral& peripheral,
     CancellationFlag* cancellation_flag) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   // Socket to return. To allow for NRVO to work, it has to be a single object.
   BleSocket socket;
 
@@ -1126,7 +1211,7 @@ ErrorOr<std::unique_ptr<mediums::BleSocket>> Ble::Connect2(
 ErrorOr<std::unique_ptr<mediums::BleSocket>> Ble::ConnectOverL2cap2(
     const std::string& service_id, const BlePeripheral& peripheral,
     CancellationFlag* cancellation_flag) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (service_id.empty()) {
     LOG(WARNING) << "Refusing to create client Ble L2CAP socket because "
@@ -1206,6 +1291,29 @@ bool Ble::IsAcceptingL2capConnectionsLocked(const std::string& service_id) {
   return l2cap_server_sockets_.contains(service_id);
 }
 
+void Ble::RegisterIncomingL2capSocketLocked(const std::string& service_id,
+                                            BleL2capSocket& client_socket) {
+  api::ble::BleL2capSocket* socket_ptr = &client_socket.GetImpl();
+  client_socket.SetCloseNotifier(
+      [borrowable = lender_.GetBorrowable(), service_id, socket_ptr]() {
+        Borrowed<Ble*> borrowed = borrowable.Borrow();
+        if (!borrowed) {
+          return;
+        }
+        Ble* ble = *borrowed;
+        absl::MutexLock lock(ble->mutex_);
+        auto it = ble->l2cap_incoming_service_id_to_sockets_.find(service_id);
+        if (it != ble->l2cap_incoming_service_id_to_sockets_.end()) {
+          it->second.erase(socket_ptr);
+          if (it->second.empty()) {
+            ble->l2cap_incoming_service_id_to_sockets_.erase(it);
+          }
+        }
+      });
+  l2cap_incoming_service_id_to_sockets_[service_id].insert(
+      {socket_ptr, client_socket});
+}
+
 bool Ble::IsAdvertisementGattServerRunningLocked() {
   return gatt_server_ && gatt_server_->IsValid();
 }
@@ -1256,15 +1364,10 @@ bool Ble::GenerateAdvertisementCharacteristic(
   absl::optional<GattCharacteristic> gatt_characteristic =
       gatt_server.CreateCharacteristic(
           mediums::bleutils::kCopresenceServiceUuid, *advertiement_uuid,
-          permission, property);
+          permission, property, gatt_advertisement);
   if (!gatt_characteristic.has_value()) {
     LOG(INFO) << "Unable to create and add a characterstic to the gatt "
                  "server for the advertisement.";
-    return false;
-  }
-  if (!gatt_server.UpdateCharacteristic(gatt_characteristic.value(),
-                                        gatt_advertisement)) {
-    LOG(INFO) << "Unable to write a value to the GATT characteristic.";
     return false;
   }
   hosted_gatt_characteristics_.insert(gatt_characteristic.value());
@@ -1485,12 +1588,8 @@ bool Ble::StartFastAdvertisingLocked(
     return false;
   }
 
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableAdvertisingForInstantOnLost)) {
-    instant_on_lost_manager_.OnAdvertisingStarted(service_id,
-                                                  medium_advertisement_bytes);
-  }
+  instant_on_lost_manager_.OnAdvertisingStarted(service_id,
+                                                medium_advertisement_bytes);
 
   return true;
 }
@@ -1521,12 +1620,8 @@ bool Ble::StartRegularAdvertisingLocked(
                     "advertisement bytes="
                  << absl::BytesToHexString(medium_advertisement_bytes.data());
     } else {
-      if (NearbyFlags::GetInstance().GetBoolFlag(
-              config_package_nearby::nearby_connections_feature::
-                  kEnableAdvertisingForInstantOnLost)) {
-        instant_on_lost_manager_.OnAdvertisingStarted(
-            service_id, medium_advertisement_bytes);
-      }
+      instant_on_lost_manager_.OnAdvertisingStarted(service_id,
+                                                    medium_advertisement_bytes);
     }
   }
 
@@ -1607,12 +1702,8 @@ bool Ble::StartGattAdvertisingLocked(
     return false;
   }
 
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableAdvertisingForInstantOnLost)) {
-    instant_on_lost_manager_.OnAdvertisingStarted(service_id,
-                                                  medium_advertisement_bytes);
-  }
+  instant_on_lost_manager_.OnAdvertisingStarted(service_id,
+                                                medium_advertisement_bytes);
 
   return true;
 }
@@ -1647,7 +1738,8 @@ bool Ble::StartAsyncScanningLocked(absl::string_view service_id,
       PowerLevelToTxPowerLevel(power_level),
       api::ble::BleMedium::ScanningCallback{
           .start_scanning_result =
-              [this, &service_id](absl::Status status) mutable {
+              [this, service_id =
+                         std::string(service_id)](absl::Status status) mutable {
                 // The `mutex_` is already held here. Use
                 // `AssumeHeld` to tell the thread
                 // annotation static analysis that
@@ -1674,7 +1766,7 @@ bool Ble::StartAsyncScanningLocked(absl::string_view service_id,
                 BlePeripheral proxy(medium_, peripheral_id);
                 RunOnBleThread([this, proxy = std::move(proxy),
                                 advertisement_data]() {
-                  MutexLock lock(&mutex_);
+                  absl::MutexLock lock(mutex_);
                   discovered_peripheral_tracker_.ProcessFoundBleAdvertisement(
                       std::move(proxy), advertisement_data,
                       [this](BlePeripheral proxy, int num_slots, int psm,
@@ -1718,7 +1810,7 @@ bool Ble::StartAsyncScanningLocked(absl::string_view service_id,
   lost_alarm_ = std::make_unique<CancelableAlarm>(
       "BLE.StartScanning() onLost",
       [this]() {
-        MutexLock lock(&mutex_);
+        absl::MutexLock lock(mutex_);
         discovered_peripheral_tracker_.ProcessLostGattAdvertisements();
       },
       peripheral_lost_timeout, &alarm_executor_, /*is_recurring=*/true);
@@ -1741,9 +1833,6 @@ bool Ble::StopAsyncScanningLocked(absl::string_view service_id) {
   service_ids_to_scanning_sessions_.erase(scanning_session);
 
   LOG(INFO) << "Turned off BLE client scanning";
-  if (lost_alarm_->IsValid()) {
-    lost_alarm_->Cancel();
-  }
   return true;
 }
 

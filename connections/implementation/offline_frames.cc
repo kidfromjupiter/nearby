@@ -22,7 +22,6 @@
 #include "absl/strings/string_view.h"
 #include "connections/connection_options.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
-#include "connections/implementation/internal_payload.h"
 #include "connections/implementation/offline_frames_validator.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/medium_selector.h"
@@ -181,7 +180,7 @@ std::string ForConnectionRequestPresence(
 }
 
 std::string ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
-                                const std::string& device_name) {
+                                  const std::string& device_name) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -250,7 +249,7 @@ std::string ForPayloadAckPayloadTransfer(std::int64_t payload_id) {
 
   PayloadTransferFrame::PayloadHeader header;
   header.set_id(payload_id);
-  header.set_total_size(InternalPayload::kIndeterminateSize);
+  header.set_total_size(kPayloadIndeterminateSize);
   *sub_frame->mutable_payload_header() = header;
 
   return frame.SerializeAsString();
@@ -312,9 +311,9 @@ std::string ForBwuWifiLanPathAvailable(
 }
 
 std::string ForBwuAwdlPathAvailable(const std::string& service_name,
-                                  const std::string& service_type,
-                                  const std::string& password,
-                                  bool supports_disabling_encryption) {
+                                    const std::string& service_type,
+                                    const std::string& password,
+                                    bool supports_disabling_encryption) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -337,9 +336,9 @@ std::string ForBwuAwdlPathAvailable(const std::string& service_name,
 }
 
 std::string ForBwuWifiAwarePathAvailable(const std::string& service_id,
-                                       const std::string& service_info,
-                                       const std::string& password,
-                                       bool supports_disabling_encryption) {
+                                         const std::string& service_info,
+                                         const std::string& password,
+                                         bool supports_disabling_encryption) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -358,6 +357,38 @@ std::string ForBwuWifiAwarePathAvailable(const std::string& service_id,
   wifi_aware_credentials->set_service_id(service_id);
   wifi_aware_credentials->set_service_info(service_info);
   if (!password.empty()) wifi_aware_credentials->set_password(password);
+
+  return frame.SerializeAsString();
+}
+
+std::string ForBwuWifiAwareR4PathAvailable(absl::string_view service_id,
+                                           absl::string_view service_info,
+                                           absl::string_view pmk,
+                                           std::int32_t port,
+                                           absl::string_view advertised_name,
+                                           bool supports_disabling_encryption) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
+  auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
+  sub_frame->set_event_type(
+      BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_AVAILABLE);
+  auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
+  upgrade_path_info->set_medium(UpgradePathInfo::WIFI_AWARE_R4);
+  upgrade_path_info->set_supports_client_introduction_ack(true);
+  upgrade_path_info->set_supports_disabling_encryption(
+      supports_disabling_encryption);
+  auto* wifi_aware_r4_credentials =
+      upgrade_path_info->mutable_wifi_aware_r4_credentials();
+  wifi_aware_r4_credentials->set_service_id(service_id);
+  wifi_aware_r4_credentials->set_service_info(service_info);
+  wifi_aware_r4_credentials->set_pmk(pmk);
+  wifi_aware_r4_credentials->set_port(port);
+  if (!advertised_name.empty()) {
+    wifi_aware_r4_credentials->set_advertised_name(advertised_name);
+  }
 
   return frame.SerializeAsString();
 }
@@ -394,7 +425,7 @@ std::string ForBwuWifiDirectPathAvailable(
 }
 
 std::string ForBwuBluetoothPathAvailable(const std::string& service_id,
-                                       MacAddress mac_address) {
+                                         MacAddress mac_address) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -415,7 +446,7 @@ std::string ForBwuBluetoothPathAvailable(const std::string& service_id,
 }
 
 std::string ForBwuWebrtcPathAvailable(const std::string& peer_id,
-                                    const LocationHint& location_hint) {
+                                      const LocationHint& location_hint) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -462,8 +493,8 @@ std::string ForBwuSafeToClose() {
 }
 
 std::string ForBwuIntroduction(const std::string& endpoint_id,
-                             const std::string& last_endpoint_id,
-                             bool supports_disabling_encryption) {
+                               const std::string& last_endpoint_id,
+                               bool supports_disabling_encryption) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -561,7 +592,7 @@ std::string ForKeepAlive(bool ack, uint32_t seq_num) {
 }
 
 std::string ForDisconnection(bool request_safe_to_disconnect,
-                           bool ack_safe_to_disconnect) {
+                             bool ack_safe_to_disconnect) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -573,7 +604,6 @@ std::string ForDisconnection(bool request_safe_to_disconnect,
 
   return frame.SerializeAsString();
 }
-
 
 UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium) {
   switch (medium) {
@@ -589,6 +619,8 @@ UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium) {
       return UpgradePathInfo::WIFI_LAN;
     case Medium::WIFI_AWARE:
       return UpgradePathInfo::WIFI_AWARE;
+    case Medium::WIFI_AWARE_R4:
+      return UpgradePathInfo::WIFI_AWARE_R4;
     case Medium::NFC:
       return UpgradePathInfo::NFC;
     case Medium::WIFI_DIRECT:
@@ -620,6 +652,8 @@ Medium UpgradePathInfoMediumToMedium(UpgradePathInfo::Medium medium) {
       return Medium::WIFI_LAN;
     case UpgradePathInfo::WIFI_AWARE:
       return Medium::WIFI_AWARE;
+    case UpgradePathInfo::WIFI_AWARE_R4:
+      return Medium::WIFI_AWARE_R4;
     case UpgradePathInfo::NFC:
       return Medium::NFC;
     case UpgradePathInfo::WIFI_DIRECT:
@@ -653,6 +687,8 @@ ConnectionRequestFrame::Medium MediumToConnectionRequestMedium(Medium medium) {
       return ConnectionRequestFrame::WIFI_LAN;
     case Medium::WIFI_AWARE:
       return ConnectionRequestFrame::WIFI_AWARE;
+    case Medium::WIFI_AWARE_R4:
+      return ConnectionRequestFrame::WIFI_AWARE_R4;
     case Medium::NFC:
       return ConnectionRequestFrame::NFC;
     case Medium::WIFI_DIRECT:
@@ -686,6 +722,8 @@ Medium ConnectionRequestMediumToMedium(ConnectionRequestFrame::Medium medium) {
       return Medium::WIFI_LAN;
     case ConnectionRequestFrame::WIFI_AWARE:
       return Medium::WIFI_AWARE;
+    case ConnectionRequestFrame::WIFI_AWARE_R4:
+      return Medium::WIFI_AWARE_R4;
     case ConnectionRequestFrame::NFC:
       return Medium::NFC;
     case ConnectionRequestFrame::WIFI_DIRECT:

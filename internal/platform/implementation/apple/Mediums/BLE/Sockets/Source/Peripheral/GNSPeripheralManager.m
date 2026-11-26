@@ -115,7 +115,9 @@ static NSTimeInterval gKBTCrashLoopMaxTimeBetweenResetting = 15.f;
     [self->_peripheralServiceManagers setObject:peripheralServiceManager
                                          forKey:peripheralServiceManager.serviceUUID];
     [peripheralServiceManager addedToPeripheralManager:self bleServiceAddedCompletion:completion];
-    if (self->_started) {
+    CBManagerState cbState = self->_cbPeripheralManager.state;
+    if (self->_started && ![self isBTCrashLoop] &&
+        (cbState == CBManagerStatePoweredOn || cbState == CBManagerStatePoweredOff)) {
       [self addBleServiceForServiceManager:peripheralServiceManager];
     }
     // Update all advertised services to make sure that the right services are advertised in case
@@ -415,6 +417,11 @@ static NSTimeInterval gKBTCrashLoopMaxTimeBetweenResetting = 15.f;
   GNCLoggerInfo(@"Peripheral manager state updated: %@",
                 CBManagerStateString(_cbPeripheralManager.state));
   switch (_cbPeripheralManager.state) {
+    // CBManagerStatePoweredOff intentionally shares the CBManagerStatePoweredOn path (not an
+    // accidental switch fallthrough): per Apple CoreBluetooth background-recovery guidance
+    // (cl/114732728, b/27186252) and consistent with addPeripheralServiceManager: (b/575601403),
+    // services and advertising remain registered with CBPeripheralManager while Bluetooth is
+    // toggled off so iOS automatically resumes advertising when Bluetooth powers back on.
     case CBManagerStatePoweredOn:
     case CBManagerStatePoweredOff:
       // As instructed by Apple engineers:

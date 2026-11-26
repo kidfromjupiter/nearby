@@ -24,6 +24,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/endpoint_channel_manager.h"
@@ -36,8 +37,6 @@
 #include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/logging.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/output_stream.h"
 
 namespace nearby::connections {
@@ -92,7 +91,7 @@ BaseEndpointChannel::BaseEndpointChannel(
 ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
   ByteArray result;
   {
-    MutexLock lock(&reader_mutex_);
+    absl::MutexLock lock(reader_mutex_);
 
     ExceptionOr<std::int32_t> read_int;
     // currently there's not way to have both kRefactorBleL2cap flag working AND 
@@ -132,7 +131,7 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
   }
 
   {
-    MutexLock crypto_lock(&crypto_mutex_);
+    absl::MutexLock crypto_lock(crypto_mutex_);
     Exception message_exception{Exception::kInvalidProtocolBuffer};
     if (IsEncryptionEnabledLocked()) {
       // If encryption is enabled, decode the message.
@@ -143,23 +142,29 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
         result = ByteArray(std::move(*decrypted_data));
       } else {
         // It could be a protocol race, where remote party sends a KEEP_ALIVE
-        // before encryption is setup on their side, and we receive it after
-        // we switched to encryption mode.
-        // In this case, we verify that message is indeed a valid KEEP_ALIVE,
-        // and let it through if it is, otherwise message is erased.
+        // or DISCONNECTION before encryption is setup on their side, and we
+        // receive it after we switched to encryption mode (e.g. if the peer
+        // aborts/tears down during negotiation).
+        // In this case, we verify that message is indeed a valid KEEP_ALIVE
+        // or DISCONNECTION frame, and let it through if it is, otherwise
+        // message is erased.
         // TODO(apolyudov): verify this happens at most once per session.
         result = {};
         auto parsed = parser::FromBytes(input);
         if (parsed.ok()) {
-          if (parser::GetFrameType(parsed.result()) ==
-              location::nearby::connections::V1Frame::KEEP_ALIVE) {
-            LOG(INFO) << __func__
-                      << ": Read unencrypted KEEP_ALIVE on encrypted channel.";
+          location::nearby::connections::V1Frame::FrameType frame_type =
+              parser::GetFrameType(parsed.result());
+          if (frame_type ==
+                  location::nearby::connections::V1Frame::KEEP_ALIVE ||
+              frame_type ==
+                  location::nearby::connections::V1Frame::DISCONNECTION) {
+            LOG(INFO) << __func__ << ": Read unencrypted frame of type "
+                      << frame_type << " on encrypted channel.";
             result = ByteArray(input);
           } else {
             LOG(WARNING) << __func__
                          << ": Read unexpected unencrypted frame of type "
-                         << parser::GetFrameType(parsed.result());
+                         << frame_type;
           }
         } else {
           message_exception.value = parsed.exception();
@@ -175,7 +180,7 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
   }
 
   {
-    MutexLock lock(&last_read_mutex_);
+    absl::MutexLock lock(last_read_mutex_);
     last_read_timestamp_ = SystemClock::ElapsedRealtime();
   }
   return ExceptionOr<ByteArray>(result);
@@ -183,7 +188,7 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
 
 Exception BaseEndpointChannel::Write(absl::string_view data) {
   {
-    MutexLock pause_lock(&is_paused_mutex_);
+    absl::MutexLock pause_lock(is_paused_mutex_);
     if (is_paused_) {
       BlockUntilUnpaused();
     }
@@ -197,9 +202,9 @@ Exception BaseEndpointChannel::Write(absl::string_view data) {
     // threads from writing encrypted messages out of order which causes a
     // failure to decrypt on the reader side. However we need to release the
     // crypto lock after encrypting to ensure read decryption is not blocked.
-    MutexLock lock(&writer_mutex_);
+    absl::MutexLock lock(writer_mutex_);
     {
-      MutexLock crypto_lock(&crypto_mutex_);
+      absl::MutexLock crypto_lock(crypto_mutex_);
       if (IsEncryptionEnabledLocked()) {
         // If encryption is enabled, encode the message.
         encrypted = crypto_context_->EncodeMessageToPeer(data);
@@ -247,7 +252,7 @@ Exception BaseEndpointChannel::Write(absl::string_view data) {
   }
 
   {
-    MutexLock lock(&last_write_mutex_);
+    absl::MutexLock lock(last_write_mutex_);
     last_write_timestamp_ = SystemClock::ElapsedRealtime();
   }
   return {Exception::kSuccess};
@@ -256,7 +261,7 @@ Exception BaseEndpointChannel::Write(absl::string_view data) {
 void BaseEndpointChannel::Close() {
   {
     // In case channel is paused, resume it first thing.
-    MutexLock lock(&is_paused_mutex_);
+    absl::MutexLock lock(is_paused_mutex_);
     if (is_closed_) {
       VLOG(1) << "EndpointChannel already closed";
       return;
@@ -293,7 +298,7 @@ void BaseEndpointChannel::CloseIo() {
 }
 
 uint32_t BaseEndpointChannel::GetNextKeepAliveSeqNo() const {
-  MutexLock lock(&keep_alive_mutex_);
+  absl::MutexLock lock(keep_alive_mutex_);
   return next_keep_alive_seq_no_++;
 }
 
@@ -322,12 +327,12 @@ void BaseEndpointChannel::Close(
 }
 
 bool BaseEndpointChannel::IsClosed() const {
-  MutexLock lock(&is_paused_mutex_);
+  absl::MutexLock lock(is_paused_mutex_);
   return is_closed_;
 }
 
 std::string BaseEndpointChannel::GetType() const {
-  MutexLock crypto_lock(&crypto_mutex_);
+  absl::MutexLock crypto_lock(crypto_mutex_);
   std::string subtype = IsEncryptionEnabledLocked() ? "ENCRYPTED_" : "";
   std::string medium = location::nearby::proto::connections::Medium_Name(
       location::nearby::proto::connections::Medium::UNKNOWN_MEDIUM);
@@ -352,22 +357,22 @@ int BaseEndpointChannel::GetMaxTransmitPacketSize() const {
 
 void BaseEndpointChannel::EnableEncryption(
     std::shared_ptr<EncryptionContext> context) {
-  MutexLock crypto_lock(&crypto_mutex_);
+  absl::MutexLock crypto_lock(crypto_mutex_);
   crypto_context_ = context;
 }
 
 void BaseEndpointChannel::DisableEncryption() {
-  MutexLock crypto_lock(&crypto_mutex_);
+  absl::MutexLock crypto_lock(crypto_mutex_);
   crypto_context_.reset();
 }
 
 bool BaseEndpointChannel::IsEncrypted() {
-  MutexLock crypto_lock(&crypto_mutex_);
+  absl::MutexLock crypto_lock(crypto_mutex_);
   return IsEncryptionEnabledLocked();
 }
 
 ExceptionOr<ByteArray> BaseEndpointChannel::TryDecrypt(const ByteArray& data) {
-  MutexLock crypto_lock(&crypto_mutex_);
+  absl::MutexLock crypto_lock(crypto_mutex_);
   if (!IsEncryptionEnabledLocked()) {
     return Exception::kFailed;
   }
@@ -380,28 +385,28 @@ ExceptionOr<ByteArray> BaseEndpointChannel::TryDecrypt(const ByteArray& data) {
 }
 
 bool BaseEndpointChannel::IsPaused() const {
-  MutexLock lock(&is_paused_mutex_);
+  absl::MutexLock lock(is_paused_mutex_);
   return is_paused_;
 }
 
 void BaseEndpointChannel::Pause() {
-  MutexLock lock(&is_paused_mutex_);
+  absl::MutexLock lock(is_paused_mutex_);
   is_paused_ = true;
 }
 
 void BaseEndpointChannel::Resume() {
-  MutexLock lock(&is_paused_mutex_);
+  absl::MutexLock lock(is_paused_mutex_);
   is_paused_ = false;
-  is_paused_cond_.Notify();
+  is_paused_cond_.SignalAll();
 }
 
 absl::Time BaseEndpointChannel::GetLastReadTimestamp() const {
-  MutexLock lock(&last_read_mutex_);
+  absl::MutexLock lock(last_read_mutex_);
   return last_read_timestamp_;
 }
 
 absl::Time BaseEndpointChannel::GetLastWriteTimestamp() const {
-  MutexLock lock(&last_write_mutex_);
+  absl::MutexLock lock(last_write_mutex_);
   return last_write_timestamp_;
 }
 
@@ -456,12 +461,7 @@ void BaseEndpointChannel::BlockUntilUnpaused() {
   // For more on how this works, see
   // https://docs.oracle.com/javase/tutorial/essential/concurrency/guardmeth.html
   while (is_paused_) {
-    Exception wait_succeeded = is_paused_cond_.Wait();
-    if (!wait_succeeded.Ok()) {
-      LOG(WARNING) << __func__
-                   << ": Failure waiting to unpause: " << wait_succeeded.value;
-      return;
-    }
+    is_paused_cond_.Wait(&is_paused_mutex_);
   }
 }
 
@@ -469,12 +469,12 @@ void BaseEndpointChannel::UnblockPausedWriter() {
   // For more on how this works, see
   // https://docs.oracle.com/javase/tutorial/essential/concurrency/guardmeth.html
   is_paused_ = false;
-  is_paused_cond_.Notify();
+  is_paused_cond_.SignalAll();
 }
 
 std::unique_ptr<std::string> BaseEndpointChannel::EncodeMessageForTests(
     absl::string_view data) {
-  MutexLock lock(&crypto_mutex_);
+  absl::MutexLock lock(crypto_mutex_);
   DCHECK(IsEncryptionEnabledLocked());
   return crypto_context_->EncodeMessageToPeer(data);
 }

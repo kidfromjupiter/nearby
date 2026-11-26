@@ -14,6 +14,7 @@
 
 #include "sharing/incoming_share_session.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -24,12 +25,15 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/cpp/sharing/clients/cpp/common/nearby_sharing_common.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
 #include "internal/base/file_path.h"
 #include "internal/platform/clock.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/implementation/device_info.h"
+#include "internal/platform/single_thread_executor.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/constants.h"
@@ -63,7 +67,7 @@ using ::nearby::sharing::service::proto::WifiCredentials;
 }  // namespace
 
 IncomingShareSession::IncomingShareSession(
-    Clock* clock, TaskRunner& service_thread,
+    Clock* clock, SingleThreadExecutor& service_thread,
     NearbyConnectionsManager* connections_manager,
     analytics::AnalyticsRecorder& analytics_recorder, std::string endpoint_id,
     const ShareTarget& share_target,
@@ -86,20 +90,54 @@ void IncomingShareSession::InvokeTransferUpdateCallback(
 
 std::optional<TransferMetadata::Status>
 IncomingShareSession::ProcessIntroduction(
-    const IntroductionFrame& introduction_frame) {
+    const IntroductionFrame& introduction_frame, FilePath destination_directory,
+    const SyncManager& sync_manager,
+    const nearby::api::DeviceInfo& device_info) {
+  if (session_phase_ != SessionPhase::kUninitialized) {
+    LOG(WARNING) << __func__
+                 << ": Rejecting duplicate introduction frame, session is "
+                    "already in phase "
+                 << static_cast<int>(session_phase_);
+    return TransferMetadata::Status::kRejected;
+  }
   session_phase_ = SessionPhase::kTransfer;
+  // If transfer is for file sync, override the save path to the custom save
+  // path.
+  if (introduction_frame.use_case() == IntroductionFrame::FILE_SYNC) {
+    if (!certificate().has_value() || certificate()->binding_id().empty()) {
+      LOG(ERROR) << __func__ << ": Binding id is empty for file sync session.";
+      return TransferMetadata::Status::kRejected;
+    }
+    std::optional<sync::SyncBinding> binding =
+        sync_manager.GetSyncBinding(certificate()->binding_id());
+    if (!binding.has_value()) {
+      LOG(ERROR) << __func__ << ": Sync binding not found for binding id: "
+                 << certificate()->binding_id();
+      return TransferMetadata::Status::kRejected;
+    }
+    if (!binding->destination_directory().empty()) {
+      destination_directory = FilePath(binding->destination_directory());
+    }
+    set_session_usage(ShareSessionUsage::kFileSync);
+  }
   int64_t file_size_sum = 0;
   int app_file_count = 0;
   for (const AppMetadata& apk : introduction_frame.app_metadata()) {
     app_file_count += apk.file_name_size();
   }
   AttachmentContainer::Builder builder;
+  builder.SetDestinationDirectory(destination_directory);
+  // Note: introduction_frame.required_package is not used on non-Android
+  // platforms.
   builder.ReserveAttachmentsCount(
-      introduction_frame.text_metadata_size() + app_file_count,
-      introduction_frame.file_metadata_size(),
+      introduction_frame.text_metadata_size(),
+      introduction_frame.file_metadata_size() + app_file_count,
       introduction_frame.wifi_credentials_metadata_size());
+  int file_index = 0;
+  payload_to_file_index_map_.reserve(introduction_frame.file_metadata_size() +
+                                     app_file_count);
   for (const auto& file : introduction_frame.file_metadata()) {
-    if (file.size() <= 0) {
+    if (file.size() < 0) {
       LOG(WARNING) << "Ignore introduction, due to invalid attachment size";
       return TransferMetadata::Status::kUnsupportedAttachmentType;
     }
@@ -113,6 +151,7 @@ IncomingShareSession::ProcessIntroduction(
         FileAttachment(file.id(), file.size(), file.name(), file.mime_type(),
                        file.type(), file.parent_folder()));
     SetAttachmentPayloadId(file.id(), file.payload_id());
+    payload_to_file_index_map_[file.payload_id()] = file_index++;
 
     if (std::numeric_limits<int64_t>::max() - file.size() < file_size_sum) {
       LOG(WARNING) << "Ignoring introduction, total file size overflowed 64 "
@@ -165,6 +204,7 @@ IncomingShareSession::ProcessIntroduction(
               << ", payload_id=" << apk.payload_id(index);
       builder.AddFileAttachment(std::move(apk_file));
       SetAttachmentPayloadId(apk_file_id, apk.payload_id(index));
+      payload_to_file_index_map_[apk.payload_id(index)] = file_index++;
     }
     file_size_sum += apk.size();
   }
@@ -204,6 +244,26 @@ IncomingShareSession::ProcessIntroduction(
     return TransferMetadata::Status::kUnsupportedAttachmentType;
   }
   mutable_attachment_container() = std::move(*builder.Build());
+  // Override save path for this connection.
+  // This must be called before the transfer is accepted and payloads are being
+  // received.
+  connections_manager().OverrideSavePath(endpoint_id(), destination_directory);
+
+  // Log analytics event of receiving introduction.
+  analytics_recorder().NewReceiveIntroduction(
+      session_id(), share_target(), os_type(),
+      IntroductionUseCaseToLoggingUseCase(introduction_frame.use_case()),
+      nearby::sharing::cpp::common::GetPowerStatus());
+
+  std::optional<size_t> available_storage =
+      device_info.GetAvailableDiskSpaceInBytes(destination_directory);
+  if (available_storage.has_value() &&
+      *available_storage <= attachment_container().GetStorageSize()) {
+    LOG(WARNING) << __func__
+                 << ": Not enough space on the receiver. We have informed "
+                 << share_target().id;
+    return TransferMetadata::Status::kNotEnoughSpace;
+  }
   return std::nullopt;
 }
 
@@ -284,42 +344,37 @@ bool IncomingShareSession::AcceptTransfer(
   return true;
 }
 
-bool IncomingShareSession::UpdateFilePayloadPaths() {
-  AttachmentContainer& container = mutable_attachment_container();
-  bool result = true;
-  for (int i = 0; i < container.GetFileAttachments().size(); ++i) {
-    FileAttachment& file = container.GetMutableFileAttachment(i);
-    // Skip file if it already has file_path set.
-    if (file.file_path().has_value()) {
-      continue;
-    }
-    const auto it = attachment_payload_map().find(file.id());
-    if (it == attachment_payload_map().end()) {
-      LOG(WARNING) << "Payload id missing for file attachment: " << file.id();
-      result = false;
-      continue;
-    }
-
-    const Payload* incoming_payload =
-        connections_manager().GetIncomingPayload(it->second);
-    if (!incoming_payload || !incoming_payload->content.is_file()) {
-      LOG(WARNING) << "No payload found for file attachment: " << file.id();
-      result = false;
-      continue;
-    }
-
-    FilePath file_path = incoming_payload->content.file_payload.file_path;
-    VLOG(1) << __func__ << ": Updated file_path=" << file_path.ToString();
-    file.set_file_path(file_path);
+void IncomingShareSession::UpdateFilePayloadPath(int64_t payload_id) {
+  const auto it = payload_to_file_index_map_.find(payload_id);
+  if (it == payload_to_file_index_map_.end()) {
+    return;
   }
-  return result;
+  FileAttachment& file =
+      mutable_attachment_container().GetMutableFileAttachment(it->second);
+  // Skip file if it already has file_path set.
+  if (file.file_path().has_value()) {
+    return;
+  }
+
+  std::optional<FilePath> file_path =
+      connections_manager().GetIncomingPayloadFilePath(payload_id);
+  if (!file_path.has_value()) {
+    VLOG(1) << "No payload found for file attachment: " << file.id();
+    return;
+  }
+
+  VLOG(1) << __func__ << ": Updated file_path=" << file_path->ToString();
+  file.set_file_path(*file_path);
 }
 
 bool IncomingShareSession::UpdatePayloadContents() {
-  if (!UpdateFilePayloadPaths()) {
-    return false;
-  }
   AttachmentContainer& container = mutable_attachment_container();
+  for (const FileAttachment& file : container.GetFileAttachments()) {
+    if (!file.file_path().has_value()) {
+      LOG(WARNING) << "File path is not set for file attachment: " << file.id();
+      return false;
+    }
+  }
   for (int i = 0; i < container.GetTextAttachments().size(); ++i) {
     TextAttachment& text = container.GetMutableTextAttachment(i);
     const auto it = attachment_payload_map().find(text.id());
@@ -329,21 +384,19 @@ bool IncomingShareSession::UpdatePayloadContents() {
       LOG(WARNING) << "Payload id missing for text attachment: " << text.id();
       return false;
     }
-    const Payload* incoming_payload =
-        connections_manager().GetIncomingPayload(it->second);
-    if (!incoming_payload || !incoming_payload->content.is_bytes()) {
+    std::optional<std::vector<uint8_t>> bytes =
+        connections_manager().GetIncomingPayloadBytes(it->second);
+    if (!bytes.has_value()) {
       LOG(WARNING) << "No payload found for text attachment: " << text.id();
       return false;
     }
-
-    std::vector<uint8_t> bytes = incoming_payload->content.bytes_payload.bytes;
-    if (bytes.empty()) {
+    if (bytes->empty()) {
       LOG(WARNING) << "Incoming bytes is empty for text attachment: "
                    << text.id() << " with payload_id: " << it->second;
       return false;
     }
 
-    std::string text_body(bytes.begin(), bytes.end());
+    std::string text_body(bytes->begin(), bytes->end());
     text.set_text_body(text_body);
   }
 
@@ -360,24 +413,21 @@ bool IncomingShareSession::UpdatePayloadContents() {
       return false;
     }
 
-    const Payload* incoming_payload =
-        connections_manager().GetIncomingPayload(it->second);
-    if (!incoming_payload || !incoming_payload->content.is_bytes()) {
+    std::optional<std::vector<uint8_t>> bytes =
+        connections_manager().GetIncomingPayloadBytes(it->second);
+    if (!bytes.has_value()) {
       LOG(WARNING) << "No payload found for WiFi credentials: "
                    << wifi_credentials_attachment.id();
       return false;
     }
-
-    std::vector<uint8_t> bytes = incoming_payload->content.bytes_payload.bytes;
-    if (bytes.empty()) {
+    if (bytes->empty()) {
       LOG(WARNING) << "Incoming bytes is empty for WiFi credentials: "
                    << wifi_credentials_attachment.id()
                    << " with payload_id: " << it->second;
       return false;
     }
-
     WifiCredentials wifi_credentials;
-    if (!wifi_credentials.ParseFromArray(bytes.data(), bytes.size())) {
+    if (!wifi_credentials.ParseFromArray(bytes->data(), bytes->size())) {
       LOG(WARNING) << "Incoming bytes is invalid for WiFi credentials: "
                    << wifi_credentials_attachment.id()
                    << " with payload_id: " << it->second;
@@ -398,20 +448,30 @@ bool IncomingShareSession::FinalizePayloads() {
   return true;
 }
 
-std::vector<FilePath> IncomingShareSession::GetPayloadFilePaths()
-    const {
+std::vector<FilePath> IncomingShareSession::GetPayloadFilePaths() const {
   std::vector<FilePath> file_paths;
   const AttachmentContainer& container = attachment_container();
   const absl::flat_hash_map<int64_t, int64_t>& attachment_paylod_map =
       attachment_payload_map();
   for (const auto& file : container.GetFileAttachments()) {
-    if (!file.file_path().has_value()) continue;
-    FilePath file_path = *file.file_path();
-    VLOG(1) << __func__ << ": file_path=" << file_path.ToString();
-    if (attachment_paylod_map.find(file.id()) == attachment_paylod_map.end()) {
+    auto it = attachment_paylod_map.find(file.id());
+    if (it == attachment_paylod_map.end()) {
       continue;
     }
-    file_paths.push_back(file_path);
+    if (file.file_path().has_value()) {
+      FilePath file_path = *file.file_path();
+      VLOG(1) << __func__ << ": file_path=" << file_path.ToString();
+      file_paths.push_back(file_path);
+      continue;
+    }
+    std::optional<FilePath> file_path =
+        connections_manager().GetIncomingPayloadFilePath(it->second);
+    if (!file_path.has_value()) {
+      LOG(WARNING) << "No payload found for file attachment: " << file.id();
+      continue;
+    }
+    VLOG(1) << __func__ << ": file_path=" << file_path->ToString();
+    file_paths.push_back(*file_path);
   }
   return file_paths;
 }
@@ -444,6 +504,10 @@ void IncomingShareSession::SendFailureResponse(
       response_status = ConnectionResponseFrame::TIMED_OUT;
       break;
 
+    case TransferMetadata::Status::kRejected:
+      response_status = ConnectionResponseFrame::REJECT;
+      break;
+
     default:
       response_status = ConnectionResponseFrame::UNKNOWN;
       break;
@@ -459,8 +523,7 @@ void IncomingShareSession::SendFailureResponse(
 }
 
 std::optional<TransferMetadata>
-IncomingShareSession::ProcessPayloadTransferUpdates(
-    bool update_file_paths_in_progress) {
+IncomingShareSession::ProcessPayloadTransferUpdates() {
   std::queue<std::unique_ptr<PayloadTransferUpdate>> updates =
       payload_updates_queue()->ReadAll();
   VLOG(1) << "Processing " << updates.size() << " PayloadTransferUpdates";
@@ -474,6 +537,10 @@ IncomingShareSession::ProcessPayloadTransferUpdates(
   // If there is a batch of updates in the queue, only return the latest
   // TransferMetadata.
   for (; !updates.empty(); updates.pop()) {
+    if (updates.front()->payload_id != last_payload_id_) {
+      last_payload_id_ = updates.front()->payload_id;
+      UpdateFilePayloadPath(*last_payload_id_);
+    }
     metadata_builder =
         get_payload_tracker()->ProcessPayloadUpdate(std::move(updates.front()));
     if (!metadata_builder.has_value()) {
@@ -489,18 +556,6 @@ IncomingShareSession::ProcessPayloadTransferUpdates(
             .build();
       }
       return metadata;
-    }
-
-    // Update file paths during progress. It may impact transfer speed.
-    // TODO: b/289290115 - Revisit UpdateFilePath to enhance transfer speed for
-    // MacOS.
-    if (update_file_paths_in_progress) {
-      UpdateFilePayloadPaths();
-    } else {
-      if (metadata.status() == TransferMetadata::Status::kCancelled) {
-        VLOG(1) << __func__ << ": Update file paths for cancelled transfer";
-        UpdateFilePayloadPaths();
-      }
     }
   }
   return metadata_builder.has_value()

@@ -15,6 +15,7 @@
 #include "connections/implementation/analytics/analytics_recorder.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,26 +31,31 @@ using ::location::nearby::proto::connections::ConnectionBand;
 using ::location::nearby::proto::connections::ConnectionTechnology;
 using ::location::nearby::proto::connections::Medium;
 using ::location::nearby::proto::connections::OperationResultCode;
+using ::location::nearby::proto::connections::PowerLevel;
 
 std::unique_ptr<AdvertisingMetadataParams>
 AnalyticsRecorder::BuildAdvertisingMetadataParams(
-    bool is_extended_advertisement_supported, int connected_ap_frequency,
-    bool is_nfc_available,
+    std::optional<bool> is_extended_advertisement_supported,
+    std::optional<int> connected_ap_frequency,
+    std::optional<bool> is_nfc_available,
     const std::vector<OperationResultWithMedium>&
-        operation_result_with_mediums) {
+        operation_result_with_mediums,
+    PowerLevel power_level) {
   auto params = std::make_unique<AdvertisingMetadataParams>();
   params->is_extended_advertisement_supported =
       is_extended_advertisement_supported;
   params->connected_ap_frequency = connected_ap_frequency;
   params->is_nfc_available = is_nfc_available;
   params->operation_result_with_mediums = operation_result_with_mediums;
+  params->power_level = power_level;
   return params;
 }
 
 std::unique_ptr<DiscoveryMetadataParams>
 AnalyticsRecorder::BuildDiscoveryMetadataParams(
-    bool is_extended_advertisement_supported, int connected_ap_frequency,
-    bool is_nfc_available,
+    std::optional<bool> is_extended_advertisement_supported,
+    std::optional<int> connected_ap_frequency,
+    std::optional<bool> is_nfc_available,
     const std::vector<OperationResultWithMedium>&
         operation_result_with_mediums) {
   auto params = std::make_unique<DiscoveryMetadataParams>();

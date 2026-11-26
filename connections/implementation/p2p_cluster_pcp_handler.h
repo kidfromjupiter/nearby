@@ -31,18 +31,18 @@
 #include "connections/implementation/bluetooth_device_name.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
+#include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
 #include "connections/implementation/injected_bluetooth_device_store.h"
-#include "connections/implementation/mediums/awdl.h"
+#include "connections/implementation/mediums/awdl/awdl_interface.h"
 #include "connections/implementation/mediums/ble.h"
 #include "connections/implementation/mediums/ble/ble_socket.h"
-#include "connections/implementation/mediums/bluetooth_classic.h"
+#include "connections/implementation/mediums/bluetooth/bluetooth_classic_interface.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/mediums/webrtc.h"
-#include "connections/implementation/mediums/wifi_direct.h"
-#include "connections/implementation/mediums/wifi_hotspot.h"
+#include "connections/implementation/mediums/wifi_aware/wifi_aware_interface.h"
 #include "connections/implementation/mediums/wifi_lan.h"
 #include "connections/implementation/pcp.h"
 #include "connections/implementation/webrtc_state.h"
@@ -53,13 +53,12 @@
 #include "connections/status.h"
 #include "connections/v3/connection_listening_options.h"
 #include "internal/interop/device.h"
-#include "internal/platform/awdl.h"
 #include "internal/platform/ble.h"
 #include "internal/platform/bluetooth_adapter.h"
-#include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/wifi_aware_service_info.h"
 #include "internal/platform/wifi_lan.h"
 
 namespace nearby {
@@ -161,10 +160,11 @@ class P2pClusterPcpHandler : public BasePcpHandler {
   };
 
   using BluetoothDiscoveredDeviceCallback =
-      BluetoothClassic::DiscoveredDeviceCallback;
+      BluetoothClassicInterface::DiscoveredDeviceCallback;
   using BleDiscoveredPeripheralCallback = Ble::DiscoveredPeripheralCallback;
   using WifiLanDiscoveredServiceCallback = WifiLan::DiscoveredServiceCallback;
-  using AwdlDiscoveredServiceCallback = Awdl::DiscoveredServiceCallback;
+  using AwdlDiscoveredServiceCallback =
+      AwdlInterface::DiscoveredServiceCallback;
 
   static constexpr BluetoothDeviceName::Version kBluetoothDeviceNameVersion =
       BluetoothDeviceName::Version::kV1;
@@ -191,10 +191,9 @@ class P2pClusterPcpHandler : public BasePcpHandler {
   void BluetoothDeviceLostHandler(ClientProxy* client,
                                   const std::string& service_id,
                                   BluetoothDevice& device);
-  void BluetoothConnectionAcceptedHandler(ClientProxy* client,
-                                          NearbyDevice::Type device_type,
-                                          const std::string& service_id,
-                                          BluetoothSocket socket);
+  void BluetoothConnectionAcceptedHandler(
+      ClientProxy* client, NearbyDevice::Type device_type,
+      const std::string& service_id, std::unique_ptr<EndpointChannel> channel);
   ErrorOr<location::nearby::proto::connections::Medium>
   StartBluetoothAdvertising(ClientProxy* client, const std::string& service_id,
                             const ByteArray& service_id_hash,
@@ -261,10 +260,9 @@ class P2pClusterPcpHandler : public BasePcpHandler {
   void AwdlServiceLostHandler(ClientProxy* client, NsdServiceInfo service_info,
                               const std::string& service_id);
   void AwdlConnectionAcceptedHandler(ClientProxy* client,
-                                     const std::string& local_endpoint_id,
                                      NearbyDevice::Type device_type,
                                      const std::string& service_id,
-                                     AwdlSocket socket);
+                                     std::unique_ptr<EndpointChannel> channel);
   BasePcpHandler::ConnectImplResult AwdlConnectImpl(ClientProxy* client,
                                                     AwdlEndpoint* endpoint);
   ErrorOr<location::nearby::proto::connections::Medium> StartAwdlAdvertising(
@@ -273,6 +271,26 @@ class P2pClusterPcpHandler : public BasePcpHandler {
       const ByteArray& local_endpoint_info, WebRtcState web_rtc_state);
   ErrorOr<location::nearby::proto::connections::Medium> StartAwdlDiscovery(
       ClientProxy* client, const std::string& service_id);
+
+  // WifiAware
+  void WifiAwareServiceDiscoveredHandler(ClientProxy* client,
+                                         WifiAwareServiceInfo service_info,
+                                         absl::string_view service_id);
+  void WifiAwareServiceLostHandler(ClientProxy* client,
+                                   WifiAwareServiceInfo service_info,
+                                   absl::string_view service_id);
+  void WifiAwareConnectionAcceptedHandler(
+      ClientProxy* client, NearbyDevice::Type device_type,
+      absl::string_view service_id, std::unique_ptr<EndpointChannel> channel);
+  ErrorOr<location::nearby::proto::connections::Medium>
+  StartWifiAwareAdvertising(ClientProxy* client, absl::string_view service_id,
+                            absl::string_view local_endpoint_id,
+                            const ByteArray& local_endpoint_info,
+                            WebRtcState web_rtc_state);
+  ErrorOr<location::nearby::proto::connections::Medium> StartWifiAwareDiscovery(
+      ClientProxy* client, absl::string_view service_id);
+  BasePcpHandler::ConnectImplResult WifiAwareConnectImpl(
+      ClientProxy* client, WifiAwareEndpoint* endpoint);
 
   // WifiLan
   bool IsRecognizedWifiServiceEndpoint(
@@ -305,13 +323,12 @@ class P2pClusterPcpHandler : public BasePcpHandler {
   Status InjectBleEndpoint(ClientProxy* client, const std::string& service_id,
                            const OutOfBandConnectionMetadata& metadata);
 
-  Awdl& awdl_medium_;
+  AwdlInterface& awdl_medium_;
   BluetoothRadio& bluetooth_radio_;
-  BluetoothClassic& bluetooth_medium_;
+  BluetoothClassicInterface& bluetooth_medium_;
   Ble& ble_medium_;
   WifiLan& wifi_lan_medium_;
-  WifiHotspot& wifi_hotspot_medium_;
-  WifiDirect& wifi_direct_medium_;
+  WifiAwareInterface& wifi_aware_medium_;
   mediums::WebRtc& webrtc_medium_;
   InjectedBluetoothDeviceStore& injected_bluetooth_device_store_;
   // Maintains a map of client_id to service_id for bluetooth classic

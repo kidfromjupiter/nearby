@@ -14,16 +14,12 @@
 
 #include "sharing/internal/test/fake_context.h"
 
-#include <stdint.h>
-
 #include <memory>
 
 #include "internal/platform/clock.h"
-#include "internal/platform/task_runner.h"
-#include "internal/platform/timer.h"
+#include "internal/platform/single_thread_executor.h"
 #include "internal/test/fake_clock.h"
-#include "internal/test/fake_task_runner.h"
-#include "internal/test/fake_timer.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "sharing/internal/api/bluetooth_adapter.h"
 #include "sharing/internal/api/fast_initiation_manager.h"
 #include "sharing/internal/public/connectivity_manager.h"
@@ -42,10 +38,6 @@ FakeContext::FakeContext()
 
 Clock* FakeContext::GetClock() const { return fake_clock_.get(); }
 
-std::unique_ptr<Timer> FakeContext::CreateTimer() {
-  return std::make_unique<FakeTimer>(fake_clock_.get());
-}
-
 ConnectivityManager* FakeContext::GetConnectivityManager() const {
   return fake_connectivity_manager_.get();
 }
@@ -58,15 +50,11 @@ api::FastInitiationManager& FakeContext::GetFastInitiationManager() const {
   return *fake_fast_initiation_manager_;
 }
 
-std::unique_ptr<TaskRunner> FakeContext::CreateSequencedTaskRunner() const {
-  auto task_runner = std::make_unique<FakeTaskRunner>(fake_clock_.get(), 1);
-  last_sequenced_task_runner_ = task_runner.get();
-  return task_runner;
-}
-
-std::unique_ptr<TaskRunner> FakeContext::CreateConcurrentTaskRunner(
-    uint32_t concurrent_count) const {
-  return std::make_unique<FakeTaskRunner>(fake_clock_.get(), concurrent_count);
+std::unique_ptr<SingleThreadExecutor> FakeContext::CreateSingleThreadExecutor()
+    const {
+  auto executor = std::make_unique<TestSingleThreadExecutor>(fake_clock_.get());
+  last_single_thread_executor_ = executor.get();
+  return executor;
 }
 
 }  // namespace nearby

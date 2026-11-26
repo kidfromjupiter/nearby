@@ -26,6 +26,7 @@
 #include "testing/fuzzing/fuzztest.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "connections/connection_options.h"
@@ -38,12 +39,10 @@
 #include "connections/status.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/single_thread_executor.h"
 #include "internal/test/fake_single_thread_executor.h"
-#include "proto/connections_enums.pb.h"
 
 namespace nearby::connections {
 namespace {
@@ -72,7 +71,8 @@ class MockFrameProcessor : public EndpointManager::FrameProcessor {
 
   MOCK_METHOD(void, OnEndpointDisconnect,
               (ClientProxy * client, const std::string& service_id,
-               const std::string& endpoint_id, CountDownLatch barrier,
+               const std::string& endpoint_id,
+               std::shared_ptr<absl::Notification> barrier,
                DisconnectionReason reason),
               (override));
 };
@@ -80,16 +80,11 @@ class MockFrameProcessor : public EndpointManager::FrameProcessor {
 class SetSafeToDisconnect {
  public:
   SetSafeToDisconnect(bool safe_to_disconnect,
-                      bool payload_received_ack,
                       std::int32_t safe_to_disconnect_version) {
     NearbyFlags::GetInstance().OverrideBoolFlagValue(
         config_package_nearby::nearby_connections_feature::
             kEnableSafeToDisconnect,
         safe_to_disconnect);
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        config_package_nearby::nearby_connections_feature::
-            kEnablePayloadReceivedAck,
-        payload_received_ack);
     NearbyFlags::GetInstance().OverrideInt64FlagValue(
         config_package_nearby::nearby_connections_feature::
             kSafeToDisconnectVersion,
@@ -112,11 +107,14 @@ class EndpointManagerTest : public ::testing::Test {
  protected:
   void RegisterEndpoint(std::unique_ptr<MockEndpointChannel> channel,
                         bool should_close = true) {
-    auto done = std::make_shared<CountDownLatch>(1);
+    auto done = std::make_shared<absl::Notification>();
     if (should_close) {
       ON_CALL(*channel, Close(_))
-          .WillByDefault(
-              [done](DisconnectionReason reason) { done->CountDown(); });
+          .WillByDefault([done](DisconnectionReason reason) {
+            if (!done->HasBeenNotified()) {
+              done->Notify();
+            }
+          });
     }
     EXPECT_CALL(*channel, GetMedium()).WillRepeatedly(Return(Medium::BLE));
     EXPECT_CALL(*channel, GetLastReadTimestamp())
@@ -128,10 +126,11 @@ class EndpointManagerTest : public ::testing::Test {
                          connection_options_, std::move(channel), listener_,
                          connection_token_);
     if (should_close) {
-      EXPECT_TRUE(done->Await(absl::Milliseconds(1000)).result());
+      EXPECT_TRUE(
+          done->WaitForNotificationWithTimeout(absl::Milliseconds(1000)));
     }
   }
-  SetSafeToDisconnect set_safe_to_disconnect_{true, true, 5};
+  SetSafeToDisconnect set_safe_to_disconnect_{true, 5};
   std::unique_ptr<ClientProxy> client_ = std::make_unique<ClientProxy>();
   ConnectionOptions connection_options_{
       .keep_alive_interval_millis = 5000,
@@ -325,7 +324,7 @@ TEST_F(EndpointManagerTest, ReadInvalidUnencryptedPayloadIgnoresFrame) {
   // 3. EndpointManager calls EndpointChannel::TryDecrypt(), which keeps failing
   // because the channel is not encrypted.
   // 4. Invalid frame is ignored. No bad side effects.
-  CountDownLatch latch(1);
+  absl::Notification latch;
   const ByteArray payload("not a valid frame");
   auto endpoint_channel = std::make_unique<MockEndpointChannel>();
   EXPECT_CALL(*endpoint_channel, Read())
@@ -336,9 +335,9 @@ TEST_F(EndpointManagerTest, ReadInvalidUnencryptedPayloadIgnoresFrame) {
   EXPECT_CALL(*endpoint_channel, Write(_))
       .WillRepeatedly(Return(Exception{Exception::kSuccess}));
   EXPECT_CALL(*endpoint_channel, Close(_))
-      .WillOnce([&](DisconnectionReason reason) { latch.CountDown(); });
+      .WillOnce([&](DisconnectionReason reason) { latch.Notify(); });
   RegisterEndpoint(std::move(endpoint_channel), false);
-  latch.Await();
+  latch.WaitForNotification();
   em_.UnregisterEndpoint(client_.get(), endpoint_id_);
 }
 
@@ -538,6 +537,140 @@ TEST_F(EndpointManagerTest, DisconnectEndpointDuringDestruction) {
   fake_serial_executor->SetRunExecutablesImmediately(
       /*run_executables_immediately=*/true);
   endpoint_manager.reset();
+}
+
+TEST_F(EndpointManagerTest, ProcessDisconnectionFrameDuringDestruction) {
+  // This test uses a `FakeSingleThreadExecutor` in order to control when
+  // tasks are executed in order to simulate the scenario where
+  // "safe-to-disconnect" is posted to the executor before the EndpointManager
+  // is destructed, and executed during its destruction.
+  std::unique_ptr<SingleThreadExecutor> serial_executor =
+      std::make_unique<FakeSingleThreadExecutor>();
+  FakeSingleThreadExecutor* fake_serial_executor =
+      static_cast<FakeSingleThreadExecutor*>(serial_executor.get());
+  std::unique_ptr<EndpointManager> endpoint_manager =
+      std::make_unique<TestEndpointManager>(&ecm_, std::move(serial_executor));
+
+  absl::Notification read_latch;
+  absl::Notification write_latch;
+  absl::Notification read_exit_latch;
+  auto endpoint_channel = std::make_unique<MockEndpointChannel>();
+  EXPECT_CALL(*endpoint_channel, GetType()).WillRepeatedly(Return(""));
+  EXPECT_CALL(*endpoint_channel, GetMedium())
+      .WillRepeatedly(Return(Medium::BLE));
+  EXPECT_CALL(*endpoint_channel, GetLastReadTimestamp())
+      .WillRepeatedly(Return(start_time_));
+  EXPECT_CALL(*endpoint_channel, GetLastWriteTimestamp())
+      .WillRepeatedly(Return(start_time_));
+  EXPECT_CALL(*endpoint_channel, Read())
+      .WillOnce([&read_latch]() {
+        read_latch.WaitForNotification();
+        return ExceptionOr<ByteArray>(ByteArray(
+            parser::ForDisconnection(/*request_safe_to_disconnect=*/true,
+                                     /*ack_safe_to_disconnect=*/false)));
+      })
+      .WillRepeatedly([&read_exit_latch]() {
+        if (!read_exit_latch.HasBeenNotified()) {
+          read_exit_latch.Notify();
+        }
+        return ExceptionOr<ByteArray>(Exception::kIo);
+      });
+  std::string disconnection_ack =
+      parser::ForDisconnection(/*request_safe_to_disconnect=*/true,
+                               /*ack_safe_to_disconnect=*/true);
+  EXPECT_CALL(*endpoint_channel, Write(_))
+      .WillRepeatedly(
+          [&write_latch, disconnection_ack](absl::string_view data) {
+            if (data == disconnection_ack) {
+              if (!write_latch.HasBeenNotified()) {
+                write_latch.Notify();
+              }
+              return Exception{Exception::kSuccess};
+            }
+            return Exception{Exception::kIo};
+          });
+  EXPECT_CALL(*endpoint_channel, Close(_)).WillRepeatedly(Return());
+
+  SetSafeToDisconnect set_safe_to_disconnect_{true, 5};
+
+  fake_serial_executor->SetRunExecutablesImmediately(
+      /*run_executables_immediately=*/true);
+  EXPECT_CALL(mock_listener_.initiated_cb, Call).Times(1);
+  ConnectionOptions connection_options{
+      .keep_alive_interval_millis = 0,
+      .keep_alive_timeout_millis = 0,
+  };
+  endpoint_manager->RegisterEndpoint(
+      client_.get(), endpoint_id_, info_, connection_options,
+      std::move(endpoint_channel), listener_, connection_token_);
+
+  client_->SetRemoteSafeToDisconnectVersion(endpoint_id_, 5);
+  ecm_.UpdateSafeToDisconnectForEndpoint(endpoint_id_, true);
+
+  // When ProcessDisconnectionFrame runs on the reader thread, it will post
+  // "safe-to-disconnect" to serial_executor. Because
+  // SetRunExecutablesImmediately is set to false after RegisterEndpoint
+  // completes, the task will remain queued on fake_serial_executor.
+  fake_serial_executor->SetRunExecutablesImmediately(
+      /*run_executables_immediately=*/false);
+  read_latch.Notify();
+
+  // Wait until ProcessDisconnectionFrame has processed the DISCONNECTION frame,
+  // posted "safe-to-disconnect" to fake_serial_executor, and written the ACK.
+  EXPECT_TRUE(
+      write_latch.WaitForNotificationWithTimeout(absl::Milliseconds(1000)));
+  EXPECT_TRUE(
+      read_exit_latch.WaitForNotificationWithTimeout(absl::Milliseconds(1000)));
+  absl::SleepFor(absl::Milliseconds(100));
+
+  // Simulate Core destruction of ClientProxy by destroying `client_`.
+  client_.reset();
+
+  // Simulate ServiceController destruction of EndpointManager by destroying
+  // `endpoint_manager`, and set the `FakeSingleThreadExecutor` to run
+  // executables on calls `Execute`. When `endpoint_manager` is destructed, it
+  // will block on calls to `Execute` to run all pending executables, notably
+  // "safe-to-disconnect" from above. However, "safe-to-disconnect" will have a
+  // reference to a destroyed ClientProxy.
+  //
+  // Expect no crash when "safe-to-disconnect" is executed during the
+  // destruction.
+  fake_serial_executor->SetRunExecutablesImmediately(
+      /*run_executables_immediately=*/true);
+  endpoint_manager.reset();
+}
+
+TEST_F(EndpointManagerTest,
+       RemoveEndpointCancelsEndpointBeforeNotifyingFrameProcessors) {
+  auto endpoint_channel = std::make_unique<MockEndpointChannel>();
+  EXPECT_CALL(*endpoint_channel, Read())
+      .WillRepeatedly(Return(ExceptionOr<ByteArray>(Exception::kIo)));
+  EXPECT_CALL(*endpoint_channel, Write(_))
+      .WillRepeatedly(Return(Exception{Exception::kSuccess}));
+
+  auto frame_processor = std::make_unique<MockFrameProcessor>();
+  bool cancelled_when_notified = false;
+  EXPECT_CALL(*frame_processor, OnEndpointDisconnect)
+      .WillOnce([&cancelled_when_notified](
+                    ClientProxy* client, const std::string& /*service_id*/,
+                    const std::string& endpoint_id,
+                    std::shared_ptr<absl::Notification> barrier,
+                    DisconnectionReason /*reason*/) {
+        cancelled_when_notified =
+            client->GetCancellationFlag(endpoint_id)->Cancelled();
+        barrier->Notify();
+      });
+
+  em_.RegisterFrameProcessor(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION,
+                             frame_processor.get());
+  processors_.emplace_back(std::move(frame_processor));
+
+  RegisterEndpoint(std::move(endpoint_channel), /*should_close=*/false);
+  client_->AddCancellationFlag(endpoint_id_);
+  ASSERT_FALSE(client_->GetCancellationFlag(endpoint_id_)->Cancelled());
+
+  em_.UnregisterEndpoint(client_.get(), endpoint_id_);
+  EXPECT_TRUE(cancelled_when_notified);
 }
 
 }  // namespace

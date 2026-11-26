@@ -38,7 +38,7 @@
 #include "internal/network/url.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
-#include "internal/test/fake_task_runner.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/test_util.h"
 #include "sharing/common/nearby_share_enums.h"
@@ -62,6 +62,7 @@ namespace {
 using ::location::nearby::proto::sharing::EstablishConnectionStatus;
 using ::location::nearby::proto::sharing::EventCategory;
 using ::location::nearby::proto::sharing::EventType;
+using ::location::nearby::proto::sharing::SharingUseCase;
 using ::nearby::analytics::HasCategory;
 using ::nearby::analytics::HasEventType;
 using ::nearby::sharing::analytics::proto::SharingLog;
@@ -161,7 +162,7 @@ class OutgoingShareSessionTest : public ::testing::Test {
 
  protected:
   FakeClock fake_clock_;
-  FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
+  TestSingleThreadExecutor fake_task_runner_{&fake_clock_};
   nearby::analytics::MockEventLogger mock_event_logger_;
   analytics::AnalyticsRecorderImpl analytics_recorder_{/*vendor_id=*/0,
                                                        &mock_event_logger_};
@@ -227,7 +228,6 @@ TEST_F(OutgoingShareSessionTest, InitiateSendAttachmentsSuccess) {
               Eq(file1_.parent_folder()));
   EXPECT_THAT(file_payloads[0].content.file_payload.file_path,
               Eq(file1_.file_path()));
-
 
   EXPECT_THAT(session_.attachment_container().GetFileAttachments()[0].size(),
               Eq(kFile1Size));
@@ -396,10 +396,12 @@ TEST_F(OutgoingShareSessionTest, SendIntroductionSuccess) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
   EXPECT_CALL(mock_event_logger_,
-              Log(Matcher<const SharingLog&>(AllOf(
-                  (HasCategory(EventCategory::SENDING_EVENT),
-                   HasEventType(EventType::SEND_INTRODUCTION),
-                   ProtoField<"send_introduction", "session_id">(1234))))));
+              Log(Matcher<const SharingLog&>(
+                  AllOf((HasCategory(EventCategory::SENDING_EVENT),
+                         HasEventType(EventType::SEND_INTRODUCTION),
+                         ProtoField<"send_introduction", "session_id">(1234),
+                         ProtoField<"event_metadata", "use_case">(
+                             SharingUseCase::USE_CASE_NEARBY_SHARE))))));
   std::vector<uint8_t> frame_data;
   connections_manager_.set_send_payload_callback(
       [&](std::unique_ptr<Payload> payload,
@@ -469,10 +471,12 @@ TEST_F(OutgoingShareSessionTest, SendIntroductionTimeout) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
   EXPECT_CALL(mock_event_logger_,
-              Log(Matcher<const SharingLog&>(AllOf(
-                  (HasCategory(EventCategory::SENDING_EVENT),
-                   HasEventType(EventType::SEND_INTRODUCTION),
-                   ProtoField<"send_introduction", "session_id">(1234))))));
+              Log(Matcher<const SharingLog&>(
+                  AllOf((HasCategory(EventCategory::SENDING_EVENT),
+                         HasEventType(EventType::SEND_INTRODUCTION),
+                         ProtoField<"send_introduction", "session_id">(1234),
+                         ProtoField<"event_metadata", "use_case">(
+                             SharingUseCase::USE_CASE_NEARBY_SHARE))))));
 
   bool accept_timeout_called = false;
   EXPECT_THAT(session_.SendIntroduction(
@@ -496,10 +500,12 @@ TEST_F(OutgoingShareSessionTest, SendIntroductionTimeoutCancelled) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
   EXPECT_CALL(mock_event_logger_,
-              Log(Matcher<const SharingLog&>(AllOf(
-                  (HasCategory(EventCategory::SENDING_EVENT),
-                   HasEventType(EventType::SEND_INTRODUCTION),
-                   ProtoField<"send_introduction", "session_id">(1234))))));
+              Log(Matcher<const SharingLog&>(
+                  AllOf((HasCategory(EventCategory::SENDING_EVENT),
+                         HasEventType(EventType::SEND_INTRODUCTION),
+                         ProtoField<"send_introduction", "session_id">(1234),
+                         ProtoField<"event_metadata", "use_case">(
+                             SharingUseCase::USE_CASE_NEARBY_SHARE))))));
 
   bool accept_timeout_called = false;
   EXPECT_THAT(session_.SendIntroduction(
@@ -547,10 +553,13 @@ TEST_F(OutgoingShareSessionTest, AcceptTransferSuccess) {
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
   EXPECT_CALL(mock_event_logger_,
-              Log(Matcher<const SharingLog&>(AllOf(
-                  (HasCategory(EventCategory::SENDING_EVENT),
-                   HasEventType(EventType::SEND_INTRODUCTION),
-                   ProtoField<"send_introduction", "session_id">(1234))))));
+              Log(Matcher<const SharingLog&>(
+                  AllOf((HasCategory(EventCategory::SENDING_EVENT),
+                         HasEventType(EventType::SEND_INTRODUCTION),
+                         ProtoField<"send_introduction", "session_id">(1234),
+                         ProtoField<"event_metadata", "use_case">(
+                             SharingUseCase::USE_CASE_NEARBY_SHARE))))));
+
   EXPECT_THAT(session_.SendIntroduction([]() {}), IsTrue());
   EXPECT_CALL(
       transfer_metadata_callback_,
@@ -575,6 +584,7 @@ TEST_F(OutgoingShareSessionTest, AcceptTransferSuccess) {
   data.resize(frame.ByteSizeLong());
   EXPECT_THAT(frame.SerializeToArray(data.data(), data.size()), IsTrue());
   connection.WriteMessage(std::move(data));
+  EXPECT_TRUE(fake_task_runner_.SyncWithTimeout(absl::Milliseconds(100)));
 
   EXPECT_THAT(connection_response_received, IsTrue());
 }
@@ -672,12 +682,11 @@ TEST_F(OutgoingShareSessionTest, SendPayloads) {
               std::weak_ptr<NearbyConnectionsManager::PayloadStatusListener>) {
             payload->id = session_.attachment_payload_map().at(file1_.id());
           });
-  EXPECT_CALL(
-      mock_event_logger_,
-      Log(Matcher<const SharingLog&>(AllOf(
-          (HasCategory(EventCategory::SENDING_EVENT),
-           HasEventType(EventType::SEND_ATTACHMENTS_START),
-           ProtoField<"send_attachments_start", "session_id">(1234))))));
+  EXPECT_CALL(mock_event_logger_,
+              Log(Matcher<const SharingLog&>(AllOf((
+                  HasCategory(EventCategory::SENDING_EVENT),
+                  HasEventType(EventType::SEND_ATTACHMENTS_START),
+                  ProtoField<"send_attachments_start", "session_id">(1234))))));
 
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
@@ -962,26 +971,26 @@ TEST_F(OutgoingShareSessionTest, StartPeerBindingSuccess) {
 
   // Send response frame
   nearby::sharing::service::proto::Frame response_frame =
-     proto2::contrib::parse_proto::ParseTextProtoOrDie(
-      R"pb(
-        version: V1
-        v1 {
-          type: BINDINGS
-          bindings {
-            binding_response {
-              status: SUCCESS
-              cert_ids: "cert_id_3"
-              cert_ids: "cert_id_4"
+      proto2::contrib::parse_proto::ParseTextProtoOrDie(
+          R"pb(
+            version: V1
+            v1 {
+              type: BINDINGS
+              bindings {
+                binding_response {
+                  status: SUCCESS
+                  cert_ids: "cert_id_3"
+                  cert_ids: "cert_id_4"
+                }
+              }
             }
-          }
-        }
-      )pb"
-     );
+          )pb");
   std::vector<uint8_t> data;
   data.resize(response_frame.ByteSizeLong());
   EXPECT_THAT(response_frame.SerializeToArray(data.data(), data.size()),
               IsTrue());
   connection.WriteMessage(std::move(data));
+  EXPECT_TRUE(fake_task_runner_.SyncWithTimeout(absl::Milliseconds(100)));
 
   EXPECT_THAT(binding_response.status(), Eq(BindingResponse::SUCCESS));
   EXPECT_THAT(binding_response.cert_ids(),
@@ -1000,10 +1009,7 @@ TEST_F(OutgoingShareSessionTest, StartPeerBindingTimeout) {
             v1 {
               type: BINDINGS
               bindings {
-                binding_request {
-                  binding_id: "test_binding_id"
-                  type: FILESYNC
-                }
+                binding_request { binding_id: "test_binding_id" type: FILESYNC }
               }
             }
           )pb");
@@ -1032,8 +1038,8 @@ TEST_F(OutgoingShareSessionTest, StartPeerBindingTimeout) {
               IsTrue());
   EXPECT_THAT(frame, EqualsProto(expected_binding_request_frame));
 
-  // Fast forward to the disconnection timeout.
-  fake_clock_.FastForward(absl::Seconds(60));
+  // Fast forward to the binding timeout.
+  fake_clock_.FastForward(absl::Minutes(3));
   fake_task_runner_.SyncWithTimeout(absl::Milliseconds(100));
 
   EXPECT_THAT(binding_response.status(), Eq(BindingResponse::FAILURE));
@@ -1051,10 +1057,7 @@ TEST_F(OutgoingShareSessionTest, StartPeerBindingFailure) {
             v1 {
               type: BINDINGS
               bindings {
-                binding_request {
-                  binding_id: "test_binding_id"
-                  type: FILESYNC
-                }
+                binding_request { binding_id: "test_binding_id" type: FILESYNC }
               }
             }
           )pb");
@@ -1085,27 +1088,41 @@ TEST_F(OutgoingShareSessionTest, StartPeerBindingFailure) {
 
   // Send response frame
   nearby::sharing::service::proto::Frame response_frame =
-     proto2::contrib::parse_proto::ParseTextProtoOrDie(
-      R"pb(
-        version: V1
-        v1 {
-          type: BINDINGS
-          bindings {
-            binding_response {
-              status: FAILURE
+      proto2::contrib::parse_proto::ParseTextProtoOrDie(
+          R"pb(
+            version: V1
+            v1 {
+              type: BINDINGS
+              bindings { binding_response { status: FAILURE } }
             }
-          }
-        }
-      )pb"
-     );
+          )pb");
   std::vector<uint8_t> data;
   data.resize(response_frame.ByteSizeLong());
   EXPECT_THAT(response_frame.SerializeToArray(data.data(), data.size()),
               IsTrue());
   connection.WriteMessage(std::move(data));
+  EXPECT_TRUE(fake_task_runner_.SyncWithTimeout(absl::Milliseconds(100)));
 
   EXPECT_THAT(binding_response.status(), Eq(BindingResponse::FAILURE));
   EXPECT_THAT(binding_response.cert_ids(), IsEmpty());
+}
+
+TEST_F(OutgoingShareSessionTest,
+       SendAttachmentsCompletedBeforeConnectLogsZeroDuration) {
+  session_.set_session_id(1234);
+  fake_clock_.FastForward(absl::Hours(24 * 365 * 50));
+
+  EXPECT_CALL(
+      mock_event_logger_,
+      Log(Matcher<const SharingLog&>(
+          AllOf(HasEventType(EventType::SEND_ATTACHMENTS_END),
+                ProtoField<"send_attachments_end", "duration_millis">(0)))));
+
+  TransferMetadata failed_metadata =
+      TransferMetadataBuilder()
+          .set_status(TransferMetadata::Status::kFailed)
+          .build();
+  session_.SendAttachmentsCompleted(failed_metadata);
 }
 
 }  // namespace

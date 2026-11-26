@@ -32,7 +32,7 @@ option objc_class_prefix = "GNSHP";
 // in NearbyClearcutLogger (for android, or clearcut_event_logger as the
 // equivalence for Windows) for all events (may exclude settings), and
 // session_id for a pair of events (start and end of a session).
-// Next id: 81
+// Next id: 86
 enum EventType {
   UNKNOWN_EVENT_TYPE = 0;
 
@@ -333,6 +333,21 @@ enum EventType {
   // Cloud sharing RPC performance result
   CLOUD_SHARING_RPC_RESULT = 80;
 
+  // External provider connection events.
+  PROVIDER_CONNECTED = 81;
+
+  // End-to-end outcome of device pairing handshake.
+  PAIR_DEVICES = 82;
+
+  // The initiative of syncing files.
+  FILE_SYNC = 83;
+
+  // Unpair a paired device.
+  UNPAIR_DEVICE = 84;
+
+  // Link preview events.
+  LINK_PREVIEW = 85;
+
   // LINT.ThenChange(//depot/google3/location/nearby/proto/nearby_event_codes.proto:SharingEventCode)
 }
 
@@ -628,6 +643,9 @@ enum ServerActionName {
 
   // used for analytics logger to record action name.
   DOWNLOAD_CERTIFICATES_INFO = 12;
+  REGISTER_PROVISIONED_CONTACT = 13;
+  LIST_PROVISIONED_CONTACTS = 14;
+  DELETE_PROVISIONED_CONTACT = 15;
 }
 
 // The Fast Share server response state.
@@ -847,7 +865,7 @@ enum SharingUseCase {
   // The user was redirected from Bluetooth sharing UI to Nearby Share
   USE_CASE_REDIRECTED_FROM_BLUETOOTH_SHARE = 8;
   USE_CASE_TAP_TO_SHARE = 9;
-  // Automatic backup use case.
+  // Automatic file sync use case.
   USE_CASE_FILE_SYNC = 10;
 }
 
@@ -1076,4 +1094,167 @@ enum PowerStatus {
   POWER_STATUS_BATTERY = 1;
   POWER_STATUS_AC = 2;
   POWER_STATUS_BATTERY_AND_AC = 3;
+}
+
+// The result of the pairing process.
+enum PairingResultStatus {
+  PAIRING_STATUS_UNKNOWN = 0;
+
+  // Android: Pairing succeeded; binding ID and remote device name saved to
+  // SQLite Room DB.
+  //
+  // Windows: Pairing succeeded; binding ID and certificate bindings saved
+  // to local settings.
+  PAIRING_SUCCESS = 1;
+
+  // Android & Windows: Failed to verify peer identity (e.g. certificate
+  // verification failure, untrusted peer, or missing certificates).
+  PAIRING_PEER_VERIFICATION_FAILED = 2;
+
+  // Windows: InitiateBinding RPC failed (unable to obtain binding_id for
+  // pairing).
+  PAIRING_SERVER_INITIATE_ERROR = 3;
+
+  // Android: No Google (Gaia) account logged in on the device.
+  PAIRING_NO_ACCOUNT = 4;
+
+  // Android: User declined pairing consent.
+  //
+  // Windows: Received rejection from peer.
+  PAIRING_CONSENT_DECLINED = 5;
+
+  // Android: User dismissed or canceled the pairing prompt (e.g. swiped
+  // away, tapped outside, or canceled).
+  //
+  // Windows: User or peer canceled the pairing attempt.
+  PAIRING_CANCELED = 6;
+
+  // Android: Inaction timeout on pairing consent prompt.
+  //
+  // Windows: Peer response timed out.
+  PAIRING_CONSENT_TIMEOUT = 7;
+
+  // Android: JoinBinding RPC failed.
+  PAIRING_SERVER_JOIN_ERROR = 8;
+
+  // Android: SQLite Room DB write failure (failed to save binding ID and
+  // remote device name).
+  //
+  // Windows: Local settings persistence error (failed to save binding ID
+  // and certificate bindings).
+  PAIRING_LOCAL_STORAGE_ERROR = 9;
+
+  // Android & Windows: Nearby connection disconnected during pairing.
+  PAIRING_CONNECTION_LOST = 10;
+}
+
+// The trigger type that initiated the file sync flow.
+enum FileSyncTriggerType {
+  FILE_SYNC_TRIGGER_TYPE_UNKNOWN = 0;
+  // Background task triggered by the scheduler.
+  FILE_SYNC_TRIGGER_TYPE_SCHEDULED = 1;
+  // User initiated the sync on demand.
+  FILE_SYNC_TRIGGER_TYPE_ON_DEMAND = 2;
+  // Standalone indexing scan.
+  FILE_SYNC_TRIGGER_TYPE_INDEXING = 3;
+}
+
+// The result status of a file sync flow.
+enum FileSyncStatus {
+  FILE_SYNC_STATUS_UNKNOWN = 0;
+
+  // File sync flow completed successfully.
+  FILE_SYNC_STATUS_SUCCESS = 1;
+
+  // No folders are selected/configured.
+  FILE_SYNC_STATUS_NO_FOLDERS_CONFIGURED = 2;
+
+  // No paired device found.
+  FILE_SYNC_STATUS_NO_PAIRED_DEVICE = 3;
+
+  // Storage/media permissions not granted.
+  FILE_SYNC_STATUS_PERMISSION_DENIED = 4;
+
+  // Database error during indexing.
+  FILE_SYNC_STATUS_INDEXING_ERROR = 5;
+
+  // No target device found.
+  FILE_SYNC_STATUS_TARGET_NOT_FOUND = 6;
+
+  // Certificate/identity verification failed.
+  FILE_SYNC_STATUS_PEER_VERIFICATION_FAILED = 7;
+
+  // File sync cancelled by user.
+  FILE_SYNC_STATUS_USER_CANCELED = 8;
+
+  // Disconnected during connection setup or mid-transfer.
+  FILE_SYNC_STATUS_CONNECTION_LOST = 9;
+
+  // Receiver device has insufficient disk space to accept the files
+  FILE_SYNC_STATUS_REMOTE_OUT_OF_SPACE = 10;
+
+  // Payload transfer or remote response timed out
+  FILE_SYNC_STATUS_TRANSFER_TIMEOUT = 11;
+
+  // Other unclassified payload transfer errors.
+  FILE_SYNC_STATUS_OTHER_TRANSFER_ERROR = 12;
+
+  // Local DB write failure (failed to update sequence/file records).
+  FILE_SYNC_STATUS_LOCAL_DB_WRITE_ERROR = 13;
+
+  // Sync is not required.
+  FILE_SYNC_STATUS_NO_SYNC_REQUIRED = 14;
+
+  // Local DB read failure.
+  FILE_SYNC_STATUS_LOCAL_DB_READ_ERROR = 15;
+
+  // File sync is skipped due to policy, e.g. before
+  // min_duration_between_scheduled_sync expires.
+  FILE_SYNC_STATUS_SKIPPED = 16;
+}
+
+// The trigger source for unpairing (deleting a paired device binding).
+// Next id: 3
+enum UnpairTriggerType {
+  UNPAIR_TRIGGER_TYPE_UNKNOWN = 0;
+  // Triggered by user action on the local device.
+  UNPAIR_TRIGGER_TYPE_LOCAL = 1;
+  // Triggered when the remote paired device deletes the binding.
+  UNPAIR_TRIGGER_TYPE_REMOTE = 2;
+}
+
+// The file sync state of the device.
+// Next id: 6
+enum FileSyncState {
+  FILE_SYNC_STATE_UNKNOWN = 0;
+  // Device has never paired for file sync.
+  FILE_SYNC_STATE_NEVER_PAIRED = 1;
+  // Device is paired for file sync and the file sync toggle is turned on.
+  FILE_SYNC_STATE_PAIRED_TOGGLE_ON = 2;
+  // Device is paired for file sync and the file sync toggle is turned off.
+  FILE_SYNC_STATE_PAIRED_TOGGLE_OFF = 3;
+  // Device was previously paired for file sync, but is currently unpaired.
+  FILE_SYNC_STATE_UNPAIRED = 4;
+  // Failed to read the file sync state from local storage.
+  FILE_SYNC_STATE_READ_ERROR = 5;
+}
+
+// The Tap to Share state of the device.
+// Next id: 6
+enum TapToShareState {
+  TAP_TO_SHARE_STATE_UNKNOWN = 0;
+  // Tap to Share isn't supported on the device, e.g. it isn't rolled out to the
+  // device or the device doesn't meet its requirements.
+  TAP_TO_SHARE_STATE_UNSUPPORTED = 1;
+  // Tap to Share is supported on the device and the Tap to Share toggle is
+  // turned on.
+  TAP_TO_SHARE_STATE_SUPPORTED_TOGGLE_ON = 2;
+  // Tap to Share is supported on the device and the Tap to Share toggle is
+  // turned off.
+  TAP_TO_SHARE_STATE_SUPPORTED_TOGGLE_OFF = 3;
+  // Tap to Share is supported on the device, but the state of the Tap to Share
+  // toggle couldn't be read.
+  TAP_TO_SHARE_STATE_SUPPORTED_TOGGLE_UNKNOWN = 4;
+  // Failed to read the Tap to Share state, e.g. it couldn't be read in time.
+  TAP_TO_SHARE_STATE_READ_ERROR = 5;
 }

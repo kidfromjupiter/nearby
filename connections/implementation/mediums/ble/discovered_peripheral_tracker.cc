@@ -25,6 +25,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/escaping.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "connections/implementation/ble_advertisement.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
@@ -48,7 +49,6 @@
 #include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/multi_thread_executor.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/uuid.h"
 
 using ::nearby::api::ble::BleAdvertisementData;
@@ -90,13 +90,13 @@ void DiscoveredPeripheralTracker::Shutdown() {
   }
   std::unique_ptr<MultiThreadExecutor> executor_to_shutdown;
   {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     executor_to_shutdown = std::move(executor_);
   }
 
   {
-    MutexLock lock(&task_mutex_);
-    cond_.Notify();
+    absl::MutexLock lock(task_mutex_);
+    cond_.SignalAll();
   }
 
   if (executor_to_shutdown != nullptr) {
@@ -108,7 +108,7 @@ void DiscoveredPeripheralTracker::StartTracking(
     const std::string& service_id, bool include_dct_advertisement, Pcp pcp,
     DiscoveredPeripheralCallback discovered_peripheral_callback,
     const Uuid& fast_advertisement_service_uuid) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   if (start_fetch_executor_) {
     StartFetchExecutorIfNeeded();
@@ -148,7 +148,7 @@ void DiscoveredPeripheralTracker::StartTracking(
 }
 
 void DiscoveredPeripheralTracker::StopTracking(const std::string& service_id) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
 
   dct_service_id_hash_to_service_id_map_.erase(
       advertisements::ble::DctAdvertisement::ComputeServiceIdHash(service_id));
@@ -158,7 +158,7 @@ void DiscoveredPeripheralTracker::StopTracking(const std::string& service_id) {
 void DiscoveredPeripheralTracker::ProcessFoundBleAdvertisement(
     BlePeripheral peripheral, BleAdvertisementData advertisement_data,
     AdvertisementFetcher advertisement_fetcher) {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (shutting_down_.Get()) {
     return;
   }
@@ -269,7 +269,7 @@ bool DiscoveredPeripheralTracker::HandleOnLostAdvertisementLocked(
 }
 
 void DiscoveredPeripheralTracker::ProcessLostGattAdvertisements() {
-  MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   int lost_count = 0;
 
   for (auto& it : service_id_infos_) {
@@ -763,7 +763,7 @@ void DiscoveredPeripheralTracker::HandleAdvertisementHeader(
   }
 
   {
-    MutexLock lock(&task_mutex_);
+    absl::MutexLock lock(task_mutex_);
     // Check if the advertisement header is already in progress.
     if (fetch_in_progress_header_.has_value() &&
         fetch_in_progress_header_ == advertisement_header) {
@@ -802,7 +802,7 @@ void DiscoveredPeripheralTracker::HandleAdvertisementHeader(
           .scheduled_time = SystemClock::ElapsedRealtime(),
       });
     }
-    cond_.Notify();
+    cond_.SignalAll();
   }
 
   // Regardless of whether or not we read a new GATT advertisement, the maps
@@ -922,7 +922,7 @@ void DiscoveredPeripheralTracker::FetchRawAdvertisementsInThread(
   std::vector<std::string> service_ids;
 
   {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (!IsInterestingAdvertisementHeader(advertisement_header)) {
       LOG(INFO) << ": Ignore to read raw advertisement from server due to it "
                    "is not interesting header now.";
@@ -942,7 +942,7 @@ void DiscoveredPeripheralTracker::FetchRawAdvertisementsInThread(
   advertisement_fetcher(peripheral, advertisement_header.GetNumSlots(),
                         advertisement_header.GetPsm(), service_ids, *result);
   {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     // The fetching process might take a few seconds, and tracking settings
     // could change during that time. We need to double-check if the result
     // is still valid afterward.
@@ -980,14 +980,14 @@ void DiscoveredPeripheralTracker::GattFetchingLoop() {
     GattFetchTask task;
     bool found_task = false;
     {
-      MutexLock lock(&task_mutex_);
+      absl::MutexLock lock(task_mutex_);
       if (shutting_down_) {
         gatt_fetch_tasks_.clear();
         return;
       }
       while (gatt_fetch_tasks_.empty() && gatt_extended_fetch_tasks_.empty() &&
              !shutting_down_) {
-        cond_.Wait();
+        cond_.Wait(&task_mutex_);
       }
 
       if (shutting_down_) {
@@ -1029,7 +1029,7 @@ void DiscoveredPeripheralTracker::GattFetchingLoop() {
     }
     // Clear in progress header after the task is done.
     {
-      MutexLock lock(&task_mutex_);
+      absl::MutexLock lock(task_mutex_);
       fetch_in_progress_header_.reset();
     }
   }

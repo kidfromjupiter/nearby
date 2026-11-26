@@ -18,12 +18,12 @@
 
 #include "gtest/gtest.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/synchronization/blocking_counter.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "internal/platform/cancelable.h"
-#include "internal/platform/count_down_latch.h"
 
 namespace nearby {
 
@@ -44,10 +44,12 @@ TEST(ScheduledExecutorTest, CanExecute) {
   absl::CondVar cond;
   std::atomic_bool done = false;
   ScheduledExecutor executor;
-  executor.Execute([&done, &cond]() {
+  EXPECT_FALSE(executor.Execute(nullptr));
+  EXPECT_FALSE(executor.Execute("empty", nullptr));
+  EXPECT_TRUE(executor.Execute([&done, &cond]() {
     done = true;
     cond.SignalAll();
-  });
+  }));
   {
     absl::MutexLock lock(mutex);
     if (!done) {
@@ -55,6 +57,11 @@ TEST(ScheduledExecutorTest, CanExecute) {
     }
   }
   EXPECT_TRUE(done);
+
+  absl::Notification named_done;
+  EXPECT_TRUE(
+      executor.Execute("named_task", [&named_done]() { named_done.Notify(); }));
+  EXPECT_TRUE(named_done.WaitForNotificationWithTimeout(kLongDelay));
 }
 
 TEST(ScheduledExecutorTest, CanSchedule) {
@@ -135,19 +142,19 @@ TEST(ScheduledExecutorTest, FailToCancel) {
 
 TEST(ScheduledExecutorTest,
      CancelWhileRunning_TaskCompletesBeforeCancelReturns) {
-  CountDownLatch start_latch(1);
+  absl::Notification start_notification;
   ScheduledExecutor executor;
   std::atomic_int value = 0;
   // A task that takes a little bit of time to complete
   Cancelable cancelable = executor.Schedule(
-      [&start_latch, &value]() {
-        start_latch.CountDown();
+      [&start_notification, &value]() {
+        start_notification.Notify();
         absl::SleepFor(kLongDelay);
         value += 1;
       },
       absl::ZeroDuration());
 
-  start_latch.Await();
+  start_notification.WaitForNotification();
   cancelable.Cancel();
 
   EXPECT_EQ(value, 1);
@@ -155,19 +162,19 @@ TEST(ScheduledExecutorTest,
 
 TEST(ScheduledExecutorTest,
      CancelTwiceWhileRunning_TaskCompletesBeforeCancelReturns) {
-  CountDownLatch start_latch(1);
+  absl::Notification start_notification;
   ScheduledExecutor executor;
   std::atomic_int value = 0;
   // A task that takes a little bit of time to complete
   Cancelable cancelable = executor.Schedule(
-      [&start_latch, &value]() {
-        start_latch.CountDown();
+      [&start_notification, &value]() {
+        start_notification.Notify();
         absl::SleepFor(kLongDelay);
         value += 1;
       },
       absl::ZeroDuration());
 
-  start_latch.Await();
+  start_notification.WaitForNotification();
 
   cancelable.Cancel();
   cancelable.Cancel();
@@ -192,19 +199,21 @@ TEST(ScheduledExecutorTest, ExecuteAfterShutdownFails) {
   ScheduledExecutor executor;
 
   executor.Shutdown();
-  executor.Execute([&]() { FAIL() << "Task should not run"; });
+  EXPECT_FALSE(executor.Execute([&]() { FAIL() << "Task should not run"; }));
+  EXPECT_FALSE(
+      executor.Execute("named", [&]() { FAIL() << "Task should not run"; }));
 }
 
 TEST(ScheduledExecutorTest, ExecuteDuringShutdownFails) {
-  CountDownLatch latch(1);
+  absl::Notification notification;
   ScheduledExecutor executor;
 
-  executor.Execute([&]() {
-    latch.CountDown();
+  EXPECT_TRUE(executor.Execute([&]() {
+    notification.Notify();
     absl::SleepFor(kLongDelay);
-    executor.Execute([&]() { FAIL() << "Task should not run"; });
-  });
-  latch.Await();
+    EXPECT_FALSE(executor.Execute([&]() { FAIL() << "Task should not run"; }));
+  }));
+  notification.WaitForNotification();
   executor.Shutdown();
 }
 
@@ -247,16 +256,17 @@ TEST(ScheduledExecutorTest, CanScheduleRepeatedly) {
   constexpr int kNumIterations = 3;
   ScheduledExecutor executor;
   std::atomic_int value = 0;
-  CountDownLatch latch(kNumIterations);
+  absl::BlockingCounter counter(kNumIterations);
 
   Cancelable cancelable = executor.ScheduleRepeatedly(
       [&]() {
-        value++;
-        latch.CountDown();
+        if (value.fetch_add(1, std::memory_order_acq_rel) < kNumIterations) {
+          counter.DecrementCount();
+        }
       },
       kShortDelay);
 
-  latch.Await();
+  counter.Wait();
   EXPECT_GE(value, kNumIterations);
   cancelable.Cancel();
 }
@@ -264,17 +274,18 @@ TEST(ScheduledExecutorTest, CanScheduleRepeatedly) {
 TEST(ScheduledExecutorTest, CanCancelRepeatedly) {
   ScheduledExecutor executor;
   std::atomic_int value = 0;
-  CountDownLatch latch(1);
+  absl::Notification notification;
 
   Cancelable cancelable = executor.ScheduleRepeatedly(
       [&]() {
-        value++;
-        latch.CountDown();
+        if (value.fetch_add(1, std::memory_order_acq_rel) == 0) {
+          notification.Notify();
+        }
       },
       kLongDelay);
 
   // Wait for the first execution.
-  latch.Await();
+  notification.WaitForNotification();
   EXPECT_EQ(value, 1);
   EXPECT_TRUE(cancelable.Cancel());
 
@@ -286,16 +297,17 @@ TEST(ScheduledExecutorTest, CanCancelRepeatedly) {
 TEST(ScheduledExecutorTest, ShutdownDoesNotRescheduleRepeatedTask) {
   ScheduledExecutor executor;
   std::atomic_int value = 0;
-  CountDownLatch latch(1);
+  absl::Notification notification;
   executor.ScheduleRepeatedly(
       [&]() {
-        value++;
-        latch.CountDown();
+        if (value.fetch_add(1, std::memory_order_acq_rel) == 0) {
+          notification.Notify();
+        }
       },
       kShortDelay);
 
   // Wait for first execution to complete.
-  latch.Await();
+  notification.WaitForNotification();
   EXPECT_EQ(value, 1);
 
   executor.Shutdown();
@@ -309,26 +321,28 @@ TEST(ScheduledExecutorTest, CanCancelOneOfTwoRepeatedTasks) {
   ScheduledExecutor executor;
   std::atomic_int valueA = 0;
   std::atomic_int valueB = 0;
-  CountDownLatch latchA(1);
-  CountDownLatch latchB(1);
+  absl::Notification notificationA;
+  absl::Notification notificationB;
 
   Cancelable cancelableA = executor.ScheduleRepeatedly(
       [&]() {
-        valueA++;
-        latchA.CountDown();
+        if (valueA.fetch_add(1, std::memory_order_acq_rel) == 0) {
+          notificationA.Notify();
+        }
       },
       kShortDelay);
 
   Cancelable cancelableB = executor.ScheduleRepeatedly(
       [&]() {
-        valueB++;
-        latchB.CountDown();
+        if (valueB.fetch_add(1, std::memory_order_acq_rel) == 0) {
+          notificationB.Notify();
+        }
       },
       kShortDelay);
 
   // Wait for both to execute once.
-  latchA.Await();
-  latchB.Await();
+  notificationA.WaitForNotification();
+  notificationB.WaitForNotification();
   EXPECT_EQ(valueA, 1);
   EXPECT_EQ(valueB, 1);
 

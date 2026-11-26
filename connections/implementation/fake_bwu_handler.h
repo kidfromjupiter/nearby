@@ -91,8 +91,8 @@ class FakeBwuHandler : public BaseBwuHandler {
             *handle_initialize_calls_[initialize_call_index].endpoint_id,
             /*last_endpoint_id=*/"",
             false /* supports_disabling_encryption */))));
-    auto connection = std::make_unique<IncomingSocketConnection>();
-    connection->channel = std::move(upgraded_channel);
+    auto connection =
+        std::make_unique<IncomingSocketConnection>(std::move(upgraded_channel));
 
     bwu_manager->InvokeOnIncomingConnectionForTesting(
         handle_initialize_calls_[initialize_call_index].client,
@@ -102,18 +102,6 @@ class FakeBwuHandler : public BaseBwuHandler {
   }
 
  private:
-  class FakeIncomingSocket : public BwuHandler::IncomingSocket {
-   public:
-    explicit FakeIncomingSocket(const std::string& name) : name_(name) {}
-    ~FakeIncomingSocket() override = default;
-
-    std::string ToString() override { return name_; }
-    void Close() override {}
-
-   private:
-    std::string name_;
-  };
-
   // BwuHandler:
   ErrorOr<std::unique_ptr<EndpointChannel>> CreateUpgradedEndpointChannel(
       ClientProxy* client, const std::string& service_id,
@@ -181,6 +169,12 @@ class FakeBwuHandler : public BaseBwuHandler {
             /*frequency=*/2412, /*supports_disabling_encryption=*/false,
             /*gateway=*/"123.234.23.1", /*device_name=*/"NC-WifiDirectTest",
             /*pin=*/"b592f7d3");
+      case location::nearby::proto::connections::WIFI_AWARE_R4:
+        return parser::ForBwuWifiAwareR4PathAvailable(
+            upgrade_service_id, /*service_info=*/"NC-WifiAwareR4Test",
+            /*pmk=*/"0123456789abcdef", /*port=*/2143,
+            /*advertised_name=*/"NC-WifiAwareR4Test",
+            /*supports_disabling_encryption=*/false);
       case location::nearby::proto::connections::UNKNOWN_MEDIUM:
       case location::nearby::proto::connections::MDNS:
       case location::nearby::proto::connections::BLE:

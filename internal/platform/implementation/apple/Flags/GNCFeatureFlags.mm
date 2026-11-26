@@ -32,14 +32,12 @@
 
 + (BOOL)bleL2capEnabled {
   return nearby::NearbyFlags::GetInstance().GetBoolFlag(
-      nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableBleL2cap);
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableBleL2cap);
 }
 
 + (BOOL)refactorBleL2capEnabled {
   return nearby::NearbyFlags::GetInstance().GetBoolFlag(
-      nearby::connections::config_package_nearby::nearby_connections_feature::
-          kRefactorBleL2cap);
+      nearby::connections::config_package_nearby::nearby_connections_feature::kRefactorBleL2cap);
 }
 
 + (BOOL)sharedPeripheralManagerEnabled {
@@ -48,8 +46,6 @@
           kEnableSharedPeripheralManager);
 }
 
-<<<<<<< HEAD
-=======
 + (BOOL)singleCopyEnabled {
   return nearby::NearbyFlags::GetInstance().GetBoolFlag(
       nearby::connections::config_package_nearby::nearby_connections_feature::kEnableSingleCopy);
@@ -61,5 +57,32 @@
           kFixBleServerSocketDeadlock);
 }
 
->>>>>>> nearby/main
++ (BOOL)wifiAwareEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableWifiAware);
+}
+
++ (BOOL)awdlEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::kEnableAwdl);
+}
+
++ (BOOL)synchronizeNWFrameworkSocketWriteTimeoutEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kSynchronizeNwFrameworkSocketWriteTimeout);
+}
+
++ (BOOL)guardNWFrameworkSocketReadConditionEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kGuardNwFrameworkSocketReadCondition);
+}
+
++ (BOOL)closeNWFrameworkSocketSafelyEnabled {
+  return nearby::NearbyFlags::GetInstance().GetBoolFlag(
+      nearby::connections::config_package_nearby::nearby_connections_feature::
+          kCloseNwFrameworkSocketSafely);
+}
+
 @end

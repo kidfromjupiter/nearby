@@ -131,6 +131,11 @@ WifiDirectMedium::~WifiDirectMedium() {
   env.UnregisterWifiDirectMedium(*this);
 }
 
+bool WifiDirectMedium::IsGOSupported() const {
+  return IsInterfaceValid() &&
+         MediumEnvironment::Instance().IsWifiDirectGoSupported();
+}
+
 bool WifiDirectMedium::StartWifiDirect(
     WifiDirectCredentials* wifi_direct_credentials) {
   absl::MutexLock lock(mutex_);
@@ -257,6 +262,10 @@ std::unique_ptr<api::WifiDirectSocket> WifiDirectMedium::ConnectToService(
 std::unique_ptr<api::WifiDirectServerSocket> WifiDirectMedium::ListenForService(
     int port) {
   auto& env = MediumEnvironment::Instance();
+  if (env.ShouldFailWifiDirectListenForService()) {
+    LOG(INFO) << "G3 WifiDirect ListenForService: simulated failure.";
+    return nullptr;
+  }
   auto server_socket = std::make_unique<WifiDirectServerSocket>();
 
   std::string dot_decimal_ip;

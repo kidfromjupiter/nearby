@@ -50,20 +50,12 @@ constexpr auto kEnableRetryResumeTransfer =
 // Enable/disable sending desktop events
 constexpr auto kEnableSendingDesktopEvents =
     flags::Flag<bool>(kConfigPackage, "45459748", false);
-// Set the logging level in Nearby Sharing SDK. The default logging level is
-// WARNING. The mapping of logging level to number: INFO: 0, WARNING: 1, ERROR:
-// 2, FATAL: 3,  negative values are -(verbosity level).
-constexpr auto kLoggingLevel =
-    flags::Flag<int64_t>(kConfigPackage, "45401358", 1);
 // Enable/disable auto-update on settings page
 constexpr auto kShowAutoUpdateSetting =
     flags::Flag<bool>(kConfigPackage, "45409033", false);
 // The default time in milliseconds a cached entry can be in LOST state.
 constexpr auto kDiscoveryCacheLostExpiryMs =
     flags::Flag<int64_t>(kConfigPackage, "45658774", 15000);
-// When true, enable suspend resume listener.
-constexpr auto kEnableSuspendResumeListener =
-    flags::Flag<bool>(kConfigPackage, "45815625", false);
 // When true, enable wifi hotspot medium for HP Realtek devices.
 constexpr auto kEnableWifiHotspotForHpRealtekDevices =
     flags::Flag<bool>(kConfigPackage, "45673628", false);
@@ -77,6 +69,9 @@ constexpr auto kUseAlternateServiceUuidForDiscovery =
 // Update track
 constexpr auto kUpdateTrack =
     flags::Flag<absl::string_view>(kConfigPackage, "45409861", "");
+// Number of days to wait before reminding users of backup usage
+constexpr auto kBackupReminderIntervalDays =
+    flags::Flag<int64_t>(kConfigPackage, "45831999", 30);
 // Timeout between displays of the conflict banner.
 constexpr auto kConflictBannerTimeout =
     flags::Flag<int64_t>(kConfigPackage, "45668886", 604800);
@@ -108,7 +103,6 @@ inline absl::btree_map<int, const flags::Flag<bool>&> GetBoolFlags() {
       {45411589, kEnableRetryResumeTransfer},
       {45459748, kEnableSendingDesktopEvents},
       {45409033, kShowAutoUpdateSetting},
-      {45815625, kEnableSuspendResumeListener},
       {45673628, kEnableWifiHotspotForHpRealtekDevices},
       {45683539, kUseAlternateServiceUuidForDiscovery},
       {45776229, kEnableBackup},
@@ -123,9 +117,9 @@ inline absl::btree_map<int, const flags::Flag<bool>&> GetBoolFlags() {
 inline absl::btree_map<int, const flags::Flag<int64_t>&> GetInt64Flags() {
   return {
       {45632386, kDelayEndpointLossMs},
-      {45401358, kLoggingLevel},
       {45658774, kDiscoveryCacheLostExpiryMs},
       {45663103, kUnregisterTargetDiscoveryCacheLostExpiryMs},
+      {45831999, kBackupReminderIntervalDays},
       {45668886, kConflictBannerTimeout},
   };
 }

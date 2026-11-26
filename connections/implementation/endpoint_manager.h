@@ -24,6 +24,8 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "connections/connection_options.h"
 #include "connections/implementation/client_proxy.h"
@@ -32,8 +34,6 @@
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/listeners.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/condition_variable.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/runnable.h"
@@ -81,16 +81,16 @@ class EndpointManager {
         const std::string& from_endpoint_id, ClientProxy* to_client,
         location::nearby::proto::connections::Medium current_medium) = 0;
 
-    // Implementations must call barrier.CountDown() once
+    // Implementations must call barrier->Notify() once
     // they're done. This parallelizes the disconnection event across all frame
     // processors.
     //
     // @EndpointManagerThread
-    virtual void OnEndpointDisconnect(ClientProxy* client,
-                                      const std::string& service_id,
-                                      const std::string& endpoint_id,
-                                      CountDownLatch barrier,
-                                      DisconnectionReason reason) = 0;
+    virtual void OnEndpointDisconnect(
+        ClientProxy* client, const std::string& service_id,
+        const std::string& endpoint_id,
+        std::shared_ptr<absl::Notification> barrier,
+        DisconnectionReason reason) = 0;
   };
 
   explicit EndpointManager(EndpointChannelManager* manager);
@@ -169,31 +169,15 @@ class EndpointManager {
    public:
     EndpointState(const std::string& endpoint_id,
                   EndpointChannelManager* channel_manager)
-        : endpoint_id_{endpoint_id},
-          channel_manager_{channel_manager},
-          keep_alive_waiter_mutex_{std::make_unique<Mutex>()},
-          keep_alive_waiter_{std::make_unique<ConditionVariable>(
-              keep_alive_waiter_mutex_.get())} {}
+        : endpoint_id_{endpoint_id}, channel_manager_{channel_manager} {}
 
     EndpointState(const EndpointState&) = delete;
-    // The default move constructor would not reset |channel_manager_|, for
-    // example. This needs to be nullified so the destructor shutdown logic is
-    // bypassed when objects are moved.
-    EndpointState(EndpointState&& other)
-        : endpoint_id_{std::move(other.endpoint_id_)},
-          channel_manager_{std::exchange(other.channel_manager_, nullptr)},
-          reader_thread_{std::move(other.reader_thread_)},
-          keep_alive_waiter_mutex_{
-              std::exchange(other.keep_alive_waiter_mutex_, nullptr)},
-          keep_alive_waiter_{std::exchange(other.keep_alive_waiter_, nullptr)},
-          keep_alive_thread_{std::move(other.keep_alive_thread_)} {}
     EndpointState& operator=(const EndpointState&) = delete;
-    EndpointState&& operator=(EndpointState&&) = delete;
     ~EndpointState();
 
     void StartEndpointReader(Runnable&& runnable);
     void StartEndpointKeepAliveManager(
-        absl::AnyInvocable<void(Mutex*, ConditionVariable*)> runnable);
+        absl::AnyInvocable<void(absl::Mutex*, absl::CondVar*)> runnable);
 
    private:
     const std::string endpoint_id_;
@@ -202,11 +186,9 @@ class EndpointManager {
 
     // Use a condition variable so we can wait on the thread but still be able
     // to wake it up before shutting down. We don't want to just sleep and risk
-    // blocking shutdown. Note: Create the mutex/condition variable on the heap
-    // so raw pointers sent to HandleKeepAlive() aren't invalidated during
-    // std::move operations.
-    mutable std::unique_ptr<Mutex> keep_alive_waiter_mutex_;
-    std::unique_ptr<ConditionVariable> keep_alive_waiter_;
+    // blocking shutdown.
+    absl::Mutex keep_alive_waiter_mutex_;
+    absl::CondVar keep_alive_waiter_;
     SingleThreadExecutor keep_alive_thread_;
   };
 
@@ -222,7 +204,7 @@ class EndpointManager {
 
    private:
     FrameProcessor* frame_processor_;
-    Mutex mutex_;
+    absl::Mutex mutex_;
     friend class LockedFrameProcessor;
   };
 
@@ -236,7 +218,7 @@ class EndpointManager {
   ExceptionOr<bool> HandleKeepAlive(
       std::shared_ptr<EndpointChannel> endpoint_channel,
       absl::Duration keep_alive_interval, absl::Duration keep_alive_timeout,
-      Mutex* keep_alive_waiter_mutex, ConditionVariable* keep_alive_waiter);
+      absl::Mutex* keep_alive_waiter_mutex, absl::CondVar* keep_alive_waiter);
 
   // Waits for a given endpoint EndpointChannelLoopRunnable() workers to
   // terminate.
@@ -250,11 +232,6 @@ class EndpointManager {
       const std::string& endpoint_id,
       absl::AnyInvocable<ExceptionOr<bool>(std::shared_ptr<EndpointChannel>)>
           handler);
-
-  static void WaitForLatch(const std::string& method_name,
-                           CountDownLatch* latch);
-  static void WaitForLatch(const std::string& method_name,
-                           CountDownLatch* latch, std::int32_t timeout_millis);
 
   // It should be noted that this method may be called multiple times (because
   // invoking this method closes the endpoint channel, which causes the
@@ -275,9 +252,11 @@ class EndpointManager {
       ClientProxy* client, const std::string& endpoint_id,
       std::shared_ptr<EndpointChannel> endpoint_channel,
       location::nearby::connections::OfflineFrame& frame);
-  CountDownLatch NotifyFrameProcessorsOnEndpointDisconnect(
-      ClientProxy* client, const std::string& service_id,
-      const std::string& endpoint_id, DisconnectionReason reason);
+  std::vector<std::shared_ptr<absl::Notification>>
+  NotifyFrameProcessorsOnEndpointDisconnect(ClientProxy* client,
+                                            const std::string& service_id,
+                                            const std::string& endpoint_id,
+                                            DisconnectionReason reason);
 
   std::vector<std::string> SendTransferFrameBytes(
       const std::vector<std::string>& endpoint_ids,
@@ -293,11 +272,11 @@ class EndpointManager {
 
   RecursiveMutex frame_processors_lock_;
   absl::flat_hash_map<location::nearby::connections::V1Frame::FrameType,
-                      FrameProcessorWithMutex>
+                      std::unique_ptr<FrameProcessorWithMutex>>
       frame_processors_ ABSL_GUARDED_BY(frame_processors_lock_);
 
   // We keep track of all registered channel endpoints here.
-  absl::flat_hash_map<std::string, EndpointState> endpoints_;
+  absl::flat_hash_map<std::string, std::unique_ptr<EndpointState>> endpoints_;
 
   // Indicates whether the destructor has been called yet. If `is_shutdown_`
   // is true, assume any `ClientProxy` pointers are invalid, and should not

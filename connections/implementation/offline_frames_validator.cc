@@ -22,7 +22,6 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
-#include "connections/implementation/internal_payload.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/medium_selector.h"
@@ -46,6 +45,7 @@ using ClientIntroduction = ::location::nearby::connections::
 using WifiHotspotCredentials = UpgradePathInfo::WifiHotspotCredentials;
 using WifiLanSocket = UpgradePathInfo::WifiLanSocket;
 using WifiAwareCredentials = UpgradePathInfo::WifiAwareCredentials;
+using WifiAwareR4Credentials = UpgradePathInfo::WifiAwareR4Credentials;
 using WifiDirectCredentials = UpgradePathInfo::WifiDirectCredentials;
 using BluetoothCredentials = UpgradePathInfo::BluetoothCredentials;
 using WebRtcCredentials = UpgradePathInfo::WebRtcCredentials;
@@ -122,7 +122,7 @@ Exception EnsureValidPayloadTransferDataFrame(const PayloadChunk& payload_chunk,
     LOG(ERROR) << "Invalid payload chunk offset";
     return {Exception::kInvalidProtocolBuffer};
   }
-  if (totalSize != InternalPayload::kIndeterminateSize &&
+  if (totalSize != kPayloadIndeterminateSize &&
       totalSize < payload_chunk.offset()) {
     LOG(ERROR) << "Payload chunk offset > totalSize";
     return {Exception::kInvalidProtocolBuffer};
@@ -139,7 +139,7 @@ Exception EnsureValidPayloadTransferControlFrame(
     LOG(ERROR) << "Invalid control message offset";
     return {Exception::kInvalidProtocolBuffer};
   }
-  if (totalSize != InternalPayload::kIndeterminateSize &&
+  if (totalSize != kPayloadIndeterminateSize &&
       totalSize < control_message.offset()) {
     LOG(ERROR) << "Control message offset > totalSize";
     return {Exception::kInvalidProtocolBuffer};
@@ -187,8 +187,7 @@ Exception EnsureValidPayloadTransferFrame(const PayloadTransferFrame& frame) {
   }
   if (!frame.payload_header().has_total_size() ||
       (frame.payload_header().total_size() < 0 &&
-       frame.payload_header().total_size() !=
-           InternalPayload::kIndeterminateSize)) {
+       frame.payload_header().total_size() != kPayloadIndeterminateSize)) {
     LOG(ERROR) << "Invalid payload header size";
     return {Exception::kInvalidProtocolBuffer};
   }
@@ -333,6 +332,18 @@ Exception EnsureValidBandwidthUpgradeWifiAwarePathAvailableFrame(
   return {Exception::kSuccess};
 }
 
+Exception EnsureValidBandwidthUpgradeWifiAwareR4PathAvailableFrame(
+    const WifiAwareR4Credentials& wifi_aware_r4_credentials) {
+  if (!wifi_aware_r4_credentials.has_service_id())
+    return {Exception::kInvalidProtocolBuffer};
+  if (!wifi_aware_r4_credentials.has_service_info())
+    return {Exception::kInvalidProtocolBuffer};
+
+  // For backwards compatibility reasons, no other fields should be null-checked
+  // for this frame. Parameter checking (eg. must be within this range) is fine.
+  return {Exception::kSuccess};
+}
+
 Exception EnsureValidBandwidthUpgradeWifiDirectPathAvailableFrame(
     const WifiDirectCredentials& wifi_direct_credentials) {
   if (!wifi_direct_credentials.has_frequency() ||
@@ -410,6 +421,13 @@ Exception EnsureValidBandwidthUpgradePathAvailableFrame(
       if (upgrade_path_info.has_wifi_aware_credentials()) {
         return EnsureValidBandwidthUpgradeWifiAwarePathAvailableFrame(
             upgrade_path_info.wifi_aware_credentials());
+      }
+      return {Exception::kInvalidProtocolBuffer};
+
+    case Medium::WIFI_AWARE_R4:
+      if (upgrade_path_info.has_wifi_aware_r4_credentials()) {
+        return EnsureValidBandwidthUpgradeWifiAwareR4PathAvailableFrame(
+            upgrade_path_info.wifi_aware_r4_credentials());
       }
       return {Exception::kInvalidProtocolBuffer};
 

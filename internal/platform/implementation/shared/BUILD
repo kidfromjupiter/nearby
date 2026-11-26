@@ -43,17 +43,36 @@ cc_library(
 )
 
 cc_library(
-    name = "posix_condition_variable",
-    srcs = [
-        "posix_condition_variable.cc",
-    ],
+    name = "executor",
     hdrs = [
-        "posix_condition_variable.h",
+        "multi_thread_executor.h",
+        "single_thread_executor.h",
+    ],
+    visibility = [
+        "//internal/platform/implementation:__subpackages__",
     ],
     visibility = ["//internal/platform/implementation:__subpackages__"],
     deps = [
-        ":posix_mutex",
+        "//internal/platform:base",
         "//internal/platform/implementation:types",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@com_google_nisaba//nisaba/port:thread_pool",
+    ],
+)
+
+cc_test(
+    name = "multi_thread_executor_test",
+    size = "small",
+    srcs = ["multi_thread_executor_test.cc"],
+    deps = [
+        ":executor",
+        "//internal/platform:base",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -73,26 +92,13 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "count_down_latch",
-    srcs = ["count_down_latch.cc"],
-    hdrs = ["count_down_latch.h"],
-    visibility = ["//internal/platform/implementation:__subpackages__"],
-    deps = [
-        "//internal/platform/implementation:types",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
-    ],
-)
-
 cc_test(
     name = "file_test",
     srcs = ["file_test.cc"],
     deps = [
         ":file",
         "//file/util:temp_path",
+        "//internal/base:file_path",
         "//internal/platform:base",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/strings",

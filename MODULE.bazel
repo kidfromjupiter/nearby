@@ -22,9 +22,6 @@ local_path_override(
     path = "third_party/gloop",
 )
 
-# for linux TUI
-# Should update to 7.0.0
-bazel_dep(name = "ftxui", version = "6.1.9")
 bazel_dep(name = "rules_qt", version = "0.0.6")
 single_version_override(
     module_name = "rules_qt",

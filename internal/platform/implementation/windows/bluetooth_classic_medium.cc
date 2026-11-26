@@ -24,6 +24,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/cancellation_flag_listener.h"
@@ -35,14 +36,14 @@
 #include "internal/platform/implementation/windows/bluetooth_classic_server_socket.h"
 #include "internal/platform/implementation/windows/bluetooth_classic_socket.h"
 #include "internal/platform/implementation/windows/bluetooth_pairing.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Bluetooth.Rfcomm.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Bluetooth.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Enumeration.h"
-#include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.Collections.h"
-#include "internal/platform/implementation/windows/generated/winrt/base.h"
 #include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
+#include "winrt/Windows.Devices.Bluetooth.Rfcomm.h"  // IWYU pragma: keep
+#include "winrt/Windows.Devices.Bluetooth.h"  // IWYU pragma: keep
+#include "winrt/Windows.Devices.Enumeration.h"  // IWYU pragma: keep
+#include "winrt/Windows.Foundation.Collections.h"
+#include "winrt/base.h"
 
 namespace nearby::windows {
 namespace {
@@ -64,7 +65,7 @@ using ::winrt::Windows::Storage::Streams::UnicodeEncoding;
 
 // Used to control the dump output for device information. It is only for debug
 // purpose.
-constexpr bool kEnableDumpDeviceInfomation = false;
+constexpr bool kEnableDumpDeviceInfomation = true;
 // The maximum length of Bluetooth device name Android can discover.
 constexpr int kAndroidDiscoverableBluetoothNameMaxLength = 37;  // bytes
 // Used to select bluetooth devices.
@@ -118,10 +119,6 @@ BluetoothClassicMedium::BluetoothClassicMedium(
     api::BluetoothAdapter& bluetooth_adapter)
     : bluetooth_adapter_(dynamic_cast<BluetoothAdapter&>(bluetooth_adapter)) {
   InitializeDeviceWatcher();
-  bluetooth_adapter_.RestoreRadioNameIfNecessary();
-
-  bluetooth_adapter_.SetOnScanModeChanged(std::bind(
-      &BluetoothClassicMedium::OnScanModeChanged, this, std::placeholders::_1));
 }
 
 BluetoothClassicMedium::~BluetoothClassicMedium() {
@@ -189,21 +186,20 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
     }
 
     BluetoothDevice* remote_device_to_connect_ =
-        GetRemoteDeviceInternal(remote_device.GetMacAddress());
+        GetRemoteDeviceFromApiDevice(&remote_device);
 
     if (remote_device_to_connect_ == nullptr ||
         remote_device_to_connect_->GetId().empty()) {
       LOG(ERROR) << __func__
-                 << ": Failed to get remote device from MAC address.";
+                 << ": Failed to get remote device to connect.";
       return nullptr;
     }
 
-    winrt::hstring device_id =
-        winrt::to_hstring(remote_device_to_connect_->GetId());
+    std::string device_id = remote_device_to_connect_->GetId();
 
     if (!HaveAccess(device_id)) {
-      LOG(ERROR) << __func__ << ": Failed to gain access to device: "
-                 << winrt::to_string(device_id);
+      LOG(ERROR) << __func__
+                 << ": Failed to gain access to device: " << device_id;
       return nullptr;
     }
 
@@ -224,7 +220,7 @@ std::unique_ptr<api::BluetoothSocket> BluetoothClassicMedium::ConnectToService(
       LOG(INFO)
           << __func__
           << ": Bluetooth Classic socket connection cancelled for device: "
-          << winrt::to_string(device_id) << ", service: " << service_uuid;
+          << device_id << ", service: " << service_uuid;
       return nullptr;
     }
     nearby::CancellationFlagListener cancellation_flag_listener(
@@ -283,21 +279,14 @@ BluetoothClassicMedium::ListenForService(const std::string& service_name,
   service_name_ = service_name;
   service_uuid_ = service_uuid;
 
-  scan_mode_ = bluetooth_adapter_.GetScanMode();
-
-  VLOG(1) << __func__ << ": scan_mode: " << static_cast<int>(scan_mode_);
-  bool radio_discoverable =
-      scan_mode_ == BluetoothAdapter::ScanMode::kConnectableDiscoverable;
-
-  if (rfcomm_provider_ != nullptr &&
-      is_radio_discoverable_ == radio_discoverable) {
+  if (rfcomm_provider_ != nullptr) {
     LOG(WARNING) << __func__
                   << ": Ignore StartAdvertising due to no change to "
                     "current advertising.";
     return server_socket_;
   }
 
-  auto server_socket = StartAdvertising(radio_discoverable);
+  auto server_socket = StartAdvertising();
 
   if (!server_socket) {
     LOG(ERROR) << __func__ << ": Failed to start listening.";
@@ -313,36 +302,37 @@ api::BluetoothDevice* BluetoothClassicMedium::GetRemoteDevice(
     MacAddress mac_address) {
   VLOG(1) << "GetRemoteDevice is called with mac_address: "
           << mac_address.ToString();
-  return GetRemoteDeviceInternal(mac_address);
-}
-
-std::unique_ptr<api::BluetoothPairing> BluetoothClassicMedium::CreatePairing(
-    api::BluetoothDevice& remote_device) {
-  VLOG(1) << __func__ << ": Start to createPairing with device: "
-          << remote_device.GetMacAddress().ToString();
-  try {
-    winrt::Windows::Devices::Bluetooth::BluetoothDevice bluetooth_device =
-        winrt::Windows::Devices::Bluetooth::BluetoothDevice::
-            FromBluetoothAddressAsync(remote_device.GetMacAddress().address())
-                .get();
-    winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing
-        custom_pairing =
-            bluetooth_device.DeviceInformation().Pairing().Custom();
-    if (custom_pairing) {
-      return std::make_unique<BluetoothPairing>(bluetooth_device,
-                                                custom_pairing);
+  absl::MutexLock lock(devices_map_mutex_);
+  for (auto& [device_id, bluetooth_device] :
+        device_id_to_bluetooth_device_map_) {
+    if (bluetooth_device->GetMacAddress() == mac_address) {
+      return bluetooth_device.get();
     }
-    VLOG(1) << __func__ << ": Failed to get DeviceInformationCustomPairing.";
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << " : Failed to create pairing. exception: "
-               << exception.what();
-  } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__ << ": Failed to create pairing. WinRT exception: "
-               << error.code() << ": " << winrt::to_string(error.message());
-  } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
   }
-  return nullptr;
+  for (auto& [device_id, bluetooth_device] :
+        cached_bluetooth_devices_map_) {
+    if (bluetooth_device->GetMacAddress() == mac_address) {
+      return bluetooth_device.get();
+    }
+  }
+  // If device is not known, create using MacAddress and add to cached
+  // devices.
+  auto native_bluetooth_device = winrt::Windows::Devices::Bluetooth::
+      BluetoothDevice::FromBluetoothAddressAsync(mac_address.address())
+          .get();
+  if (native_bluetooth_device == nullptr) {
+    LOG(ERROR) << __func__
+               << ": Failed to get native bluetooth device from mac address: "
+               << mac_address.ToString();
+    return nullptr;
+  }
+  auto bt_device = std::make_unique<BluetoothDevice>(native_bluetooth_device);
+  std::string device_id = bt_device->GetId();
+  VLOG(1) << __func__ << ": Created BluetoothDevice " << device_id
+          << " from mac address: " << mac_address.ToString();
+  auto result = cached_bluetooth_devices_map_.insert_or_assign(
+      device_id, std::move(bt_device));
+  return result.first->second.get();
 }
 
 void BluetoothClassicMedium::InitializeDeviceWatcher() {
@@ -392,64 +382,13 @@ void BluetoothClassicMedium::InitializeDeviceWatcher() {
   }
 }
 
-void BluetoothClassicMedium::OnScanModeChanged(
-    BluetoothAdapter::ScanMode scan_mode) {
-  LOG(INFO) << __func__ << ": OnScanModeChanged is called with scanMode: "
-            << static_cast<int>(scan_mode);
-
-  if (scan_mode == scan_mode_) {
-    VLOG(1) << __func__ << ": No change of scan mode.";
-    return;
-  }
-
-  scan_mode_ = scan_mode;
-  bool radio_discoverable =
-      scan_mode_ == BluetoothAdapter::ScanMode::kConnectableDiscoverable;
-
-  if (bluetooth_adapter_.GetName().size() >
-      kAndroidDiscoverableBluetoothNameMaxLength) {
-    // If the name longer than the android limitation, always set the value to
-    // false.
-    radio_discoverable = false;
-  }
-
-  if (is_radio_discoverable_ == radio_discoverable) {
-    VLOG(1) << __func__ << ": No change of radio discovery.";
-    return;
-  }
-
-  if (rfcomm_provider_ == nullptr) {
-    LOG(WARNING) << __func__ << ": No advertising.";
-    return;
-  }
-
-  try {
-    rfcomm_provider_.StopAdvertising();
-    rfcomm_provider_.StartAdvertising(
-        raw_server_socket_->stream_socket_listener(), radio_discoverable);
-    is_radio_discoverable_ = radio_discoverable;
-    return;
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__
-               << ": OnScanModeChanged exception: " << exception.what();
-    return;
-  } catch (const winrt::hresult_error& ex) {
-    LOG(ERROR) << __func__ << ": OnScanModeChanged exception: " << ex.code()
-               << ": " << winrt::to_string(ex.message());
-    return;
-  } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
-    return;
-  }
-}
-
-bool BluetoothClassicMedium::HaveAccess(winrt::hstring device_id) {
+bool BluetoothClassicMedium::HaveAccess(const std::string& device_id) {
   if (device_id.empty()) {
     return false;
   }
 
   DeviceAccessInformation access_information =
-      DeviceAccessInformation::CreateFromId(device_id);
+      DeviceAccessInformation::CreateFromId(winrt::to_hstring(device_id));
 
   if (access_information == nullptr) {
     return false;
@@ -510,70 +449,56 @@ bool BluetoothClassicMedium::CheckSdp(RfcommDeviceService requested_service) {
   }
 }
 
-bool BluetoothClassicMedium::HasRemoteDevice(MacAddress mac_address) {
-  absl::MutexLock lock(devices_map_mutex_);
-  if (IsWatcherStarted()) {
-    return mac_address_to_bluetooth_device_map_.contains(mac_address);
-  } else {
-    return cached_bluetooth_devices_map_.contains(mac_address);
-  }
-}
-
-bool BluetoothClassicMedium::RemoveRemoteDevice(MacAddress mac_address) {
+bool BluetoothClassicMedium::RemoveRemoteDevice(absl::string_view device_id) {
   absl::MutexLock lock(devices_map_mutex_);
 
-  auto it = mac_address_to_bluetooth_device_map_.find(mac_address);
-  if (it != mac_address_to_bluetooth_device_map_.end()) {
-    auto node = mac_address_to_bluetooth_device_map_.extract(mac_address);
-    removed_bluetooth_devices_map_[mac_address] = std::move(node.mapped());
+  auto it = device_id_to_bluetooth_device_map_.find(device_id);
+  if (it != device_id_to_bluetooth_device_map_.end()) {
+    auto node = device_id_to_bluetooth_device_map_.extract(device_id);
+    removed_bluetooth_devices_.push_back(std::move(node.mapped()));
     return true;
   }
 
   return false;
 }
 
-bool BluetoothClassicMedium::AssignRemoteDevice(
-    MacAddress mac_address, std::unique_ptr<BluetoothDevice> device) {
+BluetoothDevice* BluetoothClassicMedium::AssignRemoteDevice(
+    std::unique_ptr<BluetoothDevice> device) {
   absl::MutexLock lock(devices_map_mutex_);
-  auto result = mac_address_to_bluetooth_device_map_.insert_or_assign(
-      mac_address, std::move(device));
-  return result.second;
+  std::string device_id = device->GetId();
+  auto result = device_id_to_bluetooth_device_map_.insert_or_assign(
+      device_id, std::move(device));
+  return result.first->second.get();
 }
 
 BluetoothDevice* BluetoothClassicMedium::GetRemoteDeviceInternal(
-    MacAddress mac_address) {
+    absl::string_view device_id) {
   absl::MutexLock lock(devices_map_mutex_);
-  if (IsWatcherStarted()) {
-    auto it = mac_address_to_bluetooth_device_map_.find(mac_address);
-
-    if (it == mac_address_to_bluetooth_device_map_.end()) {
-      LOG(WARNING) << __func__ << ": Bluetooth device "
-                   << mac_address.ToString() << " is not in list. create it";
-      auto bluetooth_device = std::make_unique<BluetoothDevice>(mac_address);
-      auto result = mac_address_to_bluetooth_device_map_.insert_or_assign(
-          mac_address, std::move(bluetooth_device));
-
-      return result.first->second.get();
-    }
-
-    return it->second.get();
-
-  } else {
-    auto it = cached_bluetooth_devices_map_.find(mac_address);
-
-    if (it == cached_bluetooth_devices_map_.end()) {
-      LOG(WARNING) << __func__ << ": Bluetooth device "
-                   << mac_address.ToString()
-                   << " is not in cache list. create it";
-      auto bluetooth_device = std::make_unique<BluetoothDevice>(mac_address);
-      auto result = cached_bluetooth_devices_map_.insert_or_assign(
-          mac_address, std::move(bluetooth_device));
-
-      return result.first->second.get();
-    }
-
-    return it->second.get();
+  auto it = device_id_to_bluetooth_device_map_.find(device_id);
+  if (it == device_id_to_bluetooth_device_map_.end()) {
+    LOG(WARNING) << __func__ << ": Bluetooth device " << device_id
+                  << " is not in list.";
+    return nullptr;
   }
+  return it->second.get();
+}
+
+BluetoothDevice* BluetoothClassicMedium::GetRemoteDeviceFromApiDevice(
+    api::BluetoothDevice* api_device) {
+  absl::MutexLock lock(devices_map_mutex_);
+  for (auto& [device_id, bluetooth_device] :
+        device_id_to_bluetooth_device_map_) {
+    if (bluetooth_device.get() == api_device) {
+      return bluetooth_device.get();
+    }
+  }
+  for (auto& [device_id, bluetooth_device] :
+        cached_bluetooth_devices_map_) {
+    if (bluetooth_device.get() == api_device) {
+      return bluetooth_device.get();
+    }
+  }
+  return nullptr;
 }
 
 bool BluetoothClassicMedium::StartScanning() {
@@ -586,12 +511,12 @@ bool BluetoothClassicMedium::StartScanning() {
 
     {
       absl::MutexLock lock(devices_map_mutex_);
-      mac_address_to_bluetooth_device_map_.clear();
-      removed_bluetooth_devices_map_.clear();
+      device_id_to_bluetooth_device_map_.clear();
+      removed_bluetooth_devices_.clear();
       if (!cached_bluetooth_devices_map_.empty()) {
-        for (auto& [mac_address, bluetooth_device] :
+        for (auto& [device_id, bluetooth_device] :
              cached_bluetooth_devices_map_) {
-          mac_address_to_bluetooth_device_map_[mac_address] =
+          device_id_to_bluetooth_device_map_[device_id] =
               std::move(bluetooth_device);
         }
 
@@ -629,75 +554,90 @@ bool BluetoothClassicMedium::StopScanning() {
 
 winrt::fire_and_forget BluetoothClassicMedium::DeviceWatcher_Added(
     DeviceWatcher sender, DeviceInformation device_info) {
-  LOG(INFO) << "Device added " << winrt::to_string(device_info.Id());
+  std::string device_id = winrt::to_string(device_info.Id());
+  LOG(INFO) << "Device added " << device_id;
   if (!IsWatcherStarted()) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_info.Id())
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
                  << " due to watcher not started.";
     return winrt::fire_and_forget();
   }
 
+  if (GetRemoteDeviceInternal(device_id) != nullptr) {
+    // We're already tracking this one
+    LOG(WARNING) << __func__ << ": Bluetooth device " << device_id
+                 << " is alreay added.";
+    return winrt::fire_and_forget();
+  }
   IMapView<winrt::hstring, IInspectable> properties = device_info.Properties();
   DumpDeviceInformation(properties);
 
   // If device no item name, ignore it.
   if (!properties.HasKey(L"System.ItemNameDisplay")) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_info.Id()) << " due to no name.";
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
+                 << " due to no name.";
     return winrt::fire_and_forget();
   }
 
-  if (properties.Lookup(L"System.ItemNameDisplay") == nullptr) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_info.Id()) << " due to empty name.";
+  std::string device_name = InspectableReader::ReadString(
+      properties.Lookup(L"System.ItemNameDisplay"));
+  if (device_name.empty()) {
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
+                 << " due to empty name.";
     return winrt::fire_and_forget();
   }
 
   // If device doesn't support pair, ignore it.
   if (!properties.HasKey(L"System.Devices.Aep.CanPair")) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_info.Id())
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
                  << " due to no pair property.";
     return winrt::fire_and_forget();
   }
 
   if (!InspectableReader::ReadBoolean(
           properties.Lookup(L"System.Devices.Aep.CanPair"))) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_info.Id())
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
                  << " due to not support pair.";
     return winrt::fire_and_forget();
   }
 
-  // Create a bluetooth device out of this id
-  auto native_bluetooth_device =
-      ::winrt::Windows::Devices::Bluetooth::BluetoothDevice::FromIdAsync(
-          device_info.Id())
-          .get();
+  // Get device mac address.
+  if (!properties.HasKey(L"System.Devices.Aep.DeviceAddress")) {
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
+                 << " with no mac address.";
+    return winrt::fire_and_forget();
+  }
 
+  std::string mac_address_string = InspectableReader::ReadString(
+      properties.Lookup(L"System.Devices.Aep.DeviceAddress"));
+  if (mac_address_string.empty()) {
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
+                 << " cannot read mac address.";
+    return winrt::fire_and_forget();
+  }
   MacAddress mac_address;
-  MacAddress::FromUint64(native_bluetooth_device.BluetoothAddress(),
-                         mac_address);
-  if (HasRemoteDevice(mac_address)) {
-    // We're already tracking this one
-    LOG(WARNING) << __func__ << ": Bluetooth device " << mac_address.ToString()
-                 << " is alreay added.";
+  if (!MacAddress::FromString(mac_address_string, mac_address)) {
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
+                 << " cannot parse mac address: " << mac_address_string;
     return winrt::fire_and_forget();
   }
-
-  auto bluetooth_device =
-      std::make_unique<BluetoothDevice>(native_bluetooth_device);
-
-  AssignRemoteDevice(mac_address, std::move(bluetooth_device));
-
-  api::BluetoothDevice* device = GetRemoteDeviceInternal(mac_address);
-  if (device == nullptr) {
-    LOG(ERROR) << __func__ << ": Failed to get remote device.";
-    return winrt::fire_and_forget();
+  std::unique_ptr<BluetoothDevice> bt_device;
+  {
+    absl::MutexLock lock(devices_map_mutex_);
+    // Check if device is already in the cached devices map.
+    auto it = cached_bluetooth_devices_map_.find(device_id);
+    if (it != cached_bluetooth_devices_map_.end()) {
+      auto node = cached_bluetooth_devices_map_.extract(it);
+      bt_device = std::move(node.mapped());
+    }
   }
+  if (bt_device == nullptr) {
+    bt_device =
+        std::make_unique<BluetoothDevice>(device_id, device_name, mac_address);
+  }
+  BluetoothDevice* device = AssignRemoteDevice(std::move(bt_device));
 
-  LOG(INFO) << __func__ << ": Notifying bluetooth device "
-            << mac_address.ToString() << " added";
+  LOG(INFO) << __func__ << ": Notifying bluetooth device " << device_id
+            << " added";
   if (discovery_callback_.device_discovered_cb != nullptr) {
     discovery_callback_.device_discovered_cb(*device);
   }
@@ -706,36 +646,21 @@ winrt::fire_and_forget BluetoothClassicMedium::DeviceWatcher_Added(
 
 winrt::fire_and_forget BluetoothClassicMedium::DeviceWatcher_Updated(
     DeviceWatcher sender, DeviceInformationUpdate device_update_info) {
-  LOG(INFO) << "Device updated " << winrt::to_string(device_update_info.Id());
+  std::string device_id = winrt::to_string(device_update_info.Id());
+  LOG(INFO) << "Device updated " << device_id;
   if (!IsWatcherStarted()) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_update_info.Id())
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
                  << " due to watcher not started.";
     return winrt::fire_and_forget();
   }
-
-  auto native_bluetooth_device =
-      ::winrt::Windows::Devices::Bluetooth::BluetoothDevice::FromIdAsync(
-          device_update_info.Id())
-          .get();
-  MacAddress mac_address;
-  MacAddress::FromUint64(native_bluetooth_device.BluetoothAddress(),
-                         mac_address);
-
-  if (!HasRemoteDevice(mac_address)) {
-    LOG(WARNING) << __func__ << ": Bluetooth device " << mac_address.ToString()
-                 << " is not in list.";
-    return winrt::fire_and_forget();
-  }
-
-  BluetoothDevice* device = GetRemoteDeviceInternal(mac_address);
+  BluetoothDevice* device = GetRemoteDeviceInternal(device_id);
   if (device == nullptr) {
     LOG(ERROR) << __func__ << ": Failed to get remote device.";
     return winrt::fire_and_forget();
   }
 
   LOG(INFO) << "Device updated name: " << device->GetName() << " ("
-            << mac_address.ToString() << ")";
+            << device->GetId() << ")";
   IMapView<winrt::hstring, IInspectable> properties =
       device_update_info.Properties();
   DumpDeviceInformation(properties);
@@ -773,47 +698,27 @@ winrt::fire_and_forget BluetoothClassicMedium::DeviceWatcher_Updated(
 
 winrt::fire_and_forget BluetoothClassicMedium::DeviceWatcher_Removed(
     DeviceWatcher sender, DeviceInformationUpdate device_update_info) {
-  LOG(INFO) << "Device removed " << winrt::to_string(device_update_info.Id());
+  std::string device_id = winrt::to_string(device_update_info.Id());
+  LOG(INFO) << "Device removed " << device_id;
   if (!IsWatcherStarted()) {
-    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device "
-                 << winrt::to_string(device_update_info.Id())
+    LOG(WARNING) << __func__ << ": Ignore the Bluetooth device " << device_id
                  << " due to watcher not started.";
     return winrt::fire_and_forget();
   }
 
-  auto native_bluetooth_device =
-      ::winrt::Windows::Devices::Bluetooth::BluetoothDevice::FromIdAsync(
-          device_update_info.Id())
-          .get();
-
-  if (native_bluetooth_device == nullptr) {
-    LOG(WARNING) << __func__ << ": cannot get native bluetooth device.";
-    return winrt::fire_and_forget();
-  }
-
-  MacAddress mac_address;
-  MacAddress::FromUint64(native_bluetooth_device.BluetoothAddress(),
-                         mac_address);
-  if (!HasRemoteDevice(mac_address)) {
-    LOG(WARNING) << __func__ << ": Bluetooth device " << mac_address.ToString()
-                 << " is not in list.";
-    return winrt::fire_and_forget();
-  }
-
-  api::BluetoothDevice* device = GetRemoteDeviceInternal(mac_address);
-
+  api::BluetoothDevice* device = GetRemoteDeviceInternal(device_id);
   if (device == nullptr) {
     LOG(ERROR) << __func__ << ": Failed to get remote device.";
     return winrt::fire_and_forget();
   }
 
-  LOG(INFO) << __func__ << ": Notifying bluetooth device ("
-            << mac_address.ToString() << ") removed";
+  LOG(INFO) << __func__ << ": Notifying bluetooth device (" << device_id
+            << ") removed";
   if (discovery_callback_.device_lost_cb != nullptr) {
     discovery_callback_.device_lost_cb(*device);
   }
 
-  RemoveRemoteDevice(mac_address);
+  RemoveRemoteDevice(device_id);
 
   return winrt::fire_and_forget();
 }
@@ -840,10 +745,8 @@ bool BluetoothClassicMedium::IsWatcherRunning() {
 }
 
 std::shared_ptr<BluetoothServerSocket>
-BluetoothClassicMedium::StartAdvertising(bool radio_discoverable) {
-  LOG(INFO) << __func__
-            << ": StartAdvertising is called with radio_discoverable: "
-            << radio_discoverable << ".";
+BluetoothClassicMedium::StartAdvertising() {
+  LOG(INFO) << __func__ << ": StartAdvertising is called.";
 
   std::shared_ptr<BluetoothServerSocket> server_socket;
   try {
@@ -876,10 +779,9 @@ BluetoothClassicMedium::StartAdvertising(bool radio_discoverable) {
 
     // Start to advertising.
     rfcomm_provider_.StartAdvertising(server_socket->stream_socket_listener(),
-                                      radio_discoverable);
-    is_radio_discoverable_ = radio_discoverable;
+                                      /*is_discoverable=*/false);
 
-    LOG(INFO) << ": StartListening completed successfully.";
+    LOG(INFO) << "StartListening completed successfully.";
     return server_socket;
   } catch (std::exception exception) {
     // We will log and eat the exception since the caller

@@ -98,8 +98,10 @@ enum class Status {
   kTimeout = 17,
   // No status is available
   kUnknown = 18,
+  // There was an error trying to use the device's Wi-Fi Aware capabilities.
+  kWifiAwareError = 19,
   // Value of the next enum variant.
-  kNextValue = 19,
+  kNextValue = 20,
 };
 // LINT.ThenChange(
 //     ../connections/status.h:status_enum,
@@ -337,6 +339,10 @@ enum class Medium {
   kWifiDirect = 8,
   kWebRtc = 9,
   kBleL2Cap = 10,
+  kUsb = 11,
+  kWebRtcNonCellular = 12,
+  kAwdl = 13,
+  kWifiAwareR4 = 14,
 };
 
 // Log severity levels. This is passed as a member of

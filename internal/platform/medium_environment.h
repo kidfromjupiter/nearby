@@ -26,26 +26,26 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "internal/platform/borrowable.h"
+#include "internal/platform/byte_array.h"
+#include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
-#include "internal/platform/mac_address.h"
-#include "internal/platform/runnable.h"
-#include "internal/platform/uuid.h"
-#include "internal/test/fake_clock.h"
 #include "internal/platform/implementation/webrtc.h"
-#include "internal/platform/byte_array.h"
-#include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/wifi_hotspot.h"
 #include "internal/platform/implementation/wifi_lan.h"
-#include "internal/platform/mutex.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/runnable.h"
 #include "internal/platform/single_thread_executor.h"
+#include "internal/platform/uuid.h"
 #include "internal/platform/wifi_credential.h"
+#include "internal/test/fake_clock.h"
 
 namespace nearby {
 
@@ -65,6 +65,9 @@ struct EnvironmentConfig {
   // If true, the app data path will be a temporary directory, instead of the
   // actual app data path, so that we can test the preferences manager under G3.
   bool use_temporary_directory_for_app_path = false;
+
+  // Control whether WIFI_AWARE medium is enabled in the environment.
+  bool wifi_aware_enabled = false;
 };
 
 // MediumEnvironment is a simulated environment which allows multiple instances
@@ -381,6 +384,26 @@ class MediumEnvironment {
   void SetBleExtendedAdvertisementsAvailable(bool enabled);
   bool IsBleExtendedAdvertisementsAvailable() const;
 
+  // Sets whether BLE L2CAP sockets are supported in the test environment. It
+  // is false by default.
+  void SetBleL2capAvailable(bool enabled);
+  bool IsBleL2capAvailable() const;
+
+  // Sets whether Wi-Fi Direct Group Owner (GO) mode is supported. It is true
+  // by default.
+  void SetWifiDirectGoSupported(bool supported);
+  bool IsWifiDirectGoSupported() const;
+
+  // Sets whether ListenForService() fails on simulated Wi-Fi Hotspot mediums,
+  // as if the platform couldn't open a server socket. It is false by default.
+  void SetFailWifiHotspotListenForService(bool fail);
+  bool ShouldFailWifiHotspotListenForService() const;
+
+  // Sets whether ListenForService() fails on simulated Wi-Fi Direct mediums, as
+  // if the platform couldn't open a server socket. It is false by default.
+  void SetFailWifiDirectListenForService(bool fail);
+  bool ShouldFailWifiDirectListenForService() const;
+
  private:
   struct BluetoothMediumContext {
     BluetoothDiscoveryCallback callback;
@@ -425,7 +448,7 @@ class MediumEnvironment {
     bool is_go = false;
     // Set "true" when GO is started or GC is connected
     bool is_active = false;
-    const WifiDirectCredentials* wifi_direct_credentials;
+    const WifiDirectCredentials* wifi_direct_credentials = nullptr;
   };
 
   struct WifiHotspotMediumContext {
@@ -433,7 +456,7 @@ class MediumEnvironment {
     bool is_ap = true;
     // Set "true" when SoftAP is started or STA is connected
     bool is_active = false;
-    const HotspotCredentials* hotspot_credentials;
+    const HotspotCredentials* hotspot_credentials = nullptr;
   };
 
   struct BluetoothPairingContext {
@@ -500,7 +523,7 @@ class MediumEnvironment {
 
   absl::flat_hash_map<api::AwdlMedium*, AwdlMediumContext> awdl_mediums_;
 
-  Mutex mutex_;
+  absl::Mutex mutex_;
   absl::flat_hash_map<api::WifiDirectMedium*, WifiDirectMediumContext>
       wifi_direct_mediums_ ABSL_GUARDED_BY(mutex_);
 
@@ -511,6 +534,10 @@ class MediumEnvironment {
   absl::Duration peer_connection_latency_ = absl::ZeroDuration();
   std::shared_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
   bool ble_extended_advertisements_available_ = false;
+  std::atomic_bool ble_l2cap_available_ = false;
+  bool wifi_direct_go_supported_ = true;
+  std::atomic_bool fail_wifi_hotspot_listen_for_service_ = false;
+  std::atomic_bool fail_wifi_direct_listen_for_service_ = false;
 };
 
 }  // namespace nearby

@@ -34,7 +34,6 @@
 #include "connections/payload.h"
 #include "connections/v3/advertising_options.h"
 #include "connections/v3/connection_listening_options.h"
-#include "connections/v3/connections_device_provider.h"
 #include "connections/v3/discovery_options.h"
 #include "connections/v3/listeners.h"
 #include "connections/v3/listening_result.h"
@@ -53,8 +52,8 @@ class Core {
        ServiceControllerRouter* router)
       : client_(std::move(analytics_recorder)), router_(router) {}
   ~Core();
-  Core(Core&&);
-  Core& operator=(Core&&);
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
 
   // Starts advertising an endpoint for a local app.
   //
@@ -530,14 +529,23 @@ class Core {
     client_.RegisterDeviceProvider(provider);
   }
 
-  // Like RegisterDeviceProvider(NearbyDeviceProvider*) above, but for
-  // a Connections device provider, so Connections can manage the lifetime of
-  // this device provider. If an external provider is registered, this provider
-  // will be ignored.
-  void RegisterConnectionsDeviceProvider(
-      std::unique_ptr<v3::ConnectionsDeviceProvider> provider) {
-    client_.RegisterConnectionsDeviceProvider(std::move(provider));
+  // Registers a handler for events that require a decision from the client,
+  // e.g. before joining a remote Wi-Fi hotspot during a bandwidth upgrade.
+  // The handler is invoked synchronously on the thread that raises the event
+  // (i.e. the caller of `ClientProxy::OnEvent`) and blocks it until it returns.
+  // Concurrent `OnEvent` calls are serialized, so the handler is never invoked
+  // concurrently from multiple threads. The handler must not call
+  // `RegisterEventHandler()` or `UnregisterEventHandler()` synchronously from
+  // within the callback, as doing so will deadlock. Replaces any previously
+  // registered handler. If no handler is registered, all events proceed.
+  void RegisterEventHandler(ClientEventHandler handler) {
+    client_.RegisterEventHandler(std::move(handler));
   }
+
+  // Unregisters the currently registered event handler and releases any
+  // resources associated with it. Waits for any in-flight handler invocation to
+  // complete before returning.
+  void UnregisterEventHandler() { client_.UnregisterEventHandler(); }
 
  private:
   ClientProxy client_;

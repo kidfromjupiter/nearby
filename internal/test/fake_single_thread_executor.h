@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "internal/platform/runnable.h"
 #include "internal/platform/single_thread_executor.h"
 
 namespace nearby {
@@ -28,11 +29,11 @@ class ABSL_LOCKABLE FakeSingleThreadExecutor final
     : public SingleThreadExecutor {
  public:
   FakeSingleThreadExecutor();
+  FakeSingleThreadExecutor(const FakeSingleThreadExecutor&) = delete;
+  FakeSingleThreadExecutor& operator=(const FakeSingleThreadExecutor&) = delete;
   ~FakeSingleThreadExecutor() override;
-  FakeSingleThreadExecutor(FakeSingleThreadExecutor&&) = default;
-  FakeSingleThreadExecutor& operator=(FakeSingleThreadExecutor&&) = default;
 
-  void Execute(const std::string& name, Runnable&& runnable) override;
+  bool Execute(const std::string& name, Runnable&& runnable) override;
 
   void SetRunExecutablesImmediately(bool run_executables_immediately) {
     run_executables_immediately_ = run_executables_immediately;

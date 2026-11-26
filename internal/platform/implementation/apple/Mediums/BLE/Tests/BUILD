@@ -44,6 +44,7 @@ objc_library(
         "GNCMBleUtilsTest.m",
         "GNCMConnectionsTest.m",
         "GNCMFakeConnection.mm",
+        "GNCPeripheralDelegateMultiplexerTest.m",
         "GNCPeripheralManagerMultiplexerTest.m",
         "GNCPeripheralManagerTest.m",
         "GNCPeripheralTest.m",
@@ -76,6 +77,7 @@ objc_library(
         "//third_party/apple_frameworks:Foundation",
         "//third_party/apple_frameworks:ObjectiveC",
         "//third_party/apple_frameworks:XCTest",
+        "//third_party/objective_c/ocmock/v3:OCMock",
     ],
 )
 

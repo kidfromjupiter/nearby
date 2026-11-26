@@ -15,47 +15,25 @@
 #include "sharing/nearby_file_handler.h"
 
 #include <stdint.h>
+
 #include <functional>
-#include <memory>
-#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/functional/any_invocable.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "absl/types/span.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
-#include "internal/platform/task_runner.h"
-#include "internal/platform/task_runner_impl.h"
-#include "sharing/internal/api/sharing_platform.h"
+#include "internal/platform/single_thread_executor.h"
 #include "sharing/internal/public/logging.h"
 
 namespace nearby {
 namespace sharing {
-namespace {
-
-using ::nearby::sharing::api::SharingPlatform;
-
-}  // namespace
-
-NearbyFileHandler::NearbyFileHandler(SharingPlatform& platform,
-                                     std::unique_ptr<TaskRunner> runner)
-    : platform_(platform) {
-  if (runner) {
-    sequenced_task_runner_ = std::move(runner);
-  } else {
-    sequenced_task_runner_ = std::make_unique<TaskRunnerImpl>(1);
-  }
-}
-
-NearbyFileHandler::~NearbyFileHandler() = default;
 
 void NearbyFileHandler::DeleteFilesFromDisk(
     std::vector<FilePath> file_paths, DeleteFilesFromDiskCallback callback) {
-  sequenced_task_runner_->PostTask([callback = std::move(callback),
-                                    file_paths = std::move(file_paths)]() {
+  executor_.Execute([callback = std::move(callback),
+                     file_paths = std::move(file_paths)]() {
     // wait 1 second to make the file being released from another process.
     absl::SleepFor(absl::Seconds(1));
     for (const auto& file_path : file_paths) {
@@ -80,16 +58,6 @@ void NearbyFileHandler::DeleteFilesFromDisk(
     }
     callback();
   });
-}
-
-void NearbyFileHandler::UpdateFilesOriginMetadata(
-    std::vector<FilePath> file_paths,
-    absl::AnyInvocable<void(bool success)> callback) {
-  sequenced_task_runner_->PostTask(
-      [this, callback = std::move(callback),
-       file_paths = std::move(file_paths)]() mutable {
-        std::move(callback)(platform_.UpdateFileOriginMetadata(file_paths));
-      });
 }
 
 }  // namespace sharing

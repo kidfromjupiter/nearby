@@ -26,7 +26,7 @@
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "internal/platform/clock.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/single_thread_executor.h"
 #include "proto/sharing_enums.pb.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
@@ -51,7 +51,7 @@ class ShareSession {
   static location::nearby::proto::sharing::AttachmentTransmissionStatus
   ConvertToTransmissionStatus(TransferMetadata::Status status);
 
-  ShareSession(Clock* clock, TaskRunner& service_thread,
+  ShareSession(Clock* clock, SingleThreadExecutor& service_thread,
                NearbyConnectionsManager* connections_manager,
                analytics::AnalyticsRecorder& analytics_recorder,
                std::string endpoint_id, const ShareTarget& share_target);
@@ -165,7 +165,7 @@ class ShareSession {
     return analytics_recorder_;
   };
 
-  TaskRunner& service_thread() const { return service_thread_; }
+  SingleThreadExecutor& service_thread() const { return service_thread_; }
   void SetAttachmentPayloadId(int64_t attachment_id, int64_t payload_id);
 
   void set_payload_tracker(std::shared_ptr<PayloadTracker> payload_tracker) {
@@ -184,6 +184,9 @@ class ShareSession {
   NearbyConnectionsManager& connections_manager() {
     return connections_manager_;
   }
+  const NearbyConnectionsManager& connections_manager() const {
+    return connections_manager_;
+  }
   void set_endpoint_id(absl::string_view endpoint_id) {
     endpoint_id_ = std::string(endpoint_id);
   }
@@ -199,9 +202,14 @@ class ShareSession {
   void InitializePayloadTracker(
       absl::AnyInvocable<void()> payload_transfer_updates_callback);
 
+  static location::nearby::proto::sharing::SharingUseCase
+  IntroductionUseCaseToLoggingUseCase(
+      nearby::sharing::service::proto::IntroductionFrame::SharingUseCase
+          use_case);
+
  private:
   Clock& clock_;
-  TaskRunner& service_thread_;
+  SingleThreadExecutor& service_thread_;
   NearbyConnectionsManager& connections_manager_;
   analytics::AnalyticsRecorder& analytics_recorder_;
   std::string endpoint_id_;

@@ -22,10 +22,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "connections/advertising_options.h"
@@ -50,8 +52,8 @@
 #include "internal/platform/error_code_recorder.h"
 #include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/preferences_manager.h"
-#include "internal/platform/mac_address.h"
 #include "internal/platform/mutex.h"
+#include "internal/platform/mutex_lock.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/scheduled_executor.h"
 
@@ -68,8 +70,8 @@ class ClientProxy final {
   explicit ClientProxy(std::unique_ptr<nearby::analytics::AnalyticsRecorder>
                            analytics_recorder = nullptr);
   ~ClientProxy();
-  ClientProxy(ClientProxy&&) = default;
-  ClientProxy& operator=(ClientProxy&&) = default;
+  ClientProxy(const ClientProxy&) = delete;
+  ClientProxy& operator=(const ClientProxy&) = delete;
 
   std::int64_t GetClientId() const;
 
@@ -91,10 +93,6 @@ class ClientProxy final {
   }
 
   std::string GetConnectionToken(const std::string& endpoint_id);
-  std::optional<MacAddress> GetBluetoothMacAddress(
-      const std::string& endpoint_id);
-  void SetBluetoothMacAddress(const std::string& endpoint_id,
-                              MacAddress bluetooth_mac_address);
   const NearbyDevice* GetLocalDevice();
   NearbyDeviceProvider* GetLocalDeviceProvider() {
     if (external_device_provider_ != nullptr) {
@@ -116,7 +114,10 @@ class ClientProxy final {
       absl::Span<location::nearby::proto::connections::Medium> mediums,
       const std::vector<analytics::OperationResultWithMedium>&
           operation_result_with_medium,
-      const AdvertisingOptions& advertising_options = AdvertisingOptions{});
+      const AdvertisingOptions& advertising_options = AdvertisingOptions{},
+      std::optional<bool> is_extended_advertisement_supported = std::nullopt,
+      std::optional<int> connected_ap_frequency = std::nullopt,
+      std::optional<bool> is_nfc_available = std::nullopt);
   // Marks this client as not advertising.
   void StoppedAdvertising();
   bool IsAdvertising() const;
@@ -140,7 +141,10 @@ class ClientProxy final {
       absl::Span<location::nearby::proto::connections::Medium> mediums,
       const std::vector<analytics::OperationResultWithMedium>&
           operation_result_with_medium,
-      const DiscoveryOptions& discovery_options = DiscoveryOptions{});
+      const DiscoveryOptions& discovery_options = DiscoveryOptions{},
+      std::optional<bool> is_extended_advertisement_supported = std::nullopt,
+      std::optional<int> connected_ap_frequency = std::nullopt,
+      std::optional<bool> is_nfc_available = std::nullopt);
   // Marks this client as not discovering at all.
   void StoppedDiscovery();
   bool IsDiscoveringServiceId(const std::string& service_id) const;
@@ -151,10 +155,7 @@ class ClientProxy final {
     MutexLock lock(&mutex_);
     local_endpoint_info_ = std::string(endpoint_info);
   }
-  void UpdateAdvertisingOptions(const AdvertisingOptions& advertising_options) {
-    MutexLock lock(&mutex_);
-    advertising_options_ = advertising_options;
-  }
+  void UpdateAdvertisingOptions(const AdvertisingOptions& advertising_options);
 
   void UpdateDiscoveryOptions(const DiscoveryOptions& discovery_options) {
     MutexLock lock(&mutex_);
@@ -222,15 +223,12 @@ class ClientProxy final {
   // Returns true if there is at least one active WiFi Aware connection.
   bool HasWifiAwareConnection() const;
   std::string GetLastLocalEndpointId() const;
-  void SetLastLocalEndpointId(absl::string_view endpoint_id);
   // Returns the number of endpoints that are connected and outgoing.
   std::int32_t GetNumOutgoingConnections() const;
   // Returns the number of endpoints that are connected and incoming.
   std::int32_t GetNumIncomingConnections() const;
   // Returns true if endpoint is incoming connection.
   bool IsIncomingConnection(const std::string& endpoint_id) const;
-  // Returns true if endpoint is outgoing connection.
-  bool IsOutgoingConnection(const std::string& endpoint_id) const;
   // If true, then we're in the process of approving (or rejecting) a
   // connection. No payloads should be sent until isConnectedToEndpoint()
   // returns true.
@@ -268,8 +266,6 @@ class ClientProxy final {
   // Proxies to the client's PayloadListener::OnPayloadProgress() callback.
   void OnPayloadProgress(const std::string& endpoint_id,
                          const PayloadProgressInfo& info);
-  bool LocalConnectionIsAccepted(std::string endpoint_id) const;
-  bool RemoteConnectionIsAccepted(std::string endpoint_id) const;
 
   // Adds a CancellationFlag for endpoint id.
   void AddCancellationFlag(const std::string& endpoint_id);
@@ -308,10 +304,21 @@ class ClientProxy final {
     external_device_provider_ = provider;
   }
 
-  void RegisterConnectionsDeviceProvider(
-      std::unique_ptr<v3::ConnectionsDeviceProvider> provider) {
-    connections_device_provider_ = std::move(provider);
-  }
+  // Registers a handler for events that require a decision from the client.
+  // Replaces any previously registered handler. The handler must not call
+  // `RegisterEventHandler()` or `UnregisterEventHandler()` synchronously from
+  // within the callback, as doing so will deadlock.
+  void RegisterEventHandler(ClientEventHandler handler);
+
+  // Unregisters the currently registered event handler and releases any
+  // resources associated with it.
+  void UnregisterEventHandler();
+
+  // Dispatches `event` to the registered handler and returns its decision.
+  // Returns true if no handler is registered. Concurrent calls are serialized
+  // by `event_handler_mutex_` (without holding `mutex_`) and block the calling
+  // thread.
+  bool OnEvent(const ClientEvent& event);
 
   const bool& IsSupportSafeToDisconnect() const {
     return supports_safe_to_disconnect_;
@@ -323,11 +330,6 @@ class ClientProxy final {
       absl::string_view endpoint_id,
       const std::int32_t& safe_to_disconnect_version);
   bool IsSafeToDisconnectEnabled(absl::string_view endpoint_id);
-  bool IsPayloadReceivedAckEnabled(absl::string_view endpoint_id);
-
-  // Sets the multiplex socket supports status for remote device.
-  void SetRemoteMultiplexSocketBitmask(absl::string_view endpoint_id,
-                                       int remote_multiplex_socket_bitmask);
 
   // Gets the WebRTC non cellular network status.
   bool GetWebRtcNonCellular();
@@ -354,6 +356,7 @@ class ClientProxy final {
     bool is_wifi_direct_gc_available = false;
     bool is_wifi_hotspot_ap_available = false;
     bool is_wifi_hotspot_client_available = false;
+    bool is_wifi_aware_available = false;
   };
 
   location::nearby::connections::MediumRole GetLocalMediumRole(
@@ -393,12 +396,9 @@ class ClientProxy final {
     Status status{kPending};
     ConnectionListener connection_listener;
     ConnectionOptions connection_options;
-    DiscoveryOptions discovery_options;
-    AdvertisingOptions advertising_options;
     std::string connection_token;
     std::optional<location::nearby::connections::OsInfo> os_info;
     std::int32_t safe_to_disconnect_version;
-    std::int32_t remote_multiplex_socket_bitmask;
     std::string save_path;
     std::string device_name;
   };
@@ -513,9 +513,6 @@ class ClientProxy final {
   // Maps endpoint_id to endpoint connection state.
   absl::flat_hash_map<std::string, ConnectionPair> connections_;
 
-  // Maps endpoint_id to Bluetooth Mac Addresses.
-  absl::flat_hash_map<std::string, MacAddress> bluetooth_mac_addresses_;
-
   // A cache of endpoint ids that we've already notified the discoverer of. We
   // check this cache before calling onEndpointFound() so that we don't notify
   // the client multiple times for the same endpoint. This would otherwise
@@ -549,6 +546,12 @@ class ClientProxy final {
   NearbyDeviceProvider* external_device_provider_ = nullptr;
   // For Nearby Connections' own device provider.
   std::unique_ptr<v3::ConnectionsDeviceProvider> connections_device_provider_;
+  // Mutex serializing registration and invocation of `event_handler_`. Kept
+  // separate from `mutex_` so `OnEvent` does not block other `ClientProxy`
+  // operations or deadlock if the handler queries `ClientProxy`.
+  mutable absl::Mutex event_handler_mutex_;
+  // Handler for events that require a decision from the client.
+  ClientEventHandler event_handler_ ABSL_GUARDED_BY(event_handler_mutex_);
   bool supports_safe_to_disconnect_;
   // Allowed to use WebRTC over non-cellular networks.
   bool webrtc_non_cellular_ = false;

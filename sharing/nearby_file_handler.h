@@ -18,13 +18,10 @@
 #include <stdint.h>
 
 #include <functional>
-#include <memory>
 #include <vector>
 
-#include "absl/functional/any_invocable.h"
 #include "internal/base/file_path.h"
-#include "internal/platform/task_runner.h"
-#include "sharing/internal/api/sharing_platform.h"
+#include "internal/platform/single_thread_executor.h"
 
 namespace nearby {
 namespace sharing {
@@ -35,23 +32,14 @@ class NearbyFileHandler {
  public:
   using DeleteFilesFromDiskCallback = std::function<void()>;
 
-  // Pass in a TaskRunner to use for testing.
-  explicit NearbyFileHandler(nearby::sharing::api::SharingPlatform& platform,
-                             std::unique_ptr<TaskRunner> runner = nullptr);
-  ~NearbyFileHandler();
+  NearbyFileHandler() = default;
+  ~NearbyFileHandler() = default;
 
   void DeleteFilesFromDisk(std::vector<FilePath> file_paths,
                            DeleteFilesFromDiskCallback callback);
 
-  // On platforms where it is supported, tag the transferred files as
-  // originating from an untrusted source.
-  void UpdateFilesOriginMetadata(
-      std::vector<FilePath> file_paths,
-      absl::AnyInvocable<void(bool success)> callback);
-
  private:
-  nearby::sharing::api::SharingPlatform& platform_;
-  std::unique_ptr<TaskRunner> sequenced_task_runner_;
+  SingleThreadExecutor executor_;
 };
 
 }  // namespace sharing

@@ -33,6 +33,29 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Block type used to query the error domain of an `nw_error_t` in tests.
+typedef nw_error_domain_t (^GNCNWErrorGetDomainHandler)(nw_error_t error);
+
+// Optional test override for `nw_error_get_error_domain` because `nw_error_t` is opaque and
+// cannot be instantiated with `nw_error_domain_tls` in unit tests.
+static GNCNWErrorGetDomainHandler _Nullable gNWErrorGetDomainOverride = nil;
+
+// Returns YES if `error` belongs to `nw_error_domain_tls`.
+static BOOL GNCNWErrorIsTLSError(nw_error_t _Nullable error) {
+  if (error == nil) {
+    return NO;
+  }
+  if (gNWErrorGetDomainOverride != nil) {
+    return gNWErrorGetDomainOverride(error) == nw_error_domain_tls;
+  }
+  return nw_error_get_error_domain(error) == nw_error_domain_tls;
+}
+
+// Sets a test-only override for extracting `nw_error_domain_t` from an `nw_error_t`.
+void GNCSetNWErrorGetDomainOverrideForTesting(GNCNWErrorGetDomainHandler _Nullable handler) {
+  gNWErrorGetDomainOverride = handler;
+}
+
 // An arbitrary timeout that should be pretty lenient.
 NSTimeInterval const GNCConnectionTimeoutInSeconds = 4;
 
@@ -77,11 +100,37 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   return txtRecords;
 }
 
+static BOOL GNCExtractServiceFromBrowseResult(
+    nw_browse_result_t browseResult, NSString *_Nullable *_Nonnull outName,
+    NSDictionary<NSString *, NSString *> *_Nullable *_Nonnull outTxtRecords) {
+  // If the service has a loopback interface, we probably discovered our own advertisement, so we
+  // ignore it.
+  if (GNCHasLoopbackInterface(browseResult)) {
+    GNCLoggerInfo(@"Ignoring a service event with loopback interface.");
+    return NO;
+  }
+  id<GNCNWBrowseResult> wrapper = [GNCNWBrowseResultImpl sharedInstance];
+  nw_endpoint_t endpoint = [wrapper copyEndpointFromResult:browseResult];
+  NSString *name = [wrapper getBonjourServiceNameFromEndpoint:endpoint];
+  if (name == nil) {
+    GNCLoggerInfo(@"Dropping mDNS result with unrepresentable name.");
+    return NO;
+  }
+  *outName = name;
+  *outTxtRecords = GNCTXTRecordForBrowseResult(browseResult);
+  return YES;
+}
+
 @interface GNCNWFramework ()
+- (nullable GNCNWFrameworkServerSocket *)
+    internalListenForServiceWithPSKIdentity:(nullable NSData *)PSKIdentity
+                            PSKSharedSecret:(nullable NSData *)PSKSharedSecret
+                                       port:(NSInteger)port
+                                      error:(NSError **_Nullable)error;
+
 - (nullable GNCNWFrameworkSocket *)internalConnectToEndpoint:(nw_endpoint_t)endpoint
                                                  PSKIdentity:(nullable NSData *)PSKIdentity
                                              PSKSharedSecret:(nullable NSData *)PSKSharedSecret
-                                           includePeerToPeer:(BOOL)includePeerToPeer
                                                 cancelSource:
                                                     (nullable dispatch_source_t)cancelSource
                                                        queue:(nullable dispatch_queue_t)queue
@@ -107,8 +156,12 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 }
 
 - (instancetype)init {
+  return [self initWithPeerToPeer:NO];
+}
+
+- (instancetype)initWithPeerToPeer:(BOOL)includePeerToPeer {
   if (self = [super init]) {
-    _includePeerToPeer = NO;
+    _includePeerToPeer = includePeerToPeer;
     _serverSockets = [NSMapTable strongToWeakObjectsMapTable];
     _serviceBrowsers = [[NSMutableDictionary alloc] init];
     _dispatchQueue = dispatch_queue_create("GNCNWFramework", DISPATCH_QUEUE_SERIAL);
@@ -117,7 +170,7 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 }
 
 - (BOOL)isListeningForAnyService {
-  return _serverSockets.count > 0;
+  return _serverSockets.keyEnumerator.nextObject != nil;
 }
 
 - (BOOL)isDiscoveringAnyService {
@@ -125,40 +178,22 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 }
 
 - (nullable GNCNWFrameworkServerSocket *)listenForServiceOnPort:(NSInteger)port
-                                              includePeerToPeer:(BOOL)includePeerToPeer
                                                           error:(NSError **)error {
-  GNCLoggerInfo(@"[GNCNWFramework] Listen on port: %ld with includePeerToPeer: %@.", (long)port,
-                (includePeerToPeer ? @"true" : @"false"));
-  GNCNWFrameworkServerSocket *serverSocket = [[GNCNWFrameworkServerSocket alloc] initWithPort:port];
-  _includePeerToPeer = includePeerToPeer;
-  BOOL success = [serverSocket startListeningWithError:error includePeerToPeer:_includePeerToPeer];
-  if (success) {
-    [_serverSockets setObject:serverSocket forKey:@(serverSocket.port)];
-    return serverSocket;
-  }
-  return nil;
+  return [self internalListenForServiceWithPSKIdentity:nil
+                                       PSKSharedSecret:nil
+                                                  port:port
+                                                 error:error];
 }
 
 - (nullable GNCNWFrameworkServerSocket *)listenForServiceWithPSKIdentity:(NSData *)PSKIdentity
                                                          PSKSharedSecret:(NSData *)PSKSharedSecret
                                                                     port:(NSInteger)port
-                                                       includePeerToPeer:(BOOL)includePeerToPeer
                                                                    error:
                                                                        (NSError **_Nullable)error {
-  GNCLoggerInfo(
-      @"[GNCNWFramework] Listen on port: %ld with includePeerToPeer: %@, and PSKIdentity: %@.",
-      (long)port, (includePeerToPeer ? @"true" : @"false"), PSKIdentity);
-  GNCNWFrameworkServerSocket *serverSocket = [[GNCNWFrameworkServerSocket alloc] initWithPort:port];
-  _includePeerToPeer = includePeerToPeer;
-  BOOL success = [serverSocket startListeningWithPSKIdentity:PSKIdentity
-                                             PSKSharedSecret:PSKSharedSecret
-                                           includePeerToPeer:_includePeerToPeer
-                                                       error:error];
-  if (success) {
-    [_serverSockets setObject:serverSocket forKey:@(serverSocket.port)];
-    return serverSocket;
-  }
-  return nil;
+  return [self internalListenForServiceWithPSKIdentity:PSKIdentity
+                                       PSKSharedSecret:PSKSharedSecret
+                                                  port:port
+                                                 error:error];
 }
 
 - (void)startAdvertisingPort:(NSInteger)port
@@ -174,13 +209,11 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 - (void)stopAdvertisingPort:(NSInteger)port {
   GNCNWFrameworkServerSocket *serverSocket = [_serverSockets objectForKey:@(port)];
   [serverSocket stopAdvertising];
-  [_serverSockets removeObjectForKey:@(port)];
 }
 
 - (BOOL)startDiscoveryForServiceType:(NSString *)serviceType
                  serviceFoundHandler:(ServiceUpdateHandler)serviceFoundHandler
                   serviceLostHandler:(ServiceUpdateHandler)serviceLostHandler
-                   includePeerToPeer:(BOOL)includePeerToPeer
                                error:(NSError **)error {
   if ([_serviceBrowsers objectForKey:serviceType] != nil) {
     if (error != nil) {
@@ -193,7 +226,6 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 
   // Create a parameters object configured to support TCP. TLS MUST be disabled for Nearby to
   // function properly.
-  _includePeerToPeer = includePeerToPeer;
   nw_parameters_t parameters = GNCBuildNonTLSParameters(/*includePeerToPeer=*/_includePeerToPeer);
   if (!parameters) {
     GNCLoggerError(@"[GNCNWFramework] Failed to create NW parameters.");
@@ -222,86 +254,37 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
                                  case nw_browse_result_change_interface_removed:
                                    break;
                                  case nw_browse_result_change_result_added: {
-                                   // If the service has a loopback interface, we probably
-                                   // discovered our own advertisement, so we ignore it.
-                                   BOOL hasLoopback = GNCHasLoopbackInterface(new_result);
-                                   if (hasLoopback) {
-                                     GNCLoggerInfo(
-                                         @"Ignoring a service discovered with loopback interface.");
-                                     break;
+                                   NSString *name;
+                                   NSDictionary<NSString *, NSString *> *txtRecords;
+                                   if (GNCExtractServiceFromBrowseResult(new_result, &name,
+                                                                         &txtRecords)) {
+                                     serviceFoundHandler(name, txtRecords);
                                    }
-                                   nw_endpoint_t endpoint =
-                                       [browseResultWrapper copyEndpointFromResult:new_result];
-                                   NSString *name = [browseResultWrapper
-                                       getBonjourServiceNameFromEndpoint:endpoint];
-                                   if (name == nil) {
-                                     GNCLoggerInfo(
-                                         @"Dropping mDNS result with unrepresentable name.");
-                                     break;
-                                   }
-                                   NSDictionary<NSString *, NSString *> *txtRecords =
-                                       GNCTXTRecordForBrowseResult(new_result);
-                                   serviceFoundHandler(name, txtRecords);
                                    break;
                                  }
                                  case nw_browse_result_change_txt_record_changed: {
-                                   // If the service has a loopback interface, we probably lost our
-                                   // own advertisement, so we ignore it.
-                                   BOOL oldHasLoopback = GNCHasLoopbackInterface(old_result);
-                                   BOOL newHasLoopback = GNCHasLoopbackInterface(new_result);
-                                   if (oldHasLoopback || newHasLoopback) {
-                                     GNCLoggerInfo(
-                                         @"Ignoring a service change with loopback interface.");
-                                     break;
+                                   NSString *oldName;
+                                   NSDictionary<NSString *, NSString *> *oldTxtRecords;
+                                   if (GNCExtractServiceFromBrowseResult(old_result, &oldName,
+                                                                         &oldTxtRecords)) {
+                                     serviceLostHandler(oldName, oldTxtRecords);
                                    }
-                                   nw_endpoint_t old_endpoint =
-                                       [browseResultWrapper copyEndpointFromResult:old_result];
-                                   NSString *oldName = [browseResultWrapper
-                                       getBonjourServiceNameFromEndpoint:old_endpoint];
-                                   if (oldName == nil) {
-                                     GNCLoggerInfo(
-                                         @"Dropping mDNS result with unrepresentable old name.");
-                                     break;
-                                   }
-                                   NSDictionary<NSString *, NSString *> *oldTXTRecords =
-                                       GNCTXTRecordForBrowseResult(old_result);
-                                   serviceLostHandler(oldName, oldTXTRecords);
 
-                                   nw_endpoint_t new_endpoint =
-                                       [browseResultWrapper copyEndpointFromResult:new_result];
-                                   NSString *newName = [browseResultWrapper
-                                       getBonjourServiceNameFromEndpoint:new_endpoint];
-                                   if (newName == nil) {
-                                     GNCLoggerInfo(
-                                         @"Dropping mDNS result with unrepresentable new name.");
-                                     break;
+                                   NSString *newName;
+                                   NSDictionary<NSString *, NSString *> *newTxtRecords;
+                                   if (GNCExtractServiceFromBrowseResult(new_result, &newName,
+                                                                         &newTxtRecords)) {
+                                     serviceFoundHandler(newName, newTxtRecords);
                                    }
-                                   NSDictionary<NSString *, NSString *> *newTXTRecords =
-                                       GNCTXTRecordForBrowseResult(new_result);
-                                   serviceFoundHandler(newName, newTXTRecords);
                                    break;
                                  }
                                  case nw_browse_result_change_result_removed: {
-                                   // If the service has a loopback interface, we probably lost our
-                                   // own advertisement, so we ignore it.
-                                   BOOL hasLoopback = GNCHasLoopbackInterface(old_result);
-                                   if (hasLoopback) {
-                                     GNCLoggerInfo(
-                                         @"Ignoring a service lost with loopback interface.");
-                                     break;
+                                   NSString *name;
+                                   NSDictionary<NSString *, NSString *> *txtRecords;
+                                   if (GNCExtractServiceFromBrowseResult(old_result, &name,
+                                                                         &txtRecords)) {
+                                     serviceLostHandler(name, txtRecords);
                                    }
-                                   nw_endpoint_t endpoint =
-                                       [browseResultWrapper copyEndpointFromResult:old_result];
-                                   NSString *name = [browseResultWrapper
-                                       getBonjourServiceNameFromEndpoint:endpoint];
-                                   if (name == nil) {
-                                     GNCLoggerInfo(
-                                         @"Dropping mDNS result with unrepresentable name.");
-                                     break;
-                                   }
-                                   NSDictionary<NSString *, NSString *> *txtRecords =
-                                       GNCTXTRecordForBrowseResult(old_result);
-                                   serviceLostHandler(name, txtRecords);
                                    break;
                                  }
                                }
@@ -352,6 +335,7 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
     case nw_browser_state_waiting:
     case nw_browser_state_failed:
     case nw_browser_state_cancelled:
+      [self stopDiscoveryForServiceType:serviceType];
       return NO;
     case nw_browser_state_ready:
       return YES;
@@ -378,7 +362,6 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   return [self internalConnectToEndpoint:endpoint
                              PSKIdentity:nil
                          PSKSharedSecret:nil
-                       includePeerToPeer:_includePeerToPeer
                             cancelSource:nil
                                    queue:nil
                                    error:error];
@@ -397,7 +380,6 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   return [self internalConnectToEndpoint:endpoint
                              PSKIdentity:PSKIdentity
                          PSKSharedSecret:PSKSharedSecret
-                       includePeerToPeer:_includePeerToPeer
                             cancelSource:nil
                                    queue:nil
                                    error:error];
@@ -405,7 +387,6 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 
 - (nullable GNCNWFrameworkSocket *)connectToHost:(GNCIPv4Address *)host
                                             port:(NSInteger)port
-                               includePeerToPeer:(BOOL)includePeerToPeer
                                     cancelSource:(nullable dispatch_source_t)cancelSource
                                            queue:(nullable dispatch_queue_t)queue
                                            error:(NSError **)error {
@@ -416,7 +397,6 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   return [self internalConnectToEndpoint:endpoint
                              PSKIdentity:nil
                          PSKSharedSecret:nil
-                       includePeerToPeer:(BOOL)includePeerToPeer
                             cancelSource:cancelSource
                                    queue:queue
                                    error:error];
@@ -424,10 +404,29 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
 
 // MARK: - Private Methods (Implementation)
 
+- (nullable GNCNWFrameworkServerSocket *)
+    internalListenForServiceWithPSKIdentity:(nullable NSData *)PSKIdentity
+                            PSKSharedSecret:(nullable NSData *)PSKSharedSecret
+                                       port:(NSInteger)port
+                                      error:(NSError **_Nullable)error {
+  GNCLoggerInfo(
+      @"[GNCNWFramework] Listen on port: %ld with includePeerToPeer: %@, and PSKIdentity: %@.",
+      (long)port, (_includePeerToPeer ? @"true" : @"false"), PSKIdentity);
+  GNCNWFrameworkServerSocket *serverSocket = [[GNCNWFrameworkServerSocket alloc] initWithPort:port];
+  BOOL success = [serverSocket startListeningWithPSKIdentity:PSKIdentity
+                                             PSKSharedSecret:PSKSharedSecret
+                                           includePeerToPeer:_includePeerToPeer
+                                                       error:error];
+  if (success) {
+    [_serverSockets setObject:serverSocket forKey:@(serverSocket.port)];
+    return serverSocket;
+  }
+  return nil;
+}
+
 - (nullable GNCNWFrameworkSocket *)internalConnectToEndpoint:(nw_endpoint_t)endpoint
                                                  PSKIdentity:(nullable NSData *)PSKIdentity
                                              PSKSharedSecret:(nullable NSData *)PSKSharedSecret
-                                           includePeerToPeer:(BOOL)includePeerToPeer
                                                 cancelSource:
                                                     (nullable dispatch_source_t)cancelSource
                                                        queue:(nullable dispatch_queue_t)queue
@@ -438,12 +437,12 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   __block nw_connection_state_t blockResult = nw_connection_state_invalid;
   __block NSError *blockError = nil;
 
-  _includePeerToPeer = includePeerToPeer;
   nw_parameters_t parameters =
       (PSKIdentity == nil || PSKSharedSecret == nil)
           ? GNCBuildNonTLSParameters(/*includePeerToPeer=*/_includePeerToPeer)
           : GNCBuildTLSParameters(/*PSK=*/PSKSharedSecret, /*identity=*/PSKIdentity,
-                                  /*includePeerToPeer=*/_includePeerToPeer);
+                                  /*includePeerToPeer=*/_includePeerToPeer,
+                                  /*role=*/GNCTLSRoleClient);
   if (!parameters) {
     GNCLoggerError(@"[GNCNWFramework] Failed to create NW parameters.");
     return nil;
@@ -454,8 +453,12 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
   [connectionWrapper setQueue:queue ?: _dispatchQueue];
   [connectionWrapper setStateChangedHandler:^(nw_connection_state_t state, nw_error_t error) {
     [condition lock];
-    // Ignore the preparing state and waiting state, because it is not a final state.
-    if ((state != nw_connection_state_preparing) && (state != nw_connection_state_waiting)) {
+    // Ignore the preparing state and waiting state (unless waiting is due to a TLS handshake
+    // failure), because it is not a final state.
+    BOOL isTLSHandshakeFailure =
+        (state == nw_connection_state_waiting && error != nil && GNCNWErrorIsTLSError(error));
+    if ((state != nw_connection_state_preparing) &&
+        (state != nw_connection_state_waiting || isTLSHandshakeFailure)) {
       blockResult = state;
       if (error != nil) {
         blockError = (__bridge_transfer NSError *)nw_error_copy_cf_error(error);
@@ -499,6 +502,9 @@ NSDictionary<NSString *, NSString *> *GNCTXTRecordForBrowseResult(nw_browse_resu
     case nw_connection_state_waiting:
     case nw_connection_state_preparing:
     case nw_connection_state_failed:
+      [connectionWrapper setStateChangedHandler:nil];
+      [connectionWrapper cancel];
+      return nil;
     case nw_connection_state_cancelled:
       return nil;
     case nw_connection_state_ready: {

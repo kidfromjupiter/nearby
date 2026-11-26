@@ -15,18 +15,21 @@
 #include "internal/platform/multi_thread_executor.h"
 
 #include <atomic>
+#include <string>
+#include <thread>  // NOLINT(build/c++11)
+#include <vector>
 
 #include "gtest/gtest.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "internal/platform/exception.h"
 
 namespace nearby {
-
 namespace {
+
 const int kMaxThreads = 5;
-}
 
 TEST(MultiThreadExecutorTest, ConstructorDestructorWorks) {
   MultiThreadExecutor executor(kMaxThreads);
@@ -36,10 +39,12 @@ TEST(MultiThreadExecutorTest, CanExecute) {
   absl::CondVar cond;
   std::atomic_bool done = false;
   MultiThreadExecutor executor(kMaxThreads);
-  executor.Execute([&done, &cond]() {
+  EXPECT_FALSE(executor.Execute(nullptr));
+  EXPECT_FALSE(executor.Execute("empty", nullptr));
+  EXPECT_TRUE(executor.Execute([&done, &cond]() {
     done = true;
     cond.SignalAll();
-  });
+  }));
   absl::Mutex mutex;
   {
     absl::MutexLock lock(mutex);
@@ -48,6 +53,11 @@ TEST(MultiThreadExecutorTest, CanExecute) {
     }
   }
   EXPECT_TRUE(done);
+
+  absl::Notification named_done;
+  EXPECT_TRUE(
+      executor.Execute("named_task", [&named_done]() { named_done.Notify(); }));
+  EXPECT_TRUE(named_done.WaitForNotificationWithTimeout(absl::Seconds(1)));
 }
 
 TEST(MultiThreadExecutorTest, JobsExecuteInParallel) {
@@ -87,21 +97,11 @@ TEST(MultiThreadExecutorTest, JobsExecuteInParallel) {
   EXPECT_EQ(count, 0);
 }
 
-TEST(MultiThreadExecutorTest, CanSubmit) {
-  MultiThreadExecutor executor(kMaxThreads);
-  Future<bool> future;
-  bool submitted =
-      executor.Submit<bool>([]() { return ExceptionOr<bool>{true}; }, &future);
-  EXPECT_TRUE(submitted);
-  EXPECT_TRUE(future.Get().result());
-}
-
 struct ThreadCheckTestClass {
   MultiThreadExecutor executor{kMaxThreads};
   int value ABSL_GUARDED_BY(executor) = 0;
 
   void incValue() ABSL_EXCLUSIVE_LOCKS_REQUIRED(executor) { value++; }
-  int getValue() ABSL_EXCLUSIVE_LOCKS_REQUIRED(executor) { return value; }
 };
 
 TEST(MultiThreadExecutorTest, ThreadCheck_ExecuteRunnable) {
@@ -113,17 +113,95 @@ TEST(MultiThreadExecutorTest, ThreadCheck_ExecuteRunnable) {
       });
 }
 
-TEST(MultiThreadExecutorTest, ThreadCheck_SubmitCallable) {
-  ThreadCheckTestClass test_class;
-  Future<int> future;
+TEST(MultiThreadExecutorTest, ShutdownWaitsForRunningTasks) {
+  MultiThreadExecutor executor(kMaxThreads);
+  absl::Notification started;
+  std::atomic_int completed = 0;
 
-  bool submitted = test_class.executor.Submit<int>(
-      [&test_class]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(test_class.executor) {
-        return ExceptionOr<int>{test_class.getValue()};
-      },
-      &future);
+  executor.Execute([&]() {
+    started.Notify();
+    absl::SleepFor(absl::Milliseconds(100));
+    completed.fetch_add(1, std::memory_order_relaxed);
+  });
 
-  EXPECT_TRUE(submitted);
-  EXPECT_EQ(future.Get().result(), 0);
+  ASSERT_TRUE(started.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  executor.Shutdown();
+  EXPECT_EQ(completed.load(std::memory_order_relaxed), 1);
 }
+
+TEST(MultiThreadExecutorTest, ExecuteAfterShutdownFails) {
+  MultiThreadExecutor executor(kMaxThreads);
+  executor.Shutdown();
+  EXPECT_FALSE(executor.Execute([]() { FAIL() << "Task should not run"; }));
+  EXPECT_FALSE(executor.Execute(
+      "named_after_shutdown", []() { FAIL() << "Named task should not run"; }));
+}
+
+TEST(MultiThreadExecutorTest, ExecuteDuringShutdownFails) {
+  absl::Notification started;
+  absl::Notification calling_shutdown;
+  MultiThreadExecutor executor(kMaxThreads);
+
+  EXPECT_TRUE(executor.Execute([&]() {
+    started.Notify();
+    if (!calling_shutdown.WaitForNotificationWithTimeout(absl::Seconds(5))) {
+      ADD_FAILURE() << "Timed out waiting for shutdown to start";
+      return;
+    }
+    absl::SleepFor(absl::Milliseconds(200));
+    EXPECT_FALSE(executor.Execute([]() { FAIL() << "Task should not run"; }));
+  }));
+
+  ASSERT_TRUE(started.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  calling_shutdown.Notify();
+  executor.Shutdown();
+}
+
+TEST(MultiThreadExecutorTest, MultipleShutdownCallsAreIdempotent) {
+  MultiThreadExecutor executor(kMaxThreads);
+  std::atomic_int completed = 0;
+
+  executor.Execute(
+      [&]() { completed.fetch_add(1, std::memory_order_relaxed); });
+  executor.Shutdown();
+  executor.Shutdown();
+
+  EXPECT_EQ(completed.load(std::memory_order_relaxed), 1);
+}
+
+TEST(MultiThreadExecutorTest, ConcurrentExecuteAndShutdown) {
+  constexpr int kIterations = 25;
+  constexpr int kProducerThreads = 4;
+  constexpr int kTasksPerThread = 50;
+
+  for (int iter = 0; iter < kIterations; ++iter) {
+    MultiThreadExecutor executor(kMaxThreads);
+    std::atomic_bool after_shutdown = false;
+    std::atomic_bool ran_after_shutdown = false;
+    std::vector<std::thread> producers;
+    producers.reserve(kProducerThreads);
+
+    for (int t = 0; t < kProducerThreads; ++t) {
+      producers.emplace_back([&]() {
+        for (int i = 0; i < kTasksPerThread; ++i) {
+          executor.Execute([&]() {
+            if (after_shutdown.load(std::memory_order_acquire)) {
+              ran_after_shutdown.store(true, std::memory_order_relaxed);
+            }
+          });
+        }
+      });
+    }
+
+    executor.Shutdown();
+    after_shutdown.store(true, std::memory_order_release);
+
+    for (std::thread& producer : producers) {
+      producer.join();
+    }
+    EXPECT_FALSE(ran_after_shutdown.load(std::memory_order_relaxed));
+  }
+}
+
+}  // namespace
 }  // namespace nearby

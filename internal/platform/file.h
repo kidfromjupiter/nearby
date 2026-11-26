@@ -28,15 +28,15 @@
 #include "internal/platform/implementation/output_file.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/input_stream.h"
-#include "internal/platform/output_stream.h"
-#include "internal/platform/payload_id.h"
 
 namespace nearby {
 
 class InputFile final {
  public:
   using Platform = api::ImplementationPlatform;
+#if defined(NEARBY_CHROMIUM)
   explicit InputFile(PayloadId payload_id);
+#endif  // defined(NEARBY_CHROMIUM)
   explicit InputFile(std::string file_path);
   ~InputFile();
   InputFile(InputFile&&) noexcept;
@@ -77,11 +77,13 @@ class InputFile final {
 class OutputFile final {
  public:
   using Platform = api::ImplementationPlatform;
+#if defined(NEARBY_CHROMIUM)
   explicit OutputFile(PayloadId payload_id);
+#endif  // defined(NEARBY_CHROMIUM)
   explicit OutputFile(std::string file_path);
   ~OutputFile();
   OutputFile(OutputFile&&) noexcept;
-  OutputFile& operator=(OutputFile&&);
+  OutputFile& operator=(OutputFile&&) = delete;
 
   bool IsValid() const;
 
@@ -93,16 +95,16 @@ class OutputFile final {
   // associated with it.
   Exception Close();
 
-  // Returns a handle to the underlying  output stream.
-  //
-  // Returned handle will remain valid even if OutputFile is moved, for as long
-  // as original OutputFile lifetime continues.
-  // Side effects of any non-const operation invoked for OutputFile (such as
-  // Write, or Close will be observable through OutputStream& handle, and vice
-  // versa.
-  OutputStream& GetOutputStream();
+  // Closes the file if open and deletes it from the filesystem.
+  // Returns true if the file was deleted.
+  bool Delete();
 
   void SetLastModifiedTime(absl::Time last_modified_time);
+
+  // Sets the origin metadata for the file as externally downloaded so any
+  // security policies can be applied.
+  // Returns true if the origin metadata was set successfully.
+  bool SetOriginMetadata();
 
  private:
   std::unique_ptr<api::OutputFile> impl_;

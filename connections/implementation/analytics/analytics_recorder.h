@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,8 @@ class AnalyticsRecorder {
   virtual void OnStopAdvertising() = 0;
 
   virtual int GetNextAdvertisingUpdateIndex() = 0;
+  virtual void UpdateAdvertisingPowerLevel(
+      location::nearby::proto::connections::PowerLevel power_level) = 0;
 
   // Connection listening
   virtual void OnStartedIncomingConnectionListening(
@@ -102,13 +105,17 @@ class AnalyticsRecorder {
 
   static std::unique_ptr<AdvertisingMetadataParams>
   BuildAdvertisingMetadataParams(
-      bool is_extended_advertisement_supported = false,
-      int connected_ap_frequency = 0, bool is_nfc_available = false,
+      std::optional<bool> is_extended_advertisement_supported = std::nullopt,
+      std::optional<int> connected_ap_frequency = std::nullopt,
+      std::optional<bool> is_nfc_available = std::nullopt,
       const std::vector<OperationResultWithMedium>&
-          operation_result_with_mediums = {});
+          operation_result_with_mediums = {},
+      location::nearby::proto::connections::PowerLevel power_level =
+          location::nearby::proto::connections::PowerLevel::UNSPECIFIED);
   static std::unique_ptr<DiscoveryMetadataParams> BuildDiscoveryMetadataParams(
-      bool is_extended_advertisement_supported = false,
-      int connected_ap_frequency = 0, bool is_nfc_available = false,
+      std::optional<bool> is_extended_advertisement_supported = std::nullopt,
+      std::optional<int> connected_ap_frequency = std::nullopt,
+      std::optional<bool> is_nfc_available = std::nullopt,
       const std::vector<OperationResultWithMedium>&
           operation_result_with_mediums = {});
 
@@ -164,13 +171,23 @@ class AnalyticsRecorder {
           operation_result_code) = 0;
 
   // BandwidthUpgrade
+  // `bwu_connection_direction` represents the direction of the BWU socket
+  // connection attempt (`INCOMING` when hosting the upgrade medium and waiting
+  // for an incoming socket connection; `OUTGOING` when connecting as a client
+  // to the peer's upgrade medium) rather than the initial connection role
+  // (`ClientProxy::IsIncomingConnection`).
+  // Combined with `is_role_switched`:
+  // - (INCOMING, false): Advertiser hosting BWU medium (default)
+  // - (INCOMING, true): Discoverer hosting BWU medium (role-switched)
+  // - (OUTGOING, false): Discoverer connecting as BWU client (default)
+  // - (OUTGOING, true): Advertiser connecting as BWU client (role-switched)
   virtual void OnBandwidthUpgradeStarted(
       const std::string& endpoint_id,
       location::nearby::proto::connections::Medium from_medium,
       location::nearby::proto::connections::Medium to_medium,
       location::nearby::proto::connections::ConnectionAttemptDirection
-          direction,
-      const std::string& connection_token) = 0;
+          bwu_connection_direction,
+      const std::string& connection_token, bool is_role_switched) = 0;
   virtual void UpdateBwUpgradeNetworkInfo(const std::string& endpoint_id,
                                           int num_interfaces,
                                           int num_ipv6_only_interfaces) = 0;

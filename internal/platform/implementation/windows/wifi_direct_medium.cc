@@ -21,53 +21,113 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/cancellation_flag_listener.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/flags/nearby_platform_feature_flags.h"
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/implementation/windows/device_info.h"
-#include "internal/platform/implementation/windows/generated/winrt/base.h"
 #include "internal/platform/implementation/windows/socket_address.h"
 #include "internal/platform/implementation/windows/wifi_direct.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/wifi_credential.h"
+#include "winrt/base.h"
+
+// We plan to discard the Windows GO implementation for the following reasons:
+// 1. When GC (Android or Windows) connects to GO, repeated testing results in a
+// high connection failure rate (20%-60%).
+// 2. Windows GO fails to start after several rounds of testing.
+// 3. We now plan to implement WPS-PIN for security purposes; however, there is
+// no API available to set the Windows GO pin in advance. We can only obtain the
+// pin after the GC connects, which would require additional frames exchange to
+// allow the GO to notify the GC of the pin in the BWU layer and platform
+// medium layer.
+// Given these challenges, I do not believe Windows GO is a feasible solution.
+// Fortunately, with Dynamic Role Switch, Windows WFD can consistently work with
+// Android, regardless of whether it is acting as the sender or receiver.
+//
+// We have attempted several fixes for these two issues, but the improvements do
+// not meet production standards. In my assessment, this is likely a problem
+// with the Windows WinRT SDK. If Microsoft is interested in debugging this in
+// the future and solve the problem, we can enable the code.
+//
+// The related code is wrapped by ENABLE_WIFI_DIRECT_GO preprocessor macro.
+// TODO: b/535138108
 
 namespace nearby::windows {
 
 namespace {
+
+#if defined(ENABLE_WIFI_DIRECT_GO)
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationCollection;
+using ::winrt::Windows::Devices::WiFiDirect::
+    WiFiDirectAdvertisementListenStateDiscoverability;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisher;
+using ::winrt::Windows::Devices::WiFiDirect::
+    WiFiDirectAdvertisementPublisherStatus;
+using ::winrt::Windows::Devices::WiFiDirect::
+    WiFiDirectAdvertisementPublisherStatusChangedEventArgs;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionListener;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionRequest;
+using ::winrt::Windows::Devices::WiFiDirect::
+    WiFiDirectConnectionRequestedEventArgs;
+
 constexpr absl::Duration kServiceConnectionTimeout = absl::Seconds(60);
+#endif  // ENABLE_WIFI_DIRECT_GO
+
+using ::winrt::fire_and_forget;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConfigurationMethod;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectConnectionParameters;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectDevice;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectDeviceSelectorType;
+using ::winrt::Windows::Devices::WiFiDirect::WiFiDirectPairingProcedure;
+
+using ::winrt::Windows::Devices::Enumeration::DeviceInformation;
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing;
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationKind;
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationPairing;
+using ::winrt::Windows::Devices::Enumeration::DeviceInformationUpdate;
+using ::winrt::Windows::Devices::Enumeration::DevicePairingKinds;
+using ::winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel;
+using ::winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs;
+using ::winrt::Windows::Devices::Enumeration::DevicePairingResult;
+using ::winrt::Windows::Devices::Enumeration::DevicePairingResultStatus;
+using ::winrt::Windows::Devices::Enumeration::DeviceUnpairingResult;
+using ::winrt::Windows::Devices::Enumeration::DeviceUnpairingResultStatus;
+using ::winrt::Windows::Devices::Enumeration::DeviceWatcher;
+using ::winrt::Windows::Devices::Enumeration::DeviceWatcherStatus;
+
+using ::winrt::Windows::Foundation::AsyncStatus;
+using ::winrt::Windows::Foundation::IAsyncOperation;
+using ::winrt::Windows::Foundation::IInspectable;
+using ::winrt::Windows::Foundation::Collections::IVectorView;
+using ::winrt::Windows::Networking::EndpointPair;
+
 constexpr absl::Duration kWaitingForRePair = absl::Seconds(3);
 constexpr absl::Duration kWaitForGOServerStart = absl::Milliseconds(500);
 constexpr absl::Duration kConnectTimeout = absl::Seconds(30);
-}  // namespace
+constexpr absl::Duration kWatcherStopTimeout = absl::Seconds(5);
 
-WifiDirectDeviceDiscovered::WifiDirectDeviceDiscovered(
-    const DeviceInformation& device_info)
-    : windows_wifi_direct_device_(device_info) {
-  id_ = winrt::to_string(device_info.Id());
-}
+// Wi-Fi Direct Group Owner (GO) intent values (valid range 0-15 per the Wi-Fi
+// P2P specification, where a higher value indicates a stronger preference to
+// become the Group Owner and 15 means the device must be the GO).
+// - When acting as GO, use 14 (highest non-exclusive preference) to become GO.
+// - When acting as GC, use 1 (low preference) so the remote peer becomes GO.
+#if defined(ENABLE_WIFI_DIRECT_GO)
+constexpr int kGroupOwnerIntentForGo = 14;
+#endif  // ENABLE_WIFI_DIRECT_GO
+constexpr int kGroupOwnerIntentForGc = 1;
 
-// WifiDirectDeviceDiscovered::~WifiDirectDeviceDiscovered() {}
-WifiDirectMedium::WifiDirectMedium() {
-  is_interface_valid_ = IsWifiDirectSupported();
-}
-
-WifiDirectMedium::~WifiDirectMedium() {
-  is_interface_valid_ = false;
-  StopWifiDirect();
-  DisconnectWifiDirect();
-}
-
-bool WifiDirectMedium::IsWifiDirectSupported() {
+bool IsWifiDirectSupported() {
   HANDLE wifi_direct_handle = nullptr;
   DWORD negotiated_version = 0;
   DWORD result = 0;
@@ -83,7 +143,91 @@ bool WifiDirectMedium::IsWifiDirectSupported() {
   return true;
 }
 
+// Unpairs all target peers in `devices` that were paired during the session and
+// logs diagnostic status for `peer_role` (e.g. "GC" or "GO").
+//
+// Note: `devices` only contains peers that matched our out-of-band
+// `WifiDirectCredentials` device name and were paired by this medium (unrelated
+// WFD devices discovered by `DeviceWatcher` are filtered out before insertion).
+void UnpairDevices(
+    const absl::flat_hash_map<
+        winrt::hstring, std::unique_ptr<WifiDirectDeviceDiscovered>>& devices,
+    absl::string_view peer_role) {
+  for (const auto& [id, device] : devices) {
+    LOG(INFO) << "Unpair WifiDirect " << peer_role << ": " << device->GetId();
+    try {
+      DeviceInformationPairing pairing =
+          device->GetDeviceInformation().Pairing();
+      LOG(INFO) << peer_role << " IsPaired: " << pairing.IsPaired()
+                << ", unpair it";
+      // Call `UnpairAsync()` unconditionally without checking
+      // `pairing.IsPaired()`. The cached `DeviceInformation` was captured prior
+      // to pairing and its `IsPaired()` state can remain stale (`false`) if
+      // `Watcher_DeviceUpdated` has not refreshed it yet; checking `IsPaired()`
+      // can skip unpairing and leak a `WiFiDirect#<address>` entry in the
+      // Windows Device Association Service store on every connection.
+      // Refreshing via `DeviceInformation::CreateFromIdAsync(id).get()` is also
+      // avoided here because it blocks for ~10 seconds on disconnect, and
+      // calling `UnpairAsync()` when `IsPaired()` is false is safe (returns
+      // `AlreadyUnpaired`).
+      DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
+      LOG(INFO) << peer_role << " Unpair result: "
+                << static_cast<int>(unpairing_result.Status());
+      if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired ||
+          unpairing_result.Status() ==
+              DeviceUnpairingResultStatus::AlreadyUnpaired) {
+        LOG(INFO) << peer_role << " Unpaired successfully";
+      } else {
+        LOG(INFO) << peer_role << " Unpair failed";
+      }
+    } catch (const std::exception& exception) {
+      LOG(ERROR) << __func__
+                 << ": Unpair failed. Exception: " << exception.what();
+    } catch (const winrt::hresult_error& error) {
+      LOG(ERROR) << __func__
+                 << ": Unpair failed. WinRT exception: " << error.code() << ": "
+                 << winrt::to_string(error.message());
+    } catch (...) {
+      LOG(ERROR) << __func__ << ": Unknown exception.";
+    }
+  }
+}
+}  // namespace
+
+WifiDirectDeviceDiscovered::WifiDirectDeviceDiscovered(
+    const DeviceInformation& device_info)
+    : windows_wifi_direct_device_(device_info) {
+  try {
+    id_ = winrt::to_string(device_info.Id());
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
+  }
+}
+
+// WifiDirectDeviceDiscovered::~WifiDirectDeviceDiscovered() {}
+WifiDirectMedium::WifiDirectMedium()
+    : is_interface_valid_(IsWifiDirectSupported()) {}
+
+WifiDirectMedium::~WifiDirectMedium() {
+  StopWifiDirect();
+  DisconnectWifiDirect();
+}
+
 bool WifiDirectMedium::IsInterfaceValid() const { return is_interface_valid_; }
+
+bool WifiDirectMedium::IsGOSupported() const {
+  // Windows Wi-Fi Direct GO is disabled by default due to WinRT SDK stability
+  // issues and WPS-PIN API limitations (see the file-level comment above and
+  // b/535138108).
+  return false;
+}
+
+bool WifiDirectMedium::IsGCSupported() const { return is_interface_valid_; }
 
 // Discoverer connects to server socket
 std::unique_ptr<api::WifiDirectSocket> WifiDirectMedium::ConnectToService(
@@ -91,14 +235,17 @@ std::unique_ptr<api::WifiDirectSocket> WifiDirectMedium::ConnectToService(
     CancellationFlag* cancellation_flag) {
   LOG(INFO) << "WifiDirectMedium::ConnectToService Server Socket";
   // check current status
-  if (!IsConnecting()) {
-    LOG(WARNING) << "GC is not connecting to GO, skip.";
-    return nullptr;
+  std::string remote_ip_address;
+  {
+    absl::MutexLock lock(mutex_);
+    if (!IsConnecting()) {
+      LOG(WARNING) << "GC is not connecting to GO, skip.";
+      return nullptr;
+    }
+    remote_ip_address = ip_address_remote_;
   }
 
   LOG(INFO) << "Remote gateway: " << ip_address << ", Port: " << port;
-
-  std::string remote_ip_address = ip_address_remote_;
 
   if (remote_ip_address.empty() || port == 0) {
     LOG(ERROR) << "no valid service address and port to connect: "
@@ -175,6 +322,7 @@ std::unique_ptr<api::WifiDirectSocket> WifiDirectMedium::ConnectToService(
 // Advertiser starts to listen on server socket
 std::unique_ptr<api::WifiDirectServerSocket> WifiDirectMedium::ListenForService(
     int port) {
+#if defined(ENABLE_WIFI_DIRECT_GO)
   LOG(INFO) << __func__
             << " :Start to listen connection from WiFiDirect client.";
 
@@ -247,13 +395,18 @@ std::unique_ptr<api::WifiDirectServerSocket> WifiDirectMedium::ListenForService(
 
   LOG(INFO) << "Started to listen service on port " << port;
   return server_socket;
+#else
+  LOG(WARNING) << "Windows WFD GO is disabled.";
+  return nullptr;
+#endif  // ENABLE_WIFI_DIRECT_GO
 }
 
 bool WifiDirectMedium::StartWifiDirect(
     WifiDirectCredentials* wifi_direct_credentials) {
+#if defined(ENABLE_WIFI_DIRECT_GO)
   remote_device_name_ = wifi_direct_credentials->GetRemoteDeviceName();
-  LOG(INFO) << __func__ << ": remote_device_name from credentials: "
-            << remote_device_name_;
+  LOG(INFO) << __func__
+            << ": remote_device_name from credentials: " << remote_device_name_;
   absl::MutexLock lock(mutex_);
   if (IsBeaconing()) {
     LOG(WARNING) << "Cannot create WiFiDirect GO again when it is running.";
@@ -292,7 +445,7 @@ bool WifiDirectMedium::StartWifiDirect(
       LOG(ERROR) << "Windows WIFI Direct AutoGO failed to get computer name";
     }
     LOG(ERROR) << "Windows WIFI Direct AutoGO fails to start";
-  } catch (std::exception exception) {
+  } catch (const std::exception& exception) {
     LOG(ERROR) << __func__ << ": Cannot start WifiDirect GO. Exception: "
                << exception.what();
   } catch (const winrt::hresult_error& error) {
@@ -311,36 +464,23 @@ bool WifiDirectMedium::StartWifiDirect(
   listener_ = nullptr;
   publisher_ = nullptr;
   return false;
+#else
+  LOG(WARNING) << "Windows WFD GO is disabled.";
+  return false;
+#endif  // ENABLE_WIFI_DIRECT_GO
 }
 
 bool WifiDirectMedium::StopWifiDirect() {
-  std::vector<std::unique_ptr<WifiDirectDeviceDiscovered>> devices;
+#if defined(ENABLE_WIFI_DIRECT_GO)
+  absl::flat_hash_map<winrt::hstring,
+                      std::unique_ptr<WifiDirectDeviceDiscovered>>
+      devices;
   {
     absl::MutexLock lock(mutex_);
-    devices.reserve(connection_requested_devices_by_id_.size());
-    for (auto& [id, device] : connection_requested_devices_by_id_) {
-      devices.push_back(std::move(device));
-    }
-    connection_requested_devices_by_id_.clear();
+    devices.swap(connection_requested_devices_by_id_);
   }
 
-  for (auto& device : devices) {
-    LOG(INFO) << "Unpair WifiDirect GC: " << device->GetId();
-    DeviceInformationPairing pairing = device->GetDeviceInformation().Pairing();
-    if (pairing.IsPaired()) {
-      LOG(INFO) << "GC Paired, unpair it";
-      DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
-      LOG(INFO) << "GC Unpair result:"
-                << static_cast<int>(unpairing_result.Status());
-      if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired) {
-        LOG(INFO) << "GC Unpaired successfully";
-      } else {
-        LOG(INFO) << "GC Unpair failed";
-      }
-    } else {
-      LOG(INFO) << "GC Not Paired, skip";
-    }
-  }
+  UnpairDevices(devices, "GC");
 
   absl::MutexLock lock(mutex_);
   is_ip_address_ready_.SignalAll();
@@ -377,49 +517,63 @@ bool WifiDirectMedium::StopWifiDirect() {
     LOG(ERROR) << __func__ << ": Unknown exception.";
   }
   return false;
+#else
+  LOG(INFO) << "Windows WFD GO is disabled.";
+  return true;
+#endif  // ENABLE_WIFI_DIRECT_GO
 }
 
+#if defined(ENABLE_WIFI_DIRECT_GO)
 fire_and_forget WifiDirectMedium::OnStatusChanged(
     WiFiDirectAdvertisementPublisher sender,
     WiFiDirectAdvertisementPublisherStatusChangedEventArgs event) {
-  LOG(INFO) << "WIFI direct PublisherStatusChangedEvent: "
-            << static_cast<int>(event.Status());
-  if (event.Status() == WiFiDirectAdvertisementPublisherStatus::Started) {
-    LOG(INFO) << "Receive WiFi direct/SoftAP Started event.";
-    if (sender.Advertisement().LegacySettings().IsEnabled()) {
-      LOG(INFO) << "WIFI direct Legacy AP ssid: "
-                << winrt::to_string(
-                       publisher_.Advertisement().LegacySettings().Ssid());
-      LOG(INFO) << "WIFI direct Legacy AP pw: "
+  try {
+    LOG(INFO) << "WIFI direct PublisherStatusChangedEvent: "
+              << static_cast<int>(event.Status());
+    if (event.Status() == WiFiDirectAdvertisementPublisherStatus::Started) {
+      LOG(INFO) << "Receive WiFi direct/SoftAP Started event.";
+      if (sender.Advertisement().LegacySettings().IsEnabled()) {
+        LOG(INFO) << "WIFI direct Legacy AP ssid: "
+                  << winrt::to_string(
+                         publisher_.Advertisement().LegacySettings().Ssid());
+        VLOG(1) << "WIFI direct Legacy AP pw: "
                 << winrt::to_string(publisher_.Advertisement()
                                         .LegacySettings()
                                         .Passphrase()
                                         .Password());
+      }
+      return winrt::fire_and_forget();
+    } else if (event.Status() ==
+               WiFiDirectAdvertisementPublisherStatus::Created) {
+      LOG(INFO) << "Receive WiFi direct/SoftAP Created event.";
+      return winrt::fire_and_forget();
+    } else if (event.Status() ==
+               WiFiDirectAdvertisementPublisherStatus::Stopped) {
+      LOG(INFO) << "Receive WiFi direct/SoftAP Stopped event.";
+    } else if (event.Status() ==
+               WiFiDirectAdvertisementPublisherStatus::Aborted) {
+      LOG(INFO) << "Receive WiFi direct/SoftAP Aborted event.";
     }
-    return winrt::fire_and_forget();
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Created) {
-    LOG(INFO) << "Receive WiFi direct/SoftAP Created event.";
-    return winrt::fire_and_forget();
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Stopped) {
-    LOG(INFO) << "Receive WiFi direct/SoftAP Stopped event.";
-  } else if (event.Status() ==
-             WiFiDirectAdvertisementPublisherStatus::Aborted) {
-    LOG(INFO) << "Receive WiFi direct/SoftAP Aborted event.";
-  }
-  // Publisher is stopped. Need to clean up the publisher.
-  {
-    absl::MutexLock lock(mutex_);
-    if (publisher_ != nullptr) {
-      LOG(ERROR) << "Windows WiFi Direct cleanup.";
-      listener_.ConnectionRequested(connection_requested_token_);
-      publisher_.StatusChanged(publisher_status_changed_token_);
-      wifi_direct_device_ = nullptr;
-      listener_ = nullptr;
-      publisher_ = nullptr;
-      medium_status_ &= (~kMediumStatusBeaconing);
+    // Publisher is stopped. Need to clean up the publisher.
+    {
+      absl::MutexLock lock(mutex_);
+      if (publisher_ != nullptr) {
+        LOG(ERROR) << "Windows WiFi Direct cleanup.";
+        listener_.ConnectionRequested(connection_requested_token_);
+        publisher_.StatusChanged(publisher_status_changed_token_);
+        wifi_direct_device_ = nullptr;
+        listener_ = nullptr;
+        publisher_ = nullptr;
+        medium_status_ &= (~kMediumStatusBeaconing);
+      }
     }
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
   }
   return winrt::fire_and_forget();
 }
@@ -427,97 +581,108 @@ fire_and_forget WifiDirectMedium::OnStatusChanged(
 fire_and_forget WifiDirectMedium::OnConnectionRequested(
     WiFiDirectConnectionListener const& sender,
     WiFiDirectConnectionRequestedEventArgs const& event) {
-  WiFiDirectConnectionRequest connection_request = event.GetConnectionRequest();
-  winrt::hstring device_name = connection_request.DeviceInformation().Name();
-  winrt::hstring device_id = connection_request.DeviceInformation().Id();
-  LOG(INFO) << "Receive connection request from: "
-            << winrt::to_string(device_name)
-            << "; device ID: " << winrt::to_string(device_id);
-  if (!remote_device_name_.empty() &&
-      !absl::EqualsIgnoreCase(remote_device_name_,
-                              winrt::to_string(device_name))) {
-    LOG(INFO) << "Ignore the connection request from the unrelated device.";
-    return winrt::fire_and_forget();
-  }
-
-  DeviceInformation windows_device_info(connection_request.DeviceInformation());
-  auto deviceInfoP =
-      std::make_unique<WifiDirectDeviceDiscovered>(windows_device_info);
-
-  {
-    absl::MutexLock lock(mutex_);
-    connection_requested_devices_by_id_[device_id] = std::move(deviceInfoP);
-  }
-
-  bool is_paired = false;
-  DeviceInformationPairing pairing =
-      connection_request.DeviceInformation().Pairing();
-  WiFiDirectConfigurationMethod config_method =
-      WiFiDirectConfigurationMethod::PushButton;
-
-  if (pairing.IsPaired() || IsAepPaired(device_id)) {
-    if (pairing.IsPaired()) {
-      LOG(INFO) << "GO Paired";
-    } else {
-      LOG(INFO) << "GO Not Paired, but AEP is paired";
-    }
-    LOG(INFO) << "GO already paired, unpair it first";
-    DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
-    LOG(INFO) << "GO Unpair result:"
-              << static_cast<int>(unpairing_result.Status());
-    if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired ||
-        unpairing_result.Status() ==
-            DeviceUnpairingResultStatus::AlreadyUnpaired) {
-      LOG(INFO) << "GO Unpaired GC, Re-pair";
-      // Wait for kWaitingForRePair to allow WiFi driver to stabilize.
-      absl::SleepFor(kWaitingForRePair);
-      // Refresh device info after unpairing.
-      DeviceInformation refreshed_device_info =
-          DeviceInformation::CreateFromIdAsync(device_id).get();
-      is_paired = RequestPairDeviceAsync(refreshed_device_info.Pairing(), 14,
-                                         config_method);
-    } else {
-      is_paired = true;
-      LOG(INFO) << "GO Unpair failed, skip pairing";
-    }
-  } else {
-    LOG(INFO) << "GO trying to pair with GC";
-    is_paired = RequestPairDeviceAsync(pairing, 14, config_method);
-  }
-
-  if (is_paired) {
-    WiFiDirectDevice device = nullptr;
-    try {
-      device = WiFiDirectDevice::FromIdAsync(device_id).get();
-    } catch (winrt::hresult_error const& ex) {
-      LOG(ERROR) << __func__ << ": winrt exception: " << ex.code() << ": "
-                 << winrt::to_string(ex.message());
+  try {
+    WiFiDirectConnectionRequest connection_request =
+        event.GetConnectionRequest();
+    winrt::hstring device_name = connection_request.DeviceInformation().Name();
+    winrt::hstring device_id = connection_request.DeviceInformation().Id();
+    LOG(INFO) << "Receive connection request from: "
+              << winrt::to_string(device_name)
+              << "; device ID: " << winrt::to_string(device_id);
+    if (!remote_device_name_.empty() &&
+        !absl::EqualsIgnoreCase(remote_device_name_,
+                                winrt::to_string(device_name))) {
+      LOG(INFO) << "Ignore the connection request from the unrelated device.";
       return winrt::fire_and_forget();
     }
 
-    device.ConnectionStatusChanged(
-        {this, &WifiDirectMedium::OnConnectionStatusChanged});
+    DeviceInformation windows_device_info(
+        connection_request.DeviceInformation());
 
-    IVectorView<EndpointPair> endpoint_pairs =
-        device.GetConnectionEndpointPairs();
+    bool is_paired = false;
+    DeviceInformationPairing pairing = windows_device_info.Pairing();
+    WiFiDirectConfigurationMethod config_method =
+        WiFiDirectConfigurationMethod::PushButton;
 
-    if (endpoint_pairs.Size() > 0) {
-      auto const& pair = endpoint_pairs.GetAt(0);
-      std::string local_ip =
-          winrt::to_string(pair.LocalHostName().DisplayName());
-      std::string remote_ip =
-          winrt::to_string(pair.RemoteHostName().DisplayName());
-
-      absl::MutexLock lock(mutex_);
-      wifi_direct_device_ = device;
-      ip_address_local_ = local_ip;
-      ip_address_remote_ = remote_ip;
-      LOG(INFO) << "GO: Local IP: " << ip_address_local_
-                << ", Remote IP: " << ip_address_remote_;
-      is_ip_address_ready_.SignalAll();
+    if (pairing.IsPaired() || IsAepPaired(device_id)) {
+      if (pairing.IsPaired()) {
+        LOG(INFO) << "GO Paired";
+      } else {
+        LOG(INFO) << "GO Not Paired, but AEP is paired";
+      }
+      LOG(INFO) << "GO already paired, unpair it first";
+      DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
+      LOG(INFO) << "GO Unpair result:"
+                << static_cast<int>(unpairing_result.Status());
+      if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired ||
+          unpairing_result.Status() ==
+              DeviceUnpairingResultStatus::AlreadyUnpaired) {
+        LOG(INFO) << "GO Unpaired GC, Re-pair";
+        // Wait for kWaitingForRePair to allow WiFi driver to stabilize.
+        absl::SleepFor(kWaitingForRePair);
+        // Refresh device info after unpairing.
+        windows_device_info =
+            DeviceInformation::CreateFromIdAsync(device_id).get();
+        is_paired =
+            RequestPairDeviceAsync(windows_device_info.Pairing(),
+                                   kGroupOwnerIntentForGo, config_method);
+      } else {
+        is_paired = true;
+        LOG(INFO) << "GO Unpair failed, skip pairing";
+      }
     } else {
-      LOG(WARNING) << "GO: No connection endpoint pairs found.";
+      LOG(INFO) << "GO trying to pair with GC";
+      is_paired = RequestPairDeviceAsync(pairing, kGroupOwnerIntentForGo,
+                                         config_method);
     }
+
+    if (is_paired) {
+      {
+        absl::MutexLock lock(mutex_);
+        connection_requested_devices_by_id_[device_id] =
+            std::make_unique<WifiDirectDeviceDiscovered>(windows_device_info);
+      }
+
+      WiFiDirectDevice device = nullptr;
+      try {
+        device = WiFiDirectDevice::FromIdAsync(device_id).get();
+      } catch (winrt::hresult_error const& ex) {
+        LOG(ERROR) << __func__ << ": winrt exception: " << ex.code() << ": "
+                   << winrt::to_string(ex.message());
+        return winrt::fire_and_forget();
+      }
+
+      device.ConnectionStatusChanged(
+          {this, &WifiDirectMedium::OnConnectionStatusChanged});
+
+      IVectorView<EndpointPair> endpoint_pairs =
+          device.GetConnectionEndpointPairs();
+
+      if (endpoint_pairs.Size() > 0) {
+        auto const& pair = endpoint_pairs.GetAt(0);
+        std::string local_ip =
+            winrt::to_string(pair.LocalHostName().DisplayName());
+        std::string remote_ip =
+            winrt::to_string(pair.RemoteHostName().DisplayName());
+
+        absl::MutexLock lock(mutex_);
+        wifi_direct_device_ = device;
+        ip_address_local_ = local_ip;
+        ip_address_remote_ = remote_ip;
+        LOG(INFO) << "GO: Local IP: " << ip_address_local_
+                  << ", Remote IP: " << ip_address_remote_;
+        is_ip_address_ready_.SignalAll();
+      } else {
+        LOG(WARNING) << "GO: No connection endpoint pairs found.";
+      }
+    }
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
   }
   return winrt::fire_and_forget();
 }
@@ -571,7 +736,7 @@ bool WifiDirectMedium::IsAepPaired(winrt::hstring device_id) {
       LOG(INFO) << "Device is not paired.";
     }
     return false;
-  } catch (std::exception exception) {
+  } catch (const std::exception& exception) {
     LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
   } catch (const winrt::hresult_error& error) {
     LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
@@ -581,6 +746,7 @@ bool WifiDirectMedium::IsAepPaired(winrt::hstring device_id) {
   }
   return false;
 }
+#endif  // ENABLE_WIFI_DIRECT_GO
 
 // Returns true once the WifiLan discovery has been initiated.
 bool WifiDirectMedium::ConnectWifiDirect(
@@ -589,15 +755,12 @@ bool WifiDirectMedium::ConnectWifiDirect(
   LOG(INFO) << "WifiDirectMedium::ConnectWifiDirect";
   {
     absl::MutexLock lock(mutex_);
-    if (IsConnecting()) {
-      LOG(WARNING) << "GC discovery already running.";
-      return false;
-    }
-
+#if defined(ENABLE_WIFI_DIRECT_GO)
     if (IsBeaconing()) {
       LOG(WARNING) << "Already acting as GO, skip discovery.";
       return false;
     }
+#endif
 
     if (device_watcher_) {
       LOG(WARNING)
@@ -605,15 +768,13 @@ bool WifiDirectMedium::ConnectWifiDirect(
       return false;
     }
 
-    credentials_gc_ = credentials;
-    if (credentials_gc_.GetDeviceName().empty()) {
-      LOG(ERROR) << "GC: Device name is empty, return false";
+    if (credentials.GetDeviceName().empty() || credentials.GetPin().empty()) {
+      LOG(ERROR) << "GC: Device name or pin is empty, return false";
       return false;
     }
+    credentials_gc_ = credentials;
 
     try {
-      discovered_devices_by_id_.clear();
-      connection_requested_devices_by_id_.clear();
       winrt::hstring device_selector = WiFiDirectDevice::GetDeviceSelector(
           WiFiDirectDeviceSelectorType::AssociationEndpoint);
       const winrt::param::iterable<winrt::hstring> requested_properties =
@@ -636,190 +797,198 @@ bool WifiDirectMedium::ConnectWifiDirect(
               {this, &WifiDirectMedium::Watcher_DeviceEnumerationCompleted});
       device_watcher_stopped_event_token_ = device_watcher_.Stopped(
           {this, &WifiDirectMedium::Watcher_DeviceStopped});
-      connection_latch_ = std::make_unique<CountDownLatch>(1);
+      is_watcher_stopped_ = false;
+      connection_latch_ = std::make_unique<absl::Notification>();
       device_watcher_.Start();
       medium_status_ |= kMediumStatusConnecting;
     } catch (const std::exception& exception) {
       LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
-      goto error;
+      CleanUpDeviceWatcherLocked();
+      return false;
     } catch (const winrt::hresult_error& error) {
       LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
                  << ": " << winrt::to_string(error.message());
-      goto error;
+      CleanUpDeviceWatcherLocked();
+      return false;
     } catch (...) {
       LOG(ERROR) << __func__ << ": Unknown exception.";
-      goto error;
+      CleanUpDeviceWatcherLocked();
+      return false;
     }
   }
 
   LOG(INFO) << "Started to discover and wait " << kConnectTimeout
             << " for connection.";
-  connection_latch_->Await(kConnectTimeout);
+  connection_latch_->WaitForNotificationWithTimeout(kConnectTimeout);
   {
     absl::MutexLock lock(mutex_);
     if (IsConnected()) {
       LOG(INFO) << "WifiDirectMedium::ConnectWifiDirect succeeded.";
       return true;
-    } else {
-      LOG(WARNING) << "WifiDirectMedium::ConnectWifiDirect failed.";
     }
   }
+  LOG(WARNING) << "WifiDirectMedium::ConnectWifiDirect failed.";
+  DisconnectWifiDirect();
+  return false;
+}
 
-error:
-  {
-    absl::MutexLock lock(mutex_);
-    LOG(ERROR) << "GC discovery failed or pairing to GO failed.";
-    if (device_watcher_) {
-      device_watcher_.Stop();
+void WifiDirectMedium::CleanUpDeviceWatcherLocked() {
+  LOG(INFO) << "Clean up device watcher.";
+  medium_status_ &= (~kMediumStatusConnecting);
+  medium_status_ &= (~kMediumStatusConnected);
+  if (device_watcher_) {
+    try {
       device_watcher_.Added(device_watcher_added_event_token_);
       device_watcher_.Updated(device_watcher_updated_event_token_);
       device_watcher_.Removed(device_watcher_removed_event_token_);
       device_watcher_.EnumerationCompleted(
           device_watcher_enumeration_completed_event_token_);
-      device_watcher_.Stopped(device_watcher_stopped_event_token_);
-    }
 
+      DeviceWatcherStatus status = device_watcher_.Status();
+      if (status == DeviceWatcherStatus::Started ||
+          status == DeviceWatcherStatus::EnumerationCompleted) {
+        device_watcher_.Stop();
+      }
+      if (status != DeviceWatcherStatus::Created) {
+        if (!mutex_.AwaitWithTimeout(absl::Condition(&is_watcher_stopped_),
+                                     kWatcherStopTimeout)) {
+          LOG(WARNING) << "Timed out waiting for DeviceWatcher Stopped event.";
+        }
+      }
+      device_watcher_.Stopped(device_watcher_stopped_event_token_);
+    } catch (const std::exception& exception) {
+      LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. Exception: "
+                 << exception.what();
+    } catch (const winrt::hresult_error& error) {
+      LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. WinRT exception: "
+                 << error.code() << ": " << winrt::to_string(error.message());
+    } catch (...) {
+      LOG(ERROR) << __func__ << ": Unknown exception.";
+    }
     device_watcher_ = nullptr;
-    medium_status_ &= (~kMediumStatusConnecting);
-    medium_status_ &= (~kMediumStatusConnected);
+    ip_address_local_.clear();
+    ip_address_remote_.clear();
   }
-  return false;
+
+  discovered_devices_by_id_.clear();
 }
 
 bool WifiDirectMedium::DisconnectWifiDirect() {
   LOG(INFO) << "WifiDirectMedium::DisconnectWifiDirect";
-  std::vector<std::unique_ptr<WifiDirectDeviceDiscovered>> devices;
+  absl::flat_hash_map<winrt::hstring,
+                      std::unique_ptr<WifiDirectDeviceDiscovered>>
+      devices;
   {
     absl::MutexLock lock(mutex_);
-    devices.reserve(discovered_devices_by_id_.size());
-    for (auto& [id, device] : discovered_devices_by_id_) {
-      devices.push_back(std::move(device));
-    }
-    discovered_devices_by_id_.clear();
-  }
-
-  for (auto& device : devices) {
-    LOG(INFO) << "Unpair WifiDirect GO: " << device->GetId();
-    DeviceInformationPairing pairing = device->GetDeviceInformation().Pairing();
-    if (pairing.IsPaired()) {
-      LOG(INFO) << "GC Paired, unpair it";
-      DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
-      LOG(INFO) << "GC Unpair result:"
-                << static_cast<int>(unpairing_result.Status());
-      if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired) {
-        LOG(INFO) << "GC Unpaired successfully";
-      } else {
-        LOG(INFO) << "GC Unpair failed";
-      }
+    devices.swap(discovered_devices_by_id_);
+    if (!IsConnecting() && !IsConnected()) {
+      LOG(WARNING) << "WifiDirect GC is not connecting, skip";
     } else {
-      LOG(INFO) << "GC Not Paired, skip";
+      LOG(WARNING) << "Stop connecting.";
+      CleanUpDeviceWatcherLocked();
     }
   }
 
-  absl::MutexLock lock(mutex_);
-  if (!IsConnecting() && !IsConnected()) {
-    LOG(WARNING) << "WifiDirect GC is not connecting, skip";
-    return true;
-  }
-  LOG(WARNING) << "Stop connecting.";
-  try {
-    if (device_watcher_) {
-      device_watcher_.Stop();
-      device_watcher_.Added(device_watcher_added_event_token_);
-      device_watcher_.Updated(device_watcher_updated_event_token_);
-      device_watcher_.EnumerationCompleted(
-          device_watcher_enumeration_completed_event_token_);
-      device_watcher_.Removed(device_watcher_removed_event_token_);
-      device_watcher_.Stopped(device_watcher_stopped_event_token_);
-      device_watcher_ = nullptr;
-      ip_address_local_.clear();
-      ip_address_remote_.clear();
-    }
-    medium_status_ &= (~kMediumStatusConnecting);
-    medium_status_ &= (~kMediumStatusConnected);
-    return true;
-  } catch (std::exception exception) {
-    LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. Exception: "
-               << exception.what();
-  } catch (const winrt::hresult_error& error) {
-    LOG(ERROR) << __func__ << ": Stop WifiDirect GC failed. WinRT exception: "
-               << error.code() << ": " << winrt::to_string(error.message());
-  } catch (...) {
-    LOG(ERROR) << __func__ << ": Unknown exception.";
-  }
-  return false;
+  UnpairDevices(devices, "GO");
+  return true;
 }
 
 fire_and_forget WifiDirectMedium::Watcher_DeviceAdded(
     DeviceWatcher sender, DeviceInformation device_info) {
-  LOG(INFO) << "Device found for device ID "
-            << winrt::to_string(device_info.Id())
-            << ";   device name: " << winrt::to_string(device_info.Name());
-  winrt::hstring device_id = device_info.Id();
-  {
-    absl::MutexLock lock(mutex_);
-    if (discovered_devices_by_id_.contains(device_id)) {
-      return winrt::fire_and_forget();
+  winrt::hstring device_id;
+  bool added_to_discovered_devices = false;
+  bool is_paired = false;
+  try {
+    LOG(INFO) << "Device found for device ID "
+              << winrt::to_string(device_info.Id())
+              << ";   device name: " << winrt::to_string(device_info.Name());
+    device_id = device_info.Id();
+    {
+      absl::MutexLock lock(mutex_);
+      if (!IsConnecting() || !device_watcher_ || device_watcher_ != sender ||
+          (sender.Status() != DeviceWatcherStatus::Started &&
+           sender.Status() != DeviceWatcherStatus::EnumerationCompleted)) {
+        LOG(WARNING) << "DeviceWatcher is already stopping or stopped, skip.";
+        return winrt::fire_and_forget();
+      }
+      if (discovered_devices_by_id_.contains(device_id)) {
+        return winrt::fire_and_forget();
+      }
+      std::string device_name_to_match = credentials_gc_.GetDeviceName();
+      if (!absl::EqualsIgnoreCase(device_name_to_match,
+                                  winrt::to_string(device_info.Name()))) {
+        LOG(INFO) << "We are looking for device: " << device_name_to_match
+                  << ", but found: " << winrt::to_string(device_info.Name())
+                  << ", skip.";
+        return winrt::fire_and_forget();
+      }
+      // Insert before pairing (unlike `OnConnectionRequested`) so that
+      // concurrent `Watcher_DeviceAdded` callbacks for `device_id` are
+      // deduplicated while pairing runs without holding `mutex_`, and
+      // `Watcher_DeviceUpdated` can apply `DeviceInformationUpdate` events that
+      // arrive while `PairAsync()` is in progress.
+      discovered_devices_by_id_[device_id] =
+          std::make_unique<WifiDirectDeviceDiscovered>(device_info);
+      added_to_discovered_devices = true;
     }
-    std::string device_name_to_match = credentials_gc_.GetDeviceName();
-    if (!absl::EqualsIgnoreCase(device_name_to_match,
-                                winrt::to_string(device_info.Name()))) {
-      LOG(INFO) << "We are looking for device: " << device_name_to_match
-                << ", but found: " << winrt::to_string(device_info.Name())
-                << ", skip.";
-      return winrt::fire_and_forget();
-    }
-    discovered_devices_by_id_[device_id] =
-        std::make_unique<WifiDirectDeviceDiscovered>(device_info);
-  }
-  LOG(INFO) << "Connect to device name: "
-            << winrt::to_string(device_info.Name());
-  DeviceInformationPairing pairing = device_info.Pairing();
-  // WiFiDirectConfigurationMethod config_method =
-  //     WiFiDirectConfigurationMethod::ProvidePin;
-  WiFiDirectConfigurationMethod config_method =
-      WiFiDirectConfigurationMethod::PushButton;
-  bool is_paired;
-  if (pairing.IsPaired()) {
-    LOG(INFO) << "GC Paired, unpair it first to clean up stale state";
-    DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
-    LOG(INFO) << "GC Unpair result: "
-              << static_cast<int>(unpairing_result.Status());
-    if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired ||
-        unpairing_result.Status() ==
-            DeviceUnpairingResultStatus::AlreadyUnpaired) {
-      // Wait kWaitingForRePair for the device stabilize before re-pairing.
-      // This may avoid the possible contention problems in Intel WiFi driver.
-      absl::SleepFor(kWaitingForRePair);
-      DeviceInformation refreshed_device_info =
-          DeviceInformation::CreateFromIdAsync(device_id).get();
-      is_paired = RequestPairDeviceAsync(refreshed_device_info.Pairing(), 1,
-                                         config_method);
-      LOG(INFO) << "GC Re-Paired after unpair: " << is_paired;
+    LOG(INFO) << "Connect to device name: "
+              << winrt::to_string(device_info.Name());
+    DeviceInformationPairing pairing = device_info.Pairing();
+    WiFiDirectConfigurationMethod config_method =
+        WiFiDirectConfigurationMethod::ProvidePin;
+    if (pairing.IsPaired()) {
+      LOG(INFO) << "GC Paired, unpair it first to clean up stale state";
+      DeviceUnpairingResult unpairing_result = pairing.UnpairAsync().get();
+      LOG(INFO) << "GC Unpair result: "
+                << static_cast<int>(unpairing_result.Status());
+      if (unpairing_result.Status() == DeviceUnpairingResultStatus::Unpaired ||
+          unpairing_result.Status() ==
+              DeviceUnpairingResultStatus::AlreadyUnpaired) {
+        // Wait kWaitingForRePair for the device stabilize before re-pairing.
+        // This may avoid the possible contention problems in Intel WiFi driver.
+        absl::SleepFor(kWaitingForRePair);
+        DeviceInformation refreshed_device_info =
+            DeviceInformation::CreateFromIdAsync(device_id).get();
+        is_paired =
+            RequestPairDeviceAsync(refreshed_device_info.Pairing(),
+                                   kGroupOwnerIntentForGc, config_method);
+        LOG(INFO) << "GC Re-Paired after unpair: " << is_paired;
+      } else {
+        LOG(INFO) << "GC Unpair failed, assume it's still paired.";
+        is_paired =
+            true;  // Fallback to true if unpair fails, maybe it's still usable.
+      }
     } else {
-      LOG(INFO) << "GC Unpair failed, assume it's still paired.";
-      is_paired =
-          true;  // Fallback to true if unpair fails, maybe it's still usable.
+      LOG(INFO) << "GC Not Paired, start to pair";
+      is_paired = RequestPairDeviceAsync(pairing, kGroupOwnerIntentForGc,
+                                         config_method);
     }
-  } else {
-    LOG(INFO) << "GC Not Paired, start to pair";
-    is_paired = RequestPairDeviceAsync(device_info.Pairing(), 1, config_method);
-  }
-  // Create a WiFiDirectDevice out of this id
-  if (!is_paired) {
-    LOG(INFO) << "GC paired failed!";
-    absl::MutexLock lock(mutex_);
-    if (connection_latch_) {
-      connection_latch_->CountDown();
+    // Create a WiFiDirectDevice out of this id
+    if (!is_paired) {
+      LOG(INFO) << "GC paired failed!";
+      absl::MutexLock lock(mutex_);
+      discovered_devices_by_id_.erase(device_id);
+      if (connection_latch_ && !connection_latch_->HasBeenNotified()) {
+        connection_latch_->Notify();
+      }
+      return fire_and_forget();
     }
-    return fire_and_forget();
-  }
-  WiFiDirectDevice::FromIdAsync(device_info.Id())
-      .Completed(
-          [this, device_info](
-              IAsyncOperation<WiFiDirectDevice> wifidirectDevice,
-              AsyncStatus status) {
-            absl::MutexLock lock(mutex_);
+    {
+      absl::MutexLock lock(mutex_);
+      if (!IsConnecting()) {
+        LOG(WARNING) << "GC is no longer connecting, skip.";
+        return fire_and_forget();
+      }
+    }
+    WiFiDirectDevice::FromIdAsync(device_info.Id())
+        .Completed([this](IAsyncOperation<WiFiDirectDevice> wifidirectDevice,
+                          AsyncStatus status) {
+          absl::MutexLock lock(mutex_);
+          if (!IsConnecting()) {
+            LOG(WARNING) << "GC is no longer connecting, skip.";
+            return;
+          }
+          try {
             WiFiDirectDevice(wifidirectDevice.get())
                 .ConnectionStatusChanged(
                     {this, &WifiDirectMedium::OnConnectionStatusChanged});
@@ -835,25 +1004,82 @@ fire_and_forget WifiDirectMedium::Watcher_DeviceAdded(
               LOG(INFO) << "GC: Local IP: " << ip_address_local_
                         << ", Remote IP: " << ip_address_remote_;
               medium_status_ |= kMediumStatusConnected;
-              if (connection_latch_) {
-                connection_latch_->CountDown();
-              }
             } else {
               LOG(WARNING) << "GC: No connection endpoint pairs found.";
             }
-          });
+          } catch (const std::exception& exception) {
+            LOG(ERROR)
+                << __func__
+                << ": WiFiDirectDevice Completed callback failed. Exception: "
+                << exception.what();
+          } catch (const winrt::hresult_error& error) {
+            LOG(ERROR) << __func__
+                       << ": WiFiDirectDevice Completed callback failed. WinRT "
+                          "exception: "
+                       << error.code() << ": "
+                       << winrt::to_string(error.message());
+          } catch (...) {
+            LOG(ERROR) << __func__
+                       << ": WiFiDirectDevice Completed callback failed with "
+                          "unknown exception.";
+          }
+          if (connection_latch_ && !connection_latch_->HasBeenNotified()) {
+            connection_latch_->Notify();
+          }
+        });
+    return fire_and_forget();
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
+  }
+  absl::MutexLock lock(mutex_);
+  if (added_to_discovered_devices && !is_paired) {
+    discovered_devices_by_id_.erase(device_id);
+  }
+  if (connection_latch_ && !connection_latch_->HasBeenNotified()) {
+    connection_latch_->Notify();
+  }
   return fire_and_forget();
 }
 
 fire_and_forget WifiDirectMedium::Watcher_DeviceUpdated(
     DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate) {
-  LOG(INFO) << "device updated for device ID "
-            << winrt::to_string(deviceInfoUpdate.Id());
+  try {
+    winrt::hstring device_id = deviceInfoUpdate.Id();
+    LOG(INFO) << "device updated for device ID " << winrt::to_string(device_id);
+    absl::MutexLock lock(mutex_);
+    if (!device_watcher_ || device_watcher_ != sender ||
+        (sender.Status() != DeviceWatcherStatus::Started &&
+         sender.Status() != DeviceWatcherStatus::EnumerationCompleted)) {
+      return fire_and_forget();
+    }
+    auto it = discovered_devices_by_id_.find(device_id);
+    if (it != discovered_devices_by_id_.end()) {
+      it->second->GetDeviceInformation().Update(deviceInfoUpdate);
+    }
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << ": Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << ": WinRT exception: " << error.code() << ": "
+               << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
+  }
   return fire_and_forget();
 }
 
 fire_and_forget WifiDirectMedium::Watcher_DeviceRemoved(
     DeviceWatcher sender, DeviceInformationUpdate deviceInfoUpdate) {
+  // Do not erase the device from `discovered_devices_by_id_` here. That map
+  // only tracks the target GO peer paired during this session so
+  // `DisconnectWifiDirect()` can call `UnpairAsync()` on it. Because
+  // `device_watcher_` remains active while connected, `Removed` can fire when
+  // the GO stops advertising or tears down the group first, while the pairing
+  // entry still persists in the Windows Device Association Service store.
   LOG(INFO) << "device removed for device ID "
             << winrt::to_string(deviceInfoUpdate.Id());
   return fire_and_forget();
@@ -868,70 +1094,107 @@ fire_and_forget WifiDirectMedium::Watcher_DeviceEnumerationCompleted(
 fire_and_forget WifiDirectMedium::Watcher_DeviceStopped(
     DeviceWatcher sender, IInspectable inspectable) {
   LOG(INFO) << "DeviceWatcher stopped!";
+  absl::MutexLock lock(mutex_);
+  if (device_watcher_ == sender) {
+    is_watcher_stopped_ = true;
+  }
   return fire_and_forget();
 }
 
 fire_and_forget WifiDirectMedium::OnPairingRequested(
     DeviceInformationCustomPairing const& sender,
     DevicePairingRequestedEventArgs const& event) {
-  LOG(INFO) << "Handle Pairing Kind";
-  switch (event.PairingKind()) {
-    case DevicePairingKinds::DisplayPin:
-      LOG(INFO) << "Display pin is: " << winrt::to_string(event.Pin());
-      event.Accept();
-      break;
-    case DevicePairingKinds::ConfirmOnly:
-      LOG(INFO) << "DevicePairingKinds::ConfirmOnly";
-      event.Accept();
-      break;
-    case DevicePairingKinds::ProvidePin: {
-      absl::MutexLock lock(mutex_);
-      std::string pin;
-      LOG(INFO) << "Enter pin:";
-      std::cin >> pin;
-      LOG(INFO) << "DevicePairingKinds::ProvidePin:" << pin;
-      event.Accept(winrt::to_hstring(pin));
-    } break;
-    default:
-      LOG(INFO) << "DevicePairingKinds::"
-                << static_cast<int>(event.PairingKind());
-      break;
+  try {
+    LOG(INFO) << "Handle Pairing Kind";
+    switch (event.PairingKind()) {
+      case DevicePairingKinds::DisplayPin:
+        VLOG(1) << "Display pin is: " << winrt::to_string(event.Pin());
+        event.Accept();
+        break;
+      case DevicePairingKinds::ConfirmOnly:
+        LOG(INFO) << "DevicePairingKinds::ConfirmOnly";
+        event.Accept();
+        break;
+      case DevicePairingKinds::ProvidePin: {
+        std::string pin;
+        {
+          absl::MutexLock lock(mutex_);
+          pin = credentials_gc_.GetPin();
+        }
+        event.Accept(winrt::to_hstring(pin));
+      } break;
+      default:
+        LOG(INFO) << "DevicePairingKinds::"
+                  << static_cast<int>(event.PairingKind());
+        break;
+    }
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
   }
   return winrt::fire_and_forget();
 }
 void WifiDirectMedium::OnConnectionStatusChanged(
     WiFiDirectDevice const& sender,
     winrt::Windows::Foundation::IInspectable const&) {
-  LOG(INFO) << "Connection status: "
-            << static_cast<int>(sender.ConnectionStatus());
+  try {
+    LOG(INFO) << "Connection status: "
+              << static_cast<int>(sender.ConnectionStatus());
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
+  }
 }
+
+// Pairs the target Wi-Fi Direct peer using `config_method` and
+// `group_owner_intent` (see `kGroupOwnerIntentForGo` and
+// `kGroupOwnerIntentForGc`).
 bool WifiDirectMedium::RequestPairDeviceAsync(
     DeviceInformationPairing pairing, int group_owner_intent,
     WiFiDirectConfigurationMethod config_method) {
   LOG(INFO) << __func__ << " Group Intent: " << group_owner_intent;
-  WiFiDirectConnectionParameters connectionParams;
-  connectionParams.GroupOwnerIntent(group_owner_intent);
-  connectionParams.PreferenceOrderedConfigurationMethods().Append(
-      config_method);
-  DevicePairingKinds devicePairingKinds =
-      WiFiDirectConnectionParameters::GetDevicePairingKinds(config_method);
-  LOG(INFO) << "DevicePairingKinds: " << static_cast<int>(devicePairingKinds);
-  connectionParams.PreferredPairingProcedure(
-      WiFiDirectPairingProcedure::Invitation);
-  DeviceInformationCustomPairing customPairing = pairing.Custom();
-  customPairing.PairingRequested({this, &WifiDirectMedium::OnPairingRequested});
-  DevicePairingResult result =
-      customPairing
-          .PairAsync(devicePairingKinds, DevicePairingProtectionLevel::Default,
-                     connectionParams)
-          .get();
-  if (result.Status() != DevicePairingResultStatus::Paired &&
-      result.Status() != DevicePairingResultStatus::AlreadyPaired) {
-    LOG(INFO) << "Pair result: " << static_cast<int>(result.Status());
-    return false;
+  try {
+    WiFiDirectConnectionParameters connectionParams;
+    connectionParams.GroupOwnerIntent(group_owner_intent);
+    connectionParams.PreferenceOrderedConfigurationMethods().Append(
+        config_method);
+    DevicePairingKinds devicePairingKinds =
+        WiFiDirectConnectionParameters::GetDevicePairingKinds(config_method);
+    LOG(INFO) << "DevicePairingKinds: " << static_cast<int>(devicePairingKinds);
+    connectionParams.PreferredPairingProcedure(
+        WiFiDirectPairingProcedure::Invitation);
+    DeviceInformationCustomPairing customPairing = pairing.Custom();
+    customPairing.PairingRequested(
+        {this, &WifiDirectMedium::OnPairingRequested});
+    DevicePairingResult result =
+        customPairing
+            .PairAsync(devicePairingKinds,
+                       DevicePairingProtectionLevel::Default, connectionParams)
+            .get();
+    if (result.Status() != DevicePairingResultStatus::Paired &&
+        result.Status() != DevicePairingResultStatus::AlreadyPaired) {
+      LOG(INFO) << "Pair result: " << static_cast<int>(result.Status());
+      return false;
+    }
+    LOG(INFO) << "Pair success ";
+    return true;
+  } catch (const std::exception& exception) {
+    LOG(ERROR) << __func__ << " failed. Exception: " << exception.what();
+  } catch (const winrt::hresult_error& error) {
+    LOG(ERROR) << __func__ << " failed. WinRT exception: " << error.code()
+               << ": " << winrt::to_string(error.message());
+  } catch (...) {
+    LOG(ERROR) << __func__ << ": Unknown exception.";
   }
-  LOG(INFO) << "Pair success ";
-  return true;
+  return false;
 }
 
 std::vector<WifiDirectMedium::WifiDirectAuthType>

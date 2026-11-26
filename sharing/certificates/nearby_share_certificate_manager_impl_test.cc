@@ -30,6 +30,8 @@
 #include "location/nearby/sharing/lib/account/account_manager.h"
 #include "location/nearby/sharing/lib/account/fake_account_manager.h"
 #include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
+#include "location/nearby/sharing/lib/sync/sync_binding_prefs.pb.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
@@ -42,6 +44,7 @@
 #include "gloop/util/time/protoutil.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/mac_address.h"
+#include "internal/test/test_single_thread_executor.h"
 #include "sharing/certificates/constants.h"
 #include "sharing/certificates/fake_nearby_share_certificate_storage.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
@@ -67,6 +70,8 @@
 
 namespace nearby::sharing {
 namespace {
+using ::google::nearby::identity::v1::DeleteBindingRequest;
+using ::google::nearby::identity::v1::DeleteBindingResponse;
 using ::google::nearby::identity::v1::Device;
 using ::google::nearby::identity::v1::GetAccountInfoResponse;
 using ::google::nearby::identity::v1::PublishDeviceRequest;
@@ -150,11 +155,15 @@ class NearbyShareCertificateManagerImplTest
   }
 
   void Initialize() {
+    auto executor =
+        std::make_unique<TestSingleThreadExecutor>(fake_context_.fake_clock());
+    executor_ = executor.get();
     // Setup Identity API.
     cert_manager_ = NearbyShareCertificateManagerImpl::Factory::Create(
         &fake_context_, mock_sharing_platform_,
         local_device_data_manager_.get(),
-        /*profile_path=*/{}, &identity_client_);
+        /*profile_path=*/{}, &identity_client_, &sync_manager_,
+        std::move(executor));
     cert_manager_->AddObserver(this);
 
     cert_store_ = cert_store_factory_.instances().back();
@@ -184,6 +193,7 @@ class NearbyShareCertificateManagerImplTest
     PopulatePrivateCertificates();
     PopulatePublicCertificates();
     cert_manager_->StartScheduledTasks();
+    Sync();
     EXPECT_TRUE(private_cert_exp_scheduler_->is_running());
     EXPECT_TRUE(public_cert_exp_scheduler_->is_running());
     EXPECT_TRUE(upload_scheduler_->is_running());
@@ -215,8 +225,7 @@ class NearbyShareCertificateManagerImplTest
   }
 
   void Sync() {
-    EXPECT_TRUE(fake_context_.last_sequenced_task_runner()->SyncWithTimeout(
-        absl::Milliseconds(1000)));
+    EXPECT_TRUE(executor_->SyncWithTimeout(absl::Milliseconds(1000)));
   }
 
   void SetMockBluetoothAddress(MacAddress bluetooth_mac_address) {
@@ -544,7 +553,9 @@ class NearbyShareCertificateManagerImplTest
     for (auto metadata : {metadata1, metadata2}) {
       auto private_cert = NearbySharePrivateCertificate(
           DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS, t0, metadata);
-      public_certificates_.push_back(*private_cert.ToPublicCertificate());
+      PublicCertificate public_cert = *private_cert.ToPublicCertificate();
+      public_cert.set_binding_id(kCertificateTestBindingId);
+      public_certificates_.push_back(std::move(public_cert));
       metadata_encryption_keys_.push_back(*private_cert.EncryptMetadataKey());
     }
   }
@@ -568,10 +579,12 @@ class NearbyShareCertificateManagerImplTest
   std::vector<NearbyShareEncryptedMetadataKey> metadata_encryption_keys_;
 
   FakeNearbyIdentityClient identity_client_;
+  SyncManager sync_manager_{&identity_client_, &preference_manager_};
   FakeNearbyShareSchedulerFactory scheduler_factory_;
   FakeNearbyShareCertificateStorage::Factory cert_store_factory_;
   std::unique_ptr<FakeNearbyShareLocalDeviceDataManager>
       local_device_data_manager_;
+  TestSingleThreadExecutor* executor_ = nullptr;
   std::unique_ptr<NearbyShareCertificateManager> cert_manager_;
 };
 
@@ -811,8 +824,28 @@ TEST_F(NearbyShareCertificateManagerImplTest,
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_sharing_feature::kEnableBackup, true);
   Initialize();
+  identity_client_.SetDeleteBindingResponses({DeleteBindingResponse()});
   ASSERT_NO_FATAL_FAILURE(QuerySharedCredentialsWithBindingIdsFlow(
       /*num_pages=*/2, DownloadPublicCertificatesResult::kSuccess));
+  std::vector<DeleteBindingRequest> delete_requests =
+      identity_client_.delete_binding_requests();
+  ASSERT_EQ(delete_requests.size(), 1);
+  EXPECT_EQ(delete_requests[0].name(),
+            absl::StrCat("devices/", kDeviceId, "/bindings/",
+                         kCertificateTestBindingId));
+}
+
+TEST_F(NearbyShareCertificateManagerImplTest,
+       QuerySharedCredentialsWithBindingIdsBindingInSyncManager) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_sharing_feature::kEnableBackup, true);
+  Initialize();
+  sync::SyncBinding sync_binding;
+  sync_binding.set_binding_id(kCertificateTestBindingId);
+  ASSERT_TRUE(sync_manager_.AddSyncBinding(sync_binding));
+  ASSERT_NO_FATAL_FAILURE(QuerySharedCredentialsWithBindingIdsFlow(
+      /*num_pages=*/2, DownloadPublicCertificatesResult::kSuccess));
+  EXPECT_TRUE(identity_client_.delete_binding_requests().empty());
 }
 
 TEST_F(NearbyShareCertificateManagerImplTest,
@@ -822,6 +855,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
   Initialize();
   ASSERT_NO_FATAL_FAILURE(QuerySharedCredentialsWithBindingIdsFlow(
       /*num_pages=*/2, DownloadPublicCertificatesResult::kHttpError));
+  EXPECT_TRUE(identity_client_.delete_binding_requests().empty());
 }
 
 TEST_F(NearbyShareCertificateManagerImplTest,
@@ -841,6 +875,35 @@ TEST_F(NearbyShareCertificateManagerImplTest,
         util_time::EncodeGoogleApiProto(absl::FromUnixSeconds(123456789)));
     EXPECT_THAT(request.join_binding_time(), EqualsProto(expected_time));
   }
+  std::vector<DeleteBindingRequest> delete_requests =
+      identity_client_.delete_binding_requests();
+  ASSERT_EQ(delete_requests.size(), 1);
+  EXPECT_EQ(delete_requests[0].name(),
+            absl::StrCat("devices/", kDeviceId, "/bindings/",
+                         kCertificateTestBindingId));
+}
+
+TEST_F(NearbyShareCertificateManagerImplTest,
+       QuerySharedCredentialsWithBindingIdsWithJoinTimeBindingInSyncManager) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_sharing_feature::kEnableBackup, true);
+  Initialize();
+  sync::SyncBinding sync_binding;
+  sync_binding.set_binding_id(kCertificateTestBindingId);
+  ASSERT_TRUE(sync_manager_.AddSyncBinding(sync_binding));
+  cert_manager_->SetJoinBindingTime(absl::FromUnixSeconds(123456789),
+                                    absl::Seconds(30));
+  ASSERT_NO_FATAL_FAILURE(QuerySharedCredentialsWithBindingIdsFlow(
+      /*num_pages=*/2, DownloadPublicCertificatesResult::kSuccess));
+  std::vector<QuerySharedCredentialsWithBindingIdsRequest> requests =
+      identity_client_.query_shared_credentials_with_binding_ids_requests();
+  for (const auto& request : requests) {
+    ASSERT_OK_AND_ASSIGN(
+        auto expected_time,
+        util_time::EncodeGoogleApiProto(absl::FromUnixSeconds(123456789)));
+    EXPECT_THAT(request.join_binding_time(), EqualsProto(expected_time));
+  }
+  EXPECT_TRUE(identity_client_.delete_binding_requests().empty());
 }
 
 TEST_F(NearbyShareCertificateManagerImplTest,
@@ -858,6 +921,12 @@ TEST_F(NearbyShareCertificateManagerImplTest,
   for (const auto& request : requests) {
     EXPECT_FALSE(request.has_join_binding_time());
   }
+  std::vector<DeleteBindingRequest> delete_requests =
+      identity_client_.delete_binding_requests();
+  ASSERT_EQ(delete_requests.size(), 1);
+  EXPECT_EQ(delete_requests[0].name(),
+            absl::StrCat("devices/", kDeviceId, "/bindings/",
+                         kCertificateTestBindingId));
 }
 
 TEST_F(NearbyShareCertificateManagerImplTest, ClearPublicCertificates) {
@@ -1097,6 +1166,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
   Initialize();
 
   cert_manager_->DownloadPublicCertificates();
+  Sync();
 
   EXPECT_EQ(download_scheduler_->num_immediate_requests(), 1);
 }
@@ -1104,6 +1174,7 @@ TEST_F(NearbyShareCertificateManagerImplTest,
 TEST_F(NearbyShareCertificateManagerImplTest, StopScheduledTasks) {
   Initialize();
   cert_manager_->StopScheduledTasks();
+  Sync();
   EXPECT_FALSE(private_cert_exp_scheduler_->is_running());
   EXPECT_FALSE(public_cert_exp_scheduler_->is_running());
   EXPECT_FALSE(upload_scheduler_->is_running());

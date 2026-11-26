@@ -16,6 +16,7 @@
 #define PLATFORM_API_OUTPUT_FILE_H_
 
 #include "absl/time/time.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/output_stream.h"
 
@@ -25,8 +26,20 @@ namespace api {
 // An OutputFile represents a writable file on the system.
 class OutputFile : public OutputStream {
  public:
+  OutputFile(OutputFile&& other) = delete;
+  OutputFile& operator=(OutputFile&& other) = delete;
+  OutputFile(const OutputFile&) = delete;
+  OutputFile& operator=(const OutputFile&) = delete;
+
+  OutputFile() = default;
   ~OutputFile() override = default;
+  virtual FilePath GetFilePath() const = 0;
   virtual void SetLastModifiedTime(absl::Time last_modified_time) = 0;
+
+  // Sets the origin metadata for the file as externally downloaded so any
+  // security policies can be applied.
+  // Returns true if the origin metadata was set successfully.
+  virtual bool SetOriginMetadata() { return false; }
   // File flush is a no-op.
   Exception Flush() override { return {Exception::kSuccess}; }
 };

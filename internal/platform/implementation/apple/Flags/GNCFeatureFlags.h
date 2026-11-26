@@ -32,13 +32,25 @@
 /** Checks whether shared peripheral manager is enabled in the Nearby Connections SDK. */
 @property(nonatomic, class, readonly) BOOL sharedPeripheralManagerEnabled;
 
-<<<<<<< HEAD
-=======
 /** Checks whether single copy read/write is enabled in the Nearby Connections SDK. */
 @property(nonatomic, class, readonly) BOOL singleCopyEnabled;
 
 /** Checks whether BLE server socket deadlock is fixed in the Nearby Connections SDK. */
 @property(nonatomic, class, readonly) BOOL fixBleServerSocketDeadlockEnabled;
 
->>>>>>> nearby/main
+/** Checks whether Wi-Fi Aware is enabled in the Nearby Connections SDK. */
+@property(nonatomic, class, readonly) BOOL wifiAwareEnabled;
+
+/** Checks whether AWDL is enabled in the Nearby Connections SDK. */
+@property(nonatomic, class, readonly) BOOL awdlEnabled;
+
+/** Checks whether GNCNWFrameworkSocket write timeout completion state is synchronized. */
+@property(nonatomic, class, readonly) BOOL synchronizeNWFrameworkSocketWriteTimeoutEnabled;
+
+/** Checks whether GNCNWFrameworkSocket read NSCondition waits are guarded with a predicate. */
+@property(nonatomic, class, readonly) BOOL guardNWFrameworkSocketReadConditionEnabled;
+
+/** Checks whether GNCNWFrameworkSocket close is synchronized with active operations. */
+@property(nonatomic, class, readonly) BOOL closeNWFrameworkSocketSafelyEnabled;
+
 @end

@@ -26,6 +26,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "internal/platform/blocking_queue_stream.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/byte_array.h"
@@ -37,7 +38,6 @@
 #include "internal/platform/listeners.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/mac_address.h"
-#include "internal/platform/mutex.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/socket.h"
 
@@ -305,15 +305,6 @@ class BluetoothClassicMedium {
         impl_->ListenForService(service_name, service_uuid));
   }
 
-  // Return a Bluetooth pairing instance to handle the pairing process with the
-  // remote device.
-  std::unique_ptr<BluetoothPairing> CreatePairing(
-      BluetoothDevice& remote_device) {
-    std::unique_ptr<api::BluetoothPairing> bluetooth_pairing =
-        impl_->CreatePairing(remote_device.GetImpl());
-    return std::make_unique<BluetoothPairing>(std::move(bluetooth_pairing));
-  }
-
   bool IsValid() const { return impl_ != nullptr; }
 
   api::BluetoothClassicMedium& GetImpl() { return *impl_; }
@@ -325,7 +316,7 @@ class BluetoothClassicMedium {
   }
 
  private:
-  Mutex mutex_;
+  absl::Mutex mutex_;
   std::unique_ptr<api::BluetoothClassicMedium> impl_;
   BluetoothAdapter& adapter_;
   absl::flat_hash_map<api::BluetoothDevice*,

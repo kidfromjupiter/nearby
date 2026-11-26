@@ -31,9 +31,26 @@ namespace nearby_connections_feature {
 // The timeout in millis to report peripheral device lost.
 constexpr auto kBlePeripheralLostTimeoutMillis =
     flags::Flag<int64_t>(kConfigPackage, "45411439", 12000);
-// When true, enable advertising for instant on lost feature.
-constexpr auto kEnableAdvertisingForInstantOnLost =
-    flags::Flag<bool>(kConfigPackage, "45708614", true);
+// Synchronize GNCNWFrameworkSocket close with active read and write
+// operations.
+constexpr auto kCloseNwFrameworkSocketSafely =
+    flags::Flag<bool>(kConfigPackage, "45868912", false);
+// Restricts outgoing connection attempt deduplication to UPGRADE attempts so
+// failed INITIAL attempts are no longer deduplicated and their pending
+// connection requests are marked NOT_SENT.
+constexpr auto kDeduplicateOnlyUpgradeConnectionAttempts =
+    flags::Flag<bool>(kConfigPackage, "45868932", false);
+// When true, delete incomplete incoming file payloads on Close() instead of
+// closing and retaining the partial file.
+constexpr auto kDeleteIncompleteIncomingFile =
+    flags::Flag<bool>(kConfigPackage, "45864313", false);
+// Enable/Disable Wi-Fi Aware as a PCP medium (advertising, discovery and
+// listening for incoming connections). When false, WIFI_AWARE_R4 requested via
+// AdvertisingOptions/DiscoveryOptions/ConnectionListeningOptions is ignored by
+// the PCP handler; Wi-Fi Aware stays available as a bandwidth upgrade medium
+// under enable_wifi_aware.
+constexpr auto kEnableAwarePcp =
+    flags::Flag<bool>(kConfigPackage, "45856767", false);
 // Enable/Disable AWDL in Nearby connections SDK.
 constexpr auto kEnableAwdl =
     flags::Flag<bool>(kConfigPackage, "45690762", false);
@@ -46,6 +63,10 @@ constexpr auto kEnableBleMediumInjection =
 // Enable/Disable DCT advertising/scanning specification.
 constexpr auto kEnableDct =
     flags::Flag<bool>(kConfigPackage, "45697202", false);
+// Categorizes DCT operation result codes (5000..5061) under
+// OperationResultCategory::CATEGORY_DCT_ERROR in AnalyticsRecorderImpl.
+constexpr auto kEnableDctErrorResultCategory =
+    flags::Flag<bool>(kConfigPackage, "45868931", false);
 // Disable/Enable dynamic role switch in Nearby Connections SDK.
 constexpr auto kEnableDynamicRoleSwitch =
     flags::Flag<bool>(kConfigPackage, "45696452", false);
@@ -58,9 +79,6 @@ constexpr auto kEnableMultiplexBluetooth =
 // Enable/Disable preferences for Nearby Connections.
 constexpr auto kEnableNearbyConnectionsPreferences =
     flags::Flag<bool>(kConfigPackage, "45732423", false);
-// Enable/Disable payload-received-ack feature.
-constexpr auto kEnablePayloadReceivedAck =
-    flags::Flag<bool>(kConfigPackage, "45425840", false);
 // Enable/Disable safe-to-disconnect feature.
 constexpr auto kEnableSafeToDisconnect =
     flags::Flag<bool>(kConfigPackage, "45425789", false);
@@ -74,6 +92,9 @@ constexpr auto kEnableSingleCopy =
 // Stop BLE_V2 scanning when upgrading to WIFI Hotspot or WFD.
 constexpr auto kEnableStopBleScanningOnWifiUpgrade =
     flags::Flag<bool>(kConfigPackage, "45687902", false);
+// Enable/Disable Wi-Fi Aware in Nearby connections SDK.
+constexpr auto kEnableWifiAware =
+    flags::Flag<bool>(kConfigPackage, "45833001", true);
 // Enable/Disable Wi-Fi Direct in Nearby connections SDK.
 constexpr auto kEnableWifiDirect =
     flags::Flag<bool>(kConfigPackage, "45741157", false);
@@ -83,6 +104,13 @@ constexpr auto kEnableWifiDirectGcOnly =
 // by default, enable Wi-Fi Hotspot client.
 constexpr auto kEnableWifiHotspotClient =
     flags::Flag<bool>(kConfigPackage, "45648734", true);
+// Enable/Disable WIFI_LAN as a supported connection/bandwidth upgrade medium.
+constexpr auto kEnableWifiLanUpgrade =
+    flags::Flag<bool>(kConfigPackage, "45852183", true);
+// When true, enforces local strategy encryption policy on incoming BWU
+// connections (b/574970747).
+constexpr auto kEnforceBwuIncomingEncryptionPolicy =
+    flags::Flag<bool>(kConfigPackage, "45868914", false);
 // Enforces frame filtering on unconfirmed endpoints in EndpointManager and
 // BaseEndpointChannel so application payloads and upgrade requests are blocked
 // before connection acceptance.
@@ -91,12 +119,43 @@ constexpr auto kFilterUnconfirmedEndpointFrames =
 // When true, fix the BleServerSocket deadlock/use-after-free (b/494335036).
 constexpr auto kFixBleServerSocketDeadlock =
     flags::Flag<bool>(kConfigPackage, "45782647", true);
+// When true, fixes ClientProxy session completion checks, avoids redundant
+// empty session completions, and suppresses idle low-power advertising-only
+// ClientSession logs.
+constexpr auto kFixClientSessionLogging =
+    flags::Flag<bool>(kConfigPackage, "45881786", false);
+// When true, AnalyticsRecorderImpl flushes unfinished ConnectionRequests on
+// replacement or disconnect and initializes current_advertising_phase_ for
+// listen-only sessions.
+constexpr auto kFixStaleAndListenOnlyConnectionRequests =
+    flags::Flag<bool>(kConfigPackage, "45868910", false);
+// When true, initializes WebRtcState to kUnconnectable when WebRTC is
+// unavailable in UpdateAdvertisingOptionsImpl (b/574971059).
+constexpr auto kFixWifiLanServiceInfoSerialization =
+    flags::Flag<bool>(kConfigPackage, "45871083", true);
+// Guard GNCNWFrameworkSocket read condition wait with a boolean predicate and
+// treat zero-byte complete reads as clean EOF.
+constexpr auto kGuardNwFrameworkSocketReadCondition =
+    flags::Flag<bool>(kConfigPackage, "45868922", false);
 // Default max transmit packet size for medium.
 constexpr auto kMediumDefaultMaxTransmitPacketSize =
     flags::Flag<int64_t>(kConfigPackage, "45669529", 65536);
 // Default max allowed read bytes for medium.
 constexpr auto kMediumMaxAllowedReadBytes =
     flags::Flag<int64_t>(kConfigPackage, "45669530", 1048576);
+// When true, only populate measured capability fields on AdvertisingMetadata
+// and DiscoveryMetadata rather than defaulting unmeasured fields to false/0.
+constexpr auto kOmitUnmeasuredAdvDisCapabilities =
+    flags::Flag<bool>(kConfigPackage, "45868908", true);
+// When true, LogConnectionAttemptFailure populates
+// ConnectionAttemptMetadataParams with operation_result_code even when
+// endpoint_channel is null.
+constexpr auto kPreserveNullChannelAttemptResultCode =
+    flags::Flag<bool>(kConfigPackage, "45868906", false);
+// When true, LogicalConnection records EstablishedConnections in chronological
+// order instead of dropping repeated visits to an earlier Medium.
+constexpr auto kRecordChronologicalPhysicalConnections =
+    flags::Flag<bool>(kConfigPackage, "45868909", true);
 // Disable/Enable refactor of BLE/L2CAP in Nearby Connections SDK.
 constexpr auto kRefactorBleL2cap =
     flags::Flag<bool>(kConfigPackage, "45737079", false);
@@ -106,6 +165,10 @@ constexpr auto kRefactorBleL2cap =
 // 4. auto-resume  5. non-distance-constraint-recovery 6. payload_ack
 constexpr auto kSafeToDisconnectVersion =
     flags::Flag<int64_t>(kConfigPackage, "45425841", 0);
+// Synchronize GNCNWFrameworkSocket write timeout completion state on the heap
+// and populate ETIMEDOUT on timeout.
+constexpr auto kSynchronizeNwFrameworkSocketWriteTimeout =
+    flags::Flag<bool>(kConfigPackage, "45868923", false);
 
 }  // namespace nearby_connections_feature
 }  // namespace config_package_nearby

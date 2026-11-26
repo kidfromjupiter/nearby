@@ -601,6 +601,7 @@ std::unique_ptr<api::ble::BleServerSocket> BleMedium::OpenServerSocketWithDeadlo
   dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, kApiTimeoutInSeconds * NSEC_PER_SEC);
   if (dispatch_semaphore_wait(semaphore, timeout) != 0) {
     GNCLoggerError(@"OpenServerSocket operation timed out.");
+    [socketPeripheralManager_ stop];
     return nullptr;
   }
   if (blockError != nil) {
@@ -675,6 +676,7 @@ std::unique_ptr<api::ble::BleServerSocket> BleMedium::OpenServerSocketLegacy(
   dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, kApiTimeoutInSeconds * NSEC_PER_SEC);
   if (dispatch_semaphore_wait(semaphore, timeout) != 0) {
     GNCLoggerError(@"OpenServerSocket operation timed out.");
+    [socketPeripheralManager_ stop];
     return nullptr;
   }
   if (blockError != nil) {
@@ -829,8 +831,11 @@ std::unique_ptr<api::ble::BleL2capSocket> BleMedium::ConnectOverL2cap(
   [medium_ openL2CAPChannelWithPSM:psm
                         peripheral:peripheral
                  completionHandler:^(GNCBLEL2CAPStream *stream, NSError *error) {
-                   if (error) {
+                   if (error || !stream) {
                      openError = error;
+                     if (!openError) {
+                       GNCLoggerError(@"Failed to connect over L2CAP: stream is nil.");
+                     }
                      dispatch_semaphore_signal(semaphore);
                      return;
                    }

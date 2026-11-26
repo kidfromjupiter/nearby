@@ -17,7 +17,9 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
+#include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
@@ -30,18 +32,14 @@ namespace connections {
 // per-Medium-specific operations needed to upgrade an EndpointChannel.
 class BwuHandler {
  public:
-  class IncomingSocket {
-   public:
-    virtual ~IncomingSocket() = default;
-
-    virtual std::string ToString() = 0;
-    virtual void Close() = 0;
-  };
-
   struct IncomingSocketConnection {
-    std::unique_ptr<IncomingSocket> socket;
-    std::unique_ptr<EndpointChannel> channel;
+    explicit IncomingSocketConnection(
+        absl_nonnull std::unique_ptr<EndpointChannel> channel)
+        : channel(std::move(channel)) {}
+
+    absl_nonnull std::unique_ptr<EndpointChannel> channel;
   };
+
   using IncomingConnectionCallback = absl::AnyInvocable<void(
       ClientProxy* client,
       std::unique_ptr<IncomingSocketConnection> connection)>;

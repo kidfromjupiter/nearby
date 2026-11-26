@@ -66,15 +66,7 @@ AwdlOutputStream::AwdlOutputStream(GNCNWFrameworkSocket* socket) : socket_(socke
 
 Exception AwdlOutputStream::Write(absl::string_view data) {
   NSError* error = nil;
-  BOOL result = NO;
-
-  if (GNCFeatureFlags.singleCopyEnabled) {
-    // OPTIMIZATION: Write raw bytes directly, avoiding NSData creation.
-    result = [socket_ writeBytes:data.data() length:data.size() error:&error];
-  } else {
-    result = [socket_ write:[NSData dataWithBytes:data.data() length:data.size()] error:&error];
-  }
-
+  BOOL result = [socket_ write:[NSData dataWithBytes:data.data() length:data.size()] error:&error];
   if (!result) {
     GNCLoggerError(@"Error writing socket: %@", error);
     return {Exception::kIo};
@@ -141,7 +133,7 @@ Exception AwdlServerSocket::Close() {
 
 #pragma mark - AwdlMedium
 
-AwdlMedium::AwdlMedium() { medium_ = [[GNCNWFramework alloc] init]; }
+AwdlMedium::AwdlMedium() { medium_ = [[GNCNWFramework alloc] initWithPeerToPeer:YES]; }
 
 AwdlMedium::AwdlMedium(GNCNWFramework* medium) : medium_(medium) {}
 
@@ -165,8 +157,7 @@ bool AwdlMedium::StartDiscovery(const std::string& service_type,
           [this](const NsdServiceInfo& service_info) {
             service_callback_.service_lost_cb(service_info);
           }};
-  return network_utils::StartDiscovery(medium_, service_type, std::move(network_callback),
-                                       /*include_peer_to_peer=*/true);
+  return network_utils::StartDiscovery(medium_, service_type, std::move(network_callback));
 }
 
 bool AwdlMedium::StopDiscovery(const std::string& service_type) {
@@ -195,8 +186,7 @@ std::unique_ptr<api::AwdlSocket> AwdlMedium::ConnectToService(
 }
 
 std::unique_ptr<api::AwdlServerSocket> AwdlMedium::ListenForService(int port) {
-  GNCNWFrameworkServerSocket* serverSocket =
-      network_utils::ListenForService(medium_, port, /*include_peer_to_peer=*/true);
+  GNCNWFrameworkServerSocket* serverSocket = network_utils::ListenForService(medium_, port);
   if (serverSocket != nil) {
     return std::make_unique<AwdlServerSocket>(serverSocket);
   }
@@ -206,7 +196,7 @@ std::unique_ptr<api::AwdlServerSocket> AwdlMedium::ListenForService(int port) {
 std::unique_ptr<api::AwdlServerSocket> AwdlMedium::ListenForService(const api::PskInfo& psk_info,
                                                                     int port) {
   GNCNWFrameworkServerSocket* serverSocket =
-      network_utils::ListenForService(medium_, psk_info, port, /*include_peer_to_peer=*/true);
+      network_utils::ListenForService(medium_, psk_info, port);
   if (serverSocket != nil) {
     return std::make_unique<AwdlServerSocket>(serverSocket);
   }

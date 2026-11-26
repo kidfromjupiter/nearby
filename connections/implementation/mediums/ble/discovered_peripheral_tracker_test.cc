@@ -28,6 +28,8 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "connections/implementation/mediums/advertisements/dct_advertisement.h"
@@ -44,13 +46,10 @@
 #include "internal/platform/ble.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/count_down_latch.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/mac_address.h"
 #include "internal/platform/medium_environment.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/uuid.h"
 
 namespace nearby {
@@ -227,7 +226,7 @@ class DiscoveredPeripheralTrackerTest
       const BleAdvertisementHeader& header,
       const BleAdvertisement& advertisement_1,
       const BleAdvertisement& advertisement_2) {
-    MutexLock lock(&discovered_peripheral_tracker_->mutex_);
+    absl::MutexLock lock(discovered_peripheral_tracker_->mutex_);
     ByteArray advertisement_bytes_1 = advertisement_1.ByteArrayWithExtraField();
     ByteArray advertisement_bytes_2 = advertisement_2.ByteArrayWithExtraField();
     std::vector<const ByteArray*> gatt_advertisement_bytes_list = {
@@ -239,22 +238,25 @@ class DiscoveredPeripheralTrackerTest
   }
 
   void RegisterServiceIdCallback(const std::string& service_id,
-                                 CountDownLatch& lost_latch) {
+                                 absl::Mutex& lost_mutex, int& lost_count) {
     discovered_peripheral_tracker_->StartTracking(
         service_id, /*include_dct_advertisement=*/false, Pcp::kP2pPointToPoint,
         {
             .instant_lost_cb =
-                [&lost_latch](
-                    BlePeripheral peripheral, const std::string& service_id,
-                    const ByteArray& advertisement_bytes,
-                    bool fast_advertisement) { lost_latch.CountDown(); },
+                [&lost_mutex, &lost_count](BlePeripheral peripheral,
+                                           const std::string& service_id,
+                                           const ByteArray& advertisement_bytes,
+                                           bool fast_advertisement) {
+                  absl::MutexLock lock(lost_mutex);
+                  ++lost_count;
+                },
         },
         /*fast_advertisement_service_uuid=*/{});
   }
 
   bool CallHandleOnLostAdvertisementLocked(
       const api::ble::BleAdvertisementData& advertisement_data) {
-    MutexLock lock(&discovered_peripheral_tracker_->mutex_);
+    absl::MutexLock lock(discovered_peripheral_tracker_->mutex_);
     return discovered_peripheral_tracker_->HandleOnLostAdvertisementLocked(
         advertisement_data);
   }
@@ -263,7 +265,7 @@ class DiscoveredPeripheralTrackerTest
   void FindFastAdvertisement(
       const api::ble::BleAdvertisementData& advertisement_data,
       const std::vector<ByteArray>& advertisement_bytes_list,
-      CountDownLatch& fetch_latch) {
+      absl::Notification& fetch_latch) {
     BlePeripheral peripheral = CreateBlePeripheral();
 
     discovered_peripheral_tracker_->ProcessFoundBleAdvertisement(
@@ -275,21 +277,23 @@ class DiscoveredPeripheralTrackerTest
   // advertisement from GATT.
   void FindExtendedAdvertisement(
       const api::ble::BleAdvertisementData& advertisement_data,
-      CountDownLatch& fetch_latch) {
+      absl::Notification& fetch_latch) {
     BlePeripheral peripheral = CreateBlePeripheral();
     DiscoveredPeripheralTracker::AdvertisementFetcher placeholder_fetcher =
         [](BlePeripheral, int, int, const std::vector<std::string>&,
            mediums::AdvertisementReadResult&) {};
     discovered_peripheral_tracker_->ProcessFoundBleAdvertisement(
         peripheral, advertisement_data, std::move(placeholder_fetcher));
-    fetch_latch.CountDown();
+    if (!fetch_latch.HasBeenNotified()) {
+      fetch_latch.Notify();
+    }
   }
 
   // Simulates to see a regular advertisement.
   void FindAdvertisement(
       const api::ble::BleAdvertisementData& advertisement_data,
       const std::vector<ByteArray>& advertisement_bytes_list,
-      CountDownLatch& fetch_latch) {
+      absl::Notification& fetch_latch) {
     BlePeripheral peripheral = CreateBlePeripheral();
 
     discovered_peripheral_tracker_->ProcessFoundBleAdvertisement(
@@ -300,7 +304,7 @@ class DiscoveredPeripheralTrackerTest
   void FindAdvertisementWithDelay(
       const api::ble::BleAdvertisementData& advertisement_data,
       const std::vector<ByteArray>& advertisement_bytes_list,
-      CountDownLatch& fetch_latch, absl::Duration delay) {
+      absl::Notification& fetch_latch, absl::Duration delay) {
     BlePeripheral peripheral = CreateBlePeripheral();
 
     discovered_peripheral_tracker_->ProcessFoundBleAdvertisement(
@@ -310,20 +314,20 @@ class DiscoveredPeripheralTrackerTest
   }
 
   int GetFetchAdvertisementCallbackCount() const {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return fetch_count_;
   }
 
  protected:
   // A stub Advertisement fetcher.
   DiscoveredPeripheralTracker::AdvertisementFetcher GetAdvertisementFetcher(
-      CountDownLatch& fetch_latch,
+      absl::Notification& fetch_latch,
       const std::vector<ByteArray>& advertisement_bytes_list) {
     return [this, &fetch_latch, advertisement_bytes_list](
                BlePeripheral peripheral, int num_slots, int psm,
                const std::vector<std::string>& interesting_service_ids,
                mediums::AdvertisementReadResult& advertisement_read_result) {
-      MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       fetch_count_++;
       int slot = 0;
       for (const auto& advertisement_bytes : advertisement_bytes_list) {
@@ -331,20 +335,22 @@ class DiscoveredPeripheralTrackerTest
       }
       advertisement_read_result.RecordLastReadStatus(
           /*is_success=*/true);
-      fetch_latch.CountDown();
+      if (!fetch_latch.HasBeenNotified()) {
+        fetch_latch.Notify();
+      }
     };
   }
 
   DiscoveredPeripheralTracker::AdvertisementFetcher
   GetAdvertisementFetcherWithDelay(
-      CountDownLatch& fetch_latch,
+      absl::Notification& fetch_latch,
       const std::vector<ByteArray>& advertisement_bytes_list,
       absl::Duration delay) {
     return [this, &fetch_latch, advertisement_bytes_list, delay](
                BlePeripheral peripheral, int num_slots, int psm,
                const std::vector<std::string>& interesting_service_ids,
                mediums::AdvertisementReadResult& advertisement_read_result) {
-      MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       fetch_count_++;
       int slot = 0;
       // In real environment, the GATT fetch may run about 3-5 seconds.
@@ -354,7 +360,9 @@ class DiscoveredPeripheralTrackerTest
       }
       advertisement_read_result.RecordLastReadStatus(
           /*is_success=*/true);
-      fetch_latch.CountDown();
+      if (!fetch_latch.HasBeenNotified()) {
+        fetch_latch.Notify();
+      }
     };
   }
 
@@ -362,7 +370,7 @@ class DiscoveredPeripheralTrackerTest
   std::unique_ptr<BluetoothAdapter> adapter_central_;
   std::unique_ptr<BleMedium> ble_peripheral_;
   std::unique_ptr<BleMedium> ble_central_;
-  mutable Mutex mutex_;
+  mutable absl::Mutex mutex_;
   int fetch_count_ ABSL_GUARDED_BY(mutex_) = 0;
   std::unique_ptr<DiscoveredPeripheralTracker> discovered_peripheral_tracker_;
 };
@@ -371,8 +379,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
        FoundFastAdvertisementPeripheralDiscovered) {
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -384,7 +392,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -400,16 +410,16 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   // We should receive a client callback of a peripheral discovery without a
   // GATT read.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest, DctAdvertisementPeripheralDiscovered) {
   ByteArray dct_advertisement_bytes = CreateDctAdvertisement(
       std::string(kServiceIdA), std::string(kDeviceName));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), true, Pcp::kP2pPointToPoint,
@@ -420,7 +430,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, DctAdvertisementPeripheralDiscovered) {
                              const ByteArray& advertisement_bytes,
                              bool fast_advertisement) {
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -434,8 +446,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, DctAdvertisementPeripheralDiscovered) {
 
   // We should receive a client callback of a peripheral discovery without a
   // GATT read.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -447,9 +459,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch legacy_found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification legacy_found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -459,10 +471,16 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                const ByteArray& advertisement_bytes, bool fast_advertisement) {
              EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
              EXPECT_FALSE(fast_advertisement);
-             found_latch.CountDown();
+             if (!found_latch.HasBeenNotified()) {
+               found_latch.Notify();
+             }
            },
        .legacy_device_discovered_cb =
-           [&legacy_found_latch]() { legacy_found_latch.CountDown(); }},
+           [&legacy_found_latch]() {
+             if (!legacy_found_latch.HasBeenNotified()) {
+               legacy_found_latch.Notify();
+             }
+           }},
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
 
@@ -475,9 +493,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(legacy_found_latch.Await(kWaitDuration).result());
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(legacy_found_latch.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -485,8 +503,12 @@ TEST_P(DiscoveredPeripheralTrackerTest,
        CanStartMultipleTrackingWithSameServiceId) {
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(3);
-  CountDownLatch fetch_latch(3);
+  absl::Notification found_latch_1;
+  absl::Notification found_latch_2;
+  absl::Notification found_latch_3;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
+  absl::Notification fetch_latch_3;
   std::atomic<int> callback_times = 0;
 
   // 1st tracking.
@@ -494,14 +516,16 @@ TEST_P(DiscoveredPeripheralTrackerTest,
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&callback_times, &found_latch](
+              [&callback_times, &found_latch_1](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch_1.HasBeenNotified()) {
+                  found_latch_1.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -513,67 +537,75 @@ TEST_P(DiscoveredPeripheralTrackerTest,
         {Uuid(kFastAdvertisementServiceUuid), fast_advertisement_bytes});
   }
 
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_1);
 
   // 2nd tracking.
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&callback_times, &found_latch](
+              [&callback_times, &found_latch_2](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch_2.HasBeenNotified()) {
+                  found_latch_2.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
 
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_2);
 
   // 3rd tracking.
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&callback_times, &found_latch](
+              [&callback_times, &found_latch_3](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch_3.HasBeenNotified()) {
+                  found_latch_3.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
 
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_3);
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
        FoundFastAdvertisementDuplicateAdvertisements) {
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(3);
-  CountDownLatch fetch_latch(3);
+  absl::Mutex found_mutex;
+  int found_count = 0;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
+  absl::Notification fetch_latch_3;
   std::atomic<int> callback_times = 0;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&callback_times, &found_latch](
+              [&callback_times, &found_mutex, &found_count](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                absl::MutexLock lock(found_mutex);
+                found_count++;
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -585,17 +617,22 @@ TEST_P(DiscoveredPeripheralTrackerTest,
         {Uuid(kFastAdvertisementServiceUuid), fast_advertisement_bytes});
   }
 
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
-  FindFastAdvertisement(advertisement_data, {}, fetch_latch);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_1);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_2);
+  FindFastAdvertisement(advertisement_data, {}, fetch_latch_3);
 
   // We should only receive ONE client callback of a peripheral discovery with
   // ZERO GATT reads.
-  fetch_latch.Await(kWaitDuration * 3);
+  fetch_latch_1.WaitForNotificationWithTimeout(kWaitDuration * 3);
   EXPECT_EQ(callback_times, 1);
-  // The count down won't be finished since the callback only been called once.
+  // The count won't reach 3 since the callback only been called once.
   // Let it time out.
-  EXPECT_FALSE(found_latch.Await(3 * kWaitDuration).result());
+  {
+    absl::MutexLock lock(found_mutex);
+    EXPECT_FALSE(found_mutex.AwaitWithTimeout(
+        absl::Condition(+[](int* c) { return *c >= 3; }, &found_count),
+        3 * kWaitDuration));
+  }
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -603,8 +640,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
        FoundFastAdvertisementUntrackedFastAdvertisementServiceUuid) {
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   // Start tracking a service ID and then process a discovery containing a valid
   // fast advertisement, but under a different service UUID.
@@ -618,7 +655,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       Uuid("FE3C"));
@@ -633,8 +672,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindFastAdvertisement(advertisement_data, {}, fetch_latch);
 
   // We should get no new discoveries.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_FALSE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_FALSE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -648,9 +687,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdB), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch_a(1);
-  CountDownLatch found_latch_b(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch_a;
+  absl::Notification found_latch_b;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -662,7 +701,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                                bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch_a.CountDown();
+                if (!found_latch_a.HasBeenNotified()) {
+                  found_latch_a.Notify();
+                }
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -678,7 +719,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                                bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch_b.CountDown();
+                if (!found_latch_b.HasBeenNotified()) {
+                  found_latch_b.Notify();
+                }
               },
       },
       {});
@@ -696,9 +739,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindFastAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive two separate peripheral discoveries.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch_a.Await(kWaitDuration).result());
-  EXPECT_TRUE(found_latch_b.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch_a.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(found_latch_b.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -710,8 +753,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -723,7 +766,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       {});
@@ -738,8 +783,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -751,17 +796,21 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray legacy_advertisement_bytes = CreateLegacyBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&found_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { found_latch.CountDown(); },
+              [&found_latch](BlePeripheral peripheral,
+                             const std::string& service_id,
+                             const ByteArray& advertisement_bytes,
+                             bool fast_advertisement) {
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -776,8 +825,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                     fetch_latch);
 
   // We should not receive a client callback with the Version/SocketVersion kV1.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_FALSE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_FALSE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -792,8 +841,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray legacy_advertisement_bytes = CreateLegacyBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
   std::atomic<int> callback_times = 0;
 
   discovered_peripheral_tracker_->StartTracking(
@@ -807,7 +856,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData2)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       {});
@@ -825,8 +876,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   // We should only receive one callback with data from the V2 GATT
   // advertisement.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(callback_times, 1);
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
@@ -839,22 +890,26 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(3);
-  CountDownLatch fetch_latch(3);
+  absl::Mutex found_mutex;
+  int found_count = 0;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
+  absl::Notification fetch_latch_3;
   std::atomic<int> callback_times = 0;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&callback_times, &found_latch](
+              [&callback_times, &found_mutex, &found_count](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 callback_times++;
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                absl::MutexLock lock(found_mutex);
+                found_count++;
               },
       },
       {});
@@ -866,17 +921,28 @@ TEST_P(DiscoveredPeripheralTrackerTest,
         {bleutils::kCopresenceServiceUuid, advertisement_header_bytes});
   }
 
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_1);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_2);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_3);
 
   // We should only receive ONE client callback of a peripheral discovery. And
   // we should also do only ONE GATT read.
-  fetch_latch.Await(kWaitDuration);
+  {
+    absl::MutexLock lock(mutex_);
+    auto fetch_cond = [this]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+      return fetch_count_ >= 3;
+    };
+    mutex_.AwaitWithTimeout(absl::Condition(&fetch_cond), kWaitDuration);
+  }
   EXPECT_EQ(callback_times, 1);
-  // The count down won't be finished since the callback only been called once.
+  // The count won't reach 3 since the callback only been called once.
   // Let it time out.
-  EXPECT_FALSE(found_latch.Await(3 * kWaitDuration).result());
+  {
+    absl::MutexLock lock(found_mutex);
+    EXPECT_FALSE(found_mutex.AwaitWithTimeout(
+        absl::Condition(+[](int* c) { return *c >= 3; }, &found_count),
+        3 * kWaitDuration));
+  }
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -889,17 +955,21 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdB), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&found_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { found_latch.CountDown(); },
+              [&found_latch](BlePeripheral peripheral,
+                             const std::string& service_id,
+                             const ByteArray& advertisement_bytes,
+                             bool fast_advertisement) {
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -913,8 +983,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should get no new discoveries.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_FALSE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_FALSE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -925,9 +995,10 @@ TEST_P(DiscoveredPeripheralTrackerTest,
       GenerateRandomAdvertisementHash(), service_ids);
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(2);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Mutex lost_mutex;
+  int lost_count = 0;
+  absl::Notification fetch_latch;
   std::atomic<int> lost_callback_times = 0;
 
   discovered_peripheral_tracker_->StartTracking(
@@ -940,15 +1011,18 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch, &lost_callback_times](
+              [&lost_mutex, &lost_count, &lost_callback_times](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 lost_callback_times++;
-                lost_latch.CountDown();
+                absl::MutexLock lock(lost_mutex);
+                lost_count++;
               },
       },
       Uuid(kFastAdvertisementServiceUuid));
@@ -968,8 +1042,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                         fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 
   // Then, go through two cycles of onLost. The first cycle should include the
@@ -979,7 +1053,12 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   discovered_peripheral_tracker_->ProcessLostGattAdvertisements();
 
   // We should receive a client callback of a lost peripheral.
-  EXPECT_FALSE(lost_latch.Await(kWaitDuration).result());
+  {
+    absl::MutexLock lock(lost_mutex);
+    EXPECT_FALSE(lost_mutex.AwaitWithTimeout(
+        absl::Condition(+[](int* c) { return *c >= 2; }, &lost_count),
+        kWaitDuration));
+  }
   EXPECT_EQ(lost_callback_times, 1);
 }
 
@@ -990,9 +1069,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
       GenerateRandomAdvertisementHash(), service_ids);
   ByteArray fast_advertisement_bytes = CreateFastBleAdvertisement(
       ByteArray(std::string(kData)), ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification lost_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1004,13 +1083,19 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch.CountDown(); },
+              [&lost_latch](BlePeripheral peripheral,
+                            const std::string& service_id,
+                            const ByteArray& advertisement_bytes,
+                            bool fast_advertisement) {
+                if (!lost_latch.HasBeenNotified()) {
+                  lost_latch.Notify();
+                }
+              },
       },
       Uuid(kFastAdvertisementServiceUuid));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1035,10 +1120,10 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   // We should only receive ONE client callback of a peripheral discovery, ZERO
   // GATT reads, and no onLost calls.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
-  EXPECT_FALSE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_FALSE(lost_latch.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest, LostPeripheralForAdvertisementLost) {
@@ -1048,9 +1133,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, LostPeripheralForAdvertisementLost) {
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification lost_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1062,13 +1147,19 @@ TEST_P(DiscoveredPeripheralTrackerTest, LostPeripheralForAdvertisementLost) {
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch.CountDown(); },
+              [&lost_latch](BlePeripheral peripheral,
+                            const std::string& service_id,
+                            const ByteArray& advertisement_bytes,
+                            bool fast_advertisement) {
+                if (!lost_latch.HasBeenNotified()) {
+                  lost_latch.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1082,8 +1173,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, LostPeripheralForAdvertisementLost) {
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 
   // Then, go through two cycles of onLost. The first cycle should include the
@@ -1093,7 +1184,7 @@ TEST_P(DiscoveredPeripheralTrackerTest, LostPeripheralForAdvertisementLost) {
   discovered_peripheral_tracker_->ProcessLostGattAdvertisements();
 
   // We should receive a client callback of a lost peripheral
-  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(lost_latch.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
@@ -1106,11 +1197,11 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdB), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch_a(1);
-  CountDownLatch found_latch_b(1);
-  CountDownLatch lost_latch_a(1);
-  CountDownLatch lost_latch_b(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch_a;
+  absl::Notification found_latch_b;
+  absl::Notification lost_latch_a;
+  absl::Notification lost_latch_b;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1122,13 +1213,19 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                                bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch_a.CountDown();
+                if (!found_latch_a.HasBeenNotified()) {
+                  found_latch_a.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch_a](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch_a.CountDown(); },
+              [&lost_latch_a](BlePeripheral peripheral,
+                              const std::string& service_id,
+                              const ByteArray& advertisement_bytes,
+                              bool fast_advertisement) {
+                if (!lost_latch_a.HasBeenNotified()) {
+                  lost_latch_a.Notify();
+                }
+              },
       },
       Uuid(kFastAdvertisementServiceUuid));
   discovered_peripheral_tracker_->StartTracking(
@@ -1141,13 +1238,19 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                                bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch_b.CountDown();
+                if (!found_latch_b.HasBeenNotified()) {
+                  found_latch_b.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch_b](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch_b.CountDown(); },
+              [&lost_latch_b](BlePeripheral peripheral,
+                              const std::string& service_id,
+                              const ByteArray& advertisement_bytes,
+                              bool fast_advertisement) {
+                if (!lost_latch_b.HasBeenNotified()) {
+                  lost_latch_b.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1165,9 +1268,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindFastAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive two separate peripheral discoveries.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch_a.Await(kWaitDuration).result());
-  EXPECT_TRUE(found_latch_b.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch_a.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(found_latch_b.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 
   // Then, go through two cycles of onLost. The first cycle should include the
@@ -1178,8 +1281,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   // We should receive two client callbacks of a lost peripheral from each
   // service ID.
-  EXPECT_TRUE(lost_latch_a.Await(kWaitDuration).result());
-  EXPECT_TRUE(lost_latch_b.Await(kWaitDuration).result());
+  EXPECT_TRUE(lost_latch_a.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(lost_latch_b.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
@@ -1190,9 +1293,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification lost_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1204,13 +1307,19 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .peripheral_lost_cb =
-              [&lost_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch.CountDown(); },
+              [&lost_latch](BlePeripheral peripheral,
+                            const std::string& service_id,
+                            const ByteArray& advertisement_bytes,
+                            bool fast_advertisement) {
+                if (!lost_latch.HasBeenNotified()) {
+                  lost_latch.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1224,8 +1333,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 
   // Then, stop tracking the service ID and go through two cycles of onLost.
@@ -1234,7 +1343,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   discovered_peripheral_tracker_->ProcessLostGattAdvertisements();
 
   // We should NOT receive a client callback of a lost peripheral
-  EXPECT_FALSE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_FALSE(lost_latch.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
@@ -1245,9 +1354,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification lost_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1259,13 +1368,19 @@ TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .instant_lost_cb =
-              [&lost_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch.CountDown(); },
+              [&lost_latch](BlePeripheral peripheral,
+                            const std::string& service_id,
+                            const ByteArray& advertisement_bytes,
+                            bool fast_advertisement) {
+                if (!lost_latch.HasBeenNotified()) {
+                  lost_latch.Notify();
+                }
+              },
       },
       {});
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1279,8 +1394,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  ASSERT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  ASSERT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 
   auto advertisement = InstantOnLostAdvertisement::CreateFromHashes(
@@ -1300,7 +1415,7 @@ TEST_P(DiscoveredPeripheralTrackerTest, InstantLostPeripheralForInstantOnLost) {
   discovered_peripheral_tracker_->ProcessLostGattAdvertisements();
 
   // We should receive a client callback of a lost peripheral
-  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(lost_latch.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
@@ -1330,9 +1445,10 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   BleAdvertisement advertisement_2 = adv_status_or_2.value();
 
   // Register callbacks for both Service A and Service B.
-  CountDownLatch lost_latch(2);
-  RegisterServiceIdCallback(std::string(kServiceIdA), lost_latch);
-  RegisterServiceIdCallback(std::string(kServiceIdB), lost_latch);
+  absl::Mutex lost_mutex;
+  int lost_count = 0;
+  RegisterServiceIdCallback(std::string(kServiceIdA), lost_mutex, lost_count);
+  RegisterServiceIdCallback(std::string(kServiceIdB), lost_mutex, lost_count);
 
   // Use helper method to set up state manually.
   SetupMultipleAdvertisementsState(header, advertisement_1, advertisement_2);
@@ -1352,7 +1468,12 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   EXPECT_TRUE(result);
 
   // Verify that both are lost (callback triggered twice).
-  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+  {
+    absl::MutexLock lock(lost_mutex);
+    EXPECT_TRUE(lost_mutex.AwaitWithTimeout(
+        absl::Condition(+[](int* c) { return *c >= 2; }, &lost_count),
+        kWaitDuration));
+  }
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
@@ -1365,9 +1486,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
 
-  CountDownLatch fetch_latch(1);
+  absl::Notification fetch_latch;
   MockDiscoveredPeripheralCallback mock_callback;
-  CountDownLatch discovered_latch(1);
+  absl::Notification discovered_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1380,7 +1501,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                 mock_callback.OnPeripheralDiscovered(peripheral, service_id,
                                                      advertisement_bytes,
                                                      fast_advertisement);
-                discovered_latch.CountDown();
+                if (!discovered_latch.HasBeenNotified()) {
+                  discovered_latch.Notify();
+                }
               },
           .instant_lost_cb =
               [&mock_callback](BlePeripheral peripheral,
@@ -1403,13 +1526,13 @@ TEST_P(DiscoveredPeripheralTrackerTest,
 
   EXPECT_CALL(mock_callback, OnPeripheralDiscovered).Times(1);
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(discovered_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(discovered_latch.WaitForNotificationWithTimeout(kWaitDuration));
 
   // We should receive a client callback of a peripheral discovery.
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 
-  CountDownLatch fetch_latch2(1);
+  absl::Notification fetch_latch2;
   auto advertisement = InstantOnLostAdvertisement::CreateFromHashes(
       std::list<std::string>({std::string(
           bleutils::GenerateAdvertisementHash(advertisement_bytes))}));
@@ -1421,7 +1544,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   EXPECT_CALL(mock_callback, OnInstantLost).Times(1);
   FindAdvertisement(loss_advertisement_data,
                     {ByteArray(advertisement->ToBytes())}, fetch_latch2);
-  fetch_latch2.Await(kWaitDuration);
+  fetch_latch2.WaitForNotificationWithTimeout(kWaitDuration);
 
   // Then, go through a cycle of onLost. Since we triggered a forced loss via
   // the instant on los advertisement, the lost call should trigger the onLost
@@ -1429,10 +1552,10 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   discovered_peripheral_tracker_->ProcessLostGattAdvertisements();
 
   // Lost advertisement should not be reported.
-  CountDownLatch fetch_latch3(1);
+  absl::Notification fetch_latch3;
   EXPECT_CALL(mock_callback, OnPeripheralDiscovered).Times(0);
   FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch3);
-  fetch_latch3.Await(kWaitDuration);
+  fetch_latch3.WaitForNotificationWithTimeout(kWaitDuration);
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest,
@@ -1447,9 +1570,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_hash =
       ble_advertisement_header.GetAdvertisementHash();
 
-  CountDownLatch found_latch(1);
-  CountDownLatch lost_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification lost_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1461,13 +1584,19 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_TRUE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
           .instant_lost_cb =
-              [&lost_latch](
-                  BlePeripheral peripheral, const std::string& service_id,
-                  const ByteArray& advertisement_bytes,
-                  bool fast_advertisement) { lost_latch.CountDown(); },
+              [&lost_latch](BlePeripheral peripheral,
+                            const std::string& service_id,
+                            const ByteArray& advertisement_bytes,
+                            bool fast_advertisement) {
+                if (!lost_latch.HasBeenNotified()) {
+                  lost_latch.Notify();
+                }
+              },
       },
       Uuid(kFastAdvertisementServiceUuid));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
@@ -1481,8 +1610,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   FindFastAdvertisement(advertisement_data, {}, fetch_latch);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  ASSERT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch.WaitForNotificationWithTimeout(kWaitDuration);
+  ASSERT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
 
   auto advertisement = InstantOnLostAdvertisement::CreateFromHashes(
       std::list<std::string>({std::string(advertisement_hash)}));
@@ -1495,7 +1624,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                     {ByteArray(advertisement->ToBytes())}, fetch_latch);
 
   // We should receive a client callback of a lost peripheral
-  EXPECT_TRUE(lost_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(lost_latch.WaitForNotificationWithTimeout(kWaitDuration));
 }
 
 TEST_P(DiscoveredPeripheralTrackerTest, HandleDummyAdvertisement) {
@@ -1509,21 +1638,23 @@ TEST_P(DiscoveredPeripheralTrackerTest, HandleDummyAdvertisement) {
       DiscoveredPeripheralTracker::kDummyAdvertisementValue};
   advertising_data.service_data.insert(
       {mediums::bleutils::kCopresenceServiceUuid, encoded_bytes});
-  CountDownLatch fetch_latch(1);
-  CountDownLatch legacy_device_found_latch(1);
+  absl::Notification fetch_latch;
+  absl::Notification legacy_device_found_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [](BlePeripheral peripheral, const std::string& service_id,
-                 const ByteArray& advertisement_bytes,
-                 bool fast_advertisement) {
-                FAIL() << "Should NOT report found for dummy advertisement";
-              },
+               [](BlePeripheral peripheral, const std::string& service_id,
+                  const ByteArray& advertisement_bytes,
+                  bool fast_advertisement) {
+                 FAIL() << "Should NOT report found for dummy advertisement";
+               },
           .legacy_device_discovered_cb =
               [&legacy_device_found_latch]() {
-                legacy_device_found_latch.CountDown();
+                if (!legacy_device_found_latch.HasBeenNotified()) {
+                  legacy_device_found_latch.Notify();
+                }
               },
       },
       {});
@@ -1531,7 +1662,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, HandleDummyAdvertisement) {
 
   FindAdvertisement(advertising_data, {}, fetch_latch);
 
-  EXPECT_TRUE(legacy_device_found_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(
+      legacy_device_found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -1546,8 +1678,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipDummyAdvertisement) {
       DiscoveredPeripheralTracker::kDummyAdvertisementValue};
   advertising_data.service_data.insert(
       {mediums::bleutils::kCopresenceServiceUuid, encoded_bytes});
-  CountDownLatch fetch_latch(1);
-  CountDownLatch legacy_device_found_latch(1);
+  absl::Notification fetch_latch;
+  absl::Notification legacy_device_found_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1568,7 +1700,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipDummyAdvertisement) {
 
   FindAdvertisement(advertising_data, {}, fetch_latch);
 
-  EXPECT_FALSE(legacy_device_found_latch.Await(kWaitDuration).result());
+  EXPECT_FALSE(
+      legacy_device_found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -1579,8 +1712,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, FetchGattAdvertisementInThread) {
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1592,7 +1725,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, FetchGattAdvertisementInThread) {
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       {});
@@ -1608,8 +1743,8 @@ TEST_P(DiscoveredPeripheralTrackerTest, FetchGattAdvertisementInThread) {
                              fetch_latch, kDefaultGattFetchDelay);
 
   // We should receive a client callback of a peripheral discovery.
-  EXPECT_TRUE(fetch_latch.Await(kWaitDuration).ok());
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(fetch_latch.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -1621,8 +1756,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(1);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1634,7 +1769,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       {});
@@ -1652,8 +1789,8 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   // We should receive a client callback of a peripheral discovery.
   absl::SleepFor(absl::Milliseconds(20));
   discovered_peripheral_tracker_->StopTracking(std::string(kServiceIdA));
-  EXPECT_TRUE(fetch_latch.Await(kWaitDuration).ok());
-  EXPECT_FALSE(found_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(fetch_latch.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_FALSE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -1670,19 +1807,22 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes_2 = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData2)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(2);
-  CountDownLatch fetch_latch(2);
+  absl::Mutex found_mutex;
+  int found_count = 0;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&found_latch](BlePeripheral peripheral,
-                             const std::string& service_id,
-                             const ByteArray& advertisement_bytes,
-                             bool fast_advertisement) {
+              [&found_mutex, &found_count](BlePeripheral peripheral,
+                                           const std::string& service_id,
+                                           const ByteArray& advertisement_bytes,
+                                           bool fast_advertisement) {
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                absl::MutexLock lock(found_mutex);
+                found_count++;
               },
       },
       {});
@@ -1695,7 +1835,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   }
 
   FindAdvertisementWithDelay(advertisement_data, {advertisement_bytes},
-                             fetch_latch, kDefaultGattFetchDelay);
+                             fetch_latch_1, kDefaultGattFetchDelay);
 
   api::ble::BleAdvertisementData advertisement_data_2{};
   if (!advertisement_header_bytes_2.Empty()) {
@@ -1704,11 +1844,17 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   }
 
   FindAdvertisementWithDelay(advertisement_data_2, {advertisement_bytes_2},
-                             fetch_latch, kDefaultGattFetchDelay);
+                             fetch_latch_2, kDefaultGattFetchDelay);
 
   // We should receive a client callback of a peripheral discovery.
-  EXPECT_TRUE(fetch_latch.Await(kWaitDuration).ok());
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(fetch_latch_1.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(fetch_latch_2.WaitForNotificationWithTimeout(kWaitDuration));
+  {
+    absl::MutexLock lock(found_mutex);
+    EXPECT_TRUE(found_mutex.AwaitWithTimeout(
+        absl::Condition(+[](int* c) { return *c >= 2; }, &found_count),
+        kWaitDuration));
+  }
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 2);
 }
 
@@ -1721,8 +1867,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(2);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1734,7 +1881,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       bleutils::kCopresenceServiceUuid);
@@ -1747,16 +1896,16 @@ TEST_P(DiscoveredPeripheralTrackerTest,
         {bleutils::kCopresenceServiceUuid, advertisement_header_bytes});
   }
 
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_1);
 
   // 2. Receive GATT advertisement data again after 4 seconds, it should access
   // GATT server.
   MediumEnvironment::Instance().FastForward(absl::Seconds(4));
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_2);
 
   // We should receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  fetch_latch_2.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
 }
 
@@ -1768,8 +1917,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(2);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
@@ -1781,7 +1931,9 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
                              bool fast_advertisement) {
                 EXPECT_EQ(advertisement_bytes, ByteArray(std::string(kData)));
                 EXPECT_FALSE(fast_advertisement);
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       bleutils::kCopresenceServiceUuid);
@@ -1794,16 +1946,16 @@ TEST_P(DiscoveredPeripheralTrackerTest, SkipExpiredGattAdvertisement) {
   }
 
   FindAdvertisementWithDelay(advertisement_data, {advertisement_bytes},
-                             fetch_latch, kDefaultGattFetchDelay);
+                             fetch_latch_1, kDefaultGattFetchDelay);
 
   // 2. The GATT advertisement is already queued and will be skipped.
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_2);
   MediumEnvironment::Instance().FastForward(absl::Seconds(20));
   discovered_peripheral_tracker_->StartFetchExecutorForTesting();
 
   // We should not receive a client callback of a peripheral discovery.
-  fetch_latch.Await(kWaitDuration);
-  EXPECT_FALSE(found_latch.Await(kWaitDuration).result());
+  fetch_latch_1.WaitForNotificationWithTimeout(kWaitDuration);
+  EXPECT_FALSE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 0);
 }
 
@@ -1816,8 +1968,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_bytes = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string(kData)),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(1);
-  CountDownLatch fetch_latch(2);
+  absl::Notification found_latch;
+  absl::Notification fetch_latch_1;
+  absl::Notification fetch_latch_2;
   std::atomic<int> callback_count = 0;
 
   discovered_peripheral_tracker_->StartTracking(
@@ -1829,7 +1982,9 @@ TEST_P(DiscoveredPeripheralTrackerTest,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
                 ++callback_count;
-                found_latch.CountDown();
+                if (!found_latch.HasBeenNotified()) {
+                  found_latch.Notify();
+                }
               },
       },
       bleutils::kCopresenceServiceUuid);
@@ -1842,7 +1997,7 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   extended_advertisement_data.service_data.insert(
       {bleutils::kCopresenceServiceUuid, advertisement_bytes});
 
-  FindExtendedAdvertisement(extended_advertisement_data, fetch_latch);
+  FindExtendedAdvertisement(extended_advertisement_data, fetch_latch_1);
 
   // 2. Received GATT advertisement.
   api::ble::BleAdvertisementData advertisement_data{};
@@ -1851,10 +2006,11 @@ TEST_P(DiscoveredPeripheralTrackerTest,
         {bleutils::kCopresenceServiceUuid, advertisement_header_bytes});
   }
 
-  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch);
+  FindAdvertisement(advertisement_data, {advertisement_bytes}, fetch_latch_2);
 
-  EXPECT_TRUE(fetch_latch.Await(kWaitDuration).ok());
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
+  EXPECT_TRUE(fetch_latch_1.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(fetch_latch_2.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(found_latch.WaitForNotificationWithTimeout(kWaitDuration));
   EXPECT_EQ(GetFetchAdvertisementCallbackCount(), 1);
   EXPECT_EQ(callback_count, 1);
 }
@@ -1880,21 +2036,23 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   ByteArray advertisement_c = CreateBleAdvertisement(
       std::string(kServiceIdA), ByteArray(std::string("advertisement_c")),
       ByteArray(std::string(kDeviceToken)));
-  CountDownLatch found_latch(3);
-  CountDownLatch fetch_latch(3);
+  absl::Mutex found_mutex;
+  absl::Notification fetch_latch_a;
+  absl::Notification fetch_latch_b;
+  absl::Notification fetch_latch_c;
   std::vector<std::string> discovered_peripheral;
 
   discovered_peripheral_tracker_->StartTracking(
       std::string(kServiceIdA), false, Pcp::kP2pPointToPoint,
       {
           .peripheral_discovered_cb =
-              [&found_latch, &discovered_peripheral](
+              [&found_mutex, &discovered_peripheral](
                   BlePeripheral peripheral, const std::string& service_id,
                   const ByteArray& advertisement_bytes,
                   bool fast_advertisement) {
+                absl::MutexLock lock(found_mutex);
                 discovered_peripheral.push_back(
                     std::string(advertisement_bytes));
-                found_latch.CountDown();
               },
       },
       bleutils::kCopresenceServiceUuid);
@@ -1906,26 +2064,35 @@ TEST_P(DiscoveredPeripheralTrackerTest,
   advertisement_data_a.service_data.insert(
       {bleutils::kCopresenceServiceUuid, advertisement_header_a});
   FindAdvertisementWithDelay(advertisement_data_a, {advertisement_a},
-                             fetch_latch, kDefaultGattFetchDelay);
+                             fetch_latch_a, kDefaultGattFetchDelay);
 
   // 2. Find peripheral B with extended advertisement.
   api::ble::BleAdvertisementData advertisement_data_b{};
   advertisement_data_b.service_data.insert(
       {bleutils::kCopresenceServiceUuid, advertisement_header_b});
-  FindAdvertisement(advertisement_data_b, {advertisement_b}, fetch_latch);
+  FindAdvertisement(advertisement_data_b, {advertisement_b}, fetch_latch_b);
 
   // 3. Find peripheral C with GATT advertisement.
   api::ble::BleAdvertisementData advertisement_data_c{};
   advertisement_data_c.service_data.insert(
       {bleutils::kCopresenceServiceUuid, advertisement_header_c});
-  FindAdvertisement(advertisement_data_c, {advertisement_c}, fetch_latch);
+  FindAdvertisement(advertisement_data_c, {advertisement_c}, fetch_latch_c);
 
-  EXPECT_TRUE(fetch_latch.Await(kWaitDuration).ok());
-  EXPECT_TRUE(found_latch.Await(kWaitDuration).result());
-  ASSERT_EQ(discovered_peripheral.size(), 3);
-  EXPECT_THAT(discovered_peripheral,
-              UnorderedElementsAre("advertisement_a", "advertisement_c",
-                                   "advertisement_b"));
+  EXPECT_TRUE(fetch_latch_a.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(fetch_latch_b.WaitForNotificationWithTimeout(kWaitDuration));
+  EXPECT_TRUE(fetch_latch_c.WaitForNotificationWithTimeout(kWaitDuration));
+  {
+    absl::MutexLock lock(found_mutex);
+    EXPECT_TRUE(found_mutex.AwaitWithTimeout(
+        absl::Condition(
+            +[](std::vector<std::string>* v) { return v->size() >= 3; },
+            &discovered_peripheral),
+        kWaitDuration));
+    ASSERT_EQ(discovered_peripheral.size(), 3);
+    EXPECT_THAT(discovered_peripheral,
+                UnorderedElementsAre("advertisement_a", "advertisement_c",
+                                     "advertisement_b"));
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(

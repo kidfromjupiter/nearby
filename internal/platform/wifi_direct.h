@@ -23,6 +23,7 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/cancellation_flag.h"
@@ -31,9 +32,8 @@
 #include "internal/platform/implementation/wifi_direct.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/logging.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/output_stream.h"
+#include "internal/platform/socket.h"
 #include "internal/platform/wifi_credential.h"
 
 namespace nearby {
@@ -41,7 +41,7 @@ namespace nearby {
 // Socket class for both WifiDirect GO ( created through accept connection from
 // STA) and STA side (created through connect request to WifiDirect GO side)
 // Class WifiDirectSocket is copyable & movable
-class WifiDirectSocket final {
+class WifiDirectSocket : public Socket {
  public:
   WifiDirectSocket() = default;
   WifiDirectSocket(const WifiDirectSocket&) = default;
@@ -57,7 +57,7 @@ class WifiDirectSocket final {
   //
   // The returned object is not owned by the caller, and can be invalidated once
   // the WifiDirectSocket object is destroyed.
-  InputStream& GetInputStream() {
+  InputStream& GetInputStream() override {
     CHECK(impl_);
     return impl_->GetInputStream();
   }
@@ -67,13 +67,13 @@ class WifiDirectSocket final {
   //
   // The returned object is not owned by the caller, and can be invalidated once
   // the WifiDirectSocket object is destroyed.
-  OutputStream& GetOutputStream() {
+  OutputStream& GetOutputStream() override {
     CHECK(impl_);
     return impl_->GetOutputStream();
   }
 
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
-  Exception Close() {
+  Exception Close() override {
     CHECK(impl_);
     return impl_->Close();
   }
@@ -182,13 +182,13 @@ class WifiDirectMedium {
   }
 
   bool StartWifiDirect() {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return impl_->StartWifiDirect(&wifi_direct_credentials_);
   }
   bool StopWifiDirect() { return impl_->StopWifiDirect(); }
 
   bool ConnectWifiDirect(const WifiDirectCredentials& wifi_direct_credentials) {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     wifi_direct_credentials_ = wifi_direct_credentials;
     return impl_->ConnectWifiDirect(wifi_direct_credentials_);
   }
@@ -200,6 +200,10 @@ class WifiDirectMedium {
     CHECK(impl_);
     return impl_->IsInterfaceValid();
   }
+
+  bool IsGOSupported() const;
+
+  bool IsGCSupported() const;
 
   bool IsValid() const { return impl_ != nullptr; }
   api::WifiDirectMedium& GetImpl() {
@@ -219,7 +223,7 @@ class WifiDirectMedium {
   }
 
  private:
-  Mutex mutex_;
+  absl::Mutex mutex_;
   std::unique_ptr<api::WifiDirectMedium> impl_;
   WifiDirectCredentials wifi_direct_credentials_ ABSL_GUARDED_BY(mutex_);
 };

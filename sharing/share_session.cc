@@ -27,7 +27,7 @@
 #include "absl/functional/bind_front.h"
 #include "absl/strings/str_format.h"
 #include "internal/platform/clock.h"
-#include "internal/platform/task_runner.h"
+#include "internal/platform/single_thread_executor.h"
 #include "sharing/analytics/analytics_recorder.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
 #include "sharing/constants.h"
@@ -50,6 +50,7 @@ using ::location::nearby::proto::sharing::AttachmentTransmissionStatus;
 using ::location::nearby::proto::sharing::OSType;
 using ::nearby::sharing::service::proto::ConnectionResponseFrame;
 using ::nearby::sharing::service::proto::Frame;
+using ::nearby::sharing::service::proto::IntroductionFrame;
 using ::nearby::sharing::service::proto::V1Frame;
 
 // Used to hash a token into a 4 digit string.
@@ -109,7 +110,7 @@ AttachmentTransmissionStatus ShareSession::ConvertToTransmissionStatus(
   }
 }
 
-ShareSession::ShareSession(Clock* clock, TaskRunner& service_thread,
+ShareSession::ShareSession(Clock* clock, SingleThreadExecutor& service_thread,
                            NearbyConnectionsManager* connections_manager,
                            analytics::AnalyticsRecorder& analytics_recorder,
                            std::string endpoint_id,
@@ -212,6 +213,11 @@ bool ShareSession::ProcessKeyVerificationResult(
   os_type_ = share_target_os_type;
 
   switch (result) {
+    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kCancelled:
+      LOG(INFO) << __func__ << ": Paired key handshake cancelled for target "
+                << share_target().id << ". Disconnecting.";
+      return false;
+
     case PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail:
       LOG(WARNING) << __func__ << ": Paired key handshake failed for target "
                    << share_target().id << ". Disconnecting.";
@@ -315,6 +321,24 @@ void ShareSession::InitializePayloadTracker(
       &clock_, share_target_.id, attachment_container_, attachment_payload_map_,
       std::move(payload_updates_queue));
   payload_updates_queue_->Start(std::move(payload_transfer_updates_callback));
+}
+
+location::nearby::proto::sharing::SharingUseCase
+ShareSession::IntroductionUseCaseToLoggingUseCase(
+    IntroductionFrame::SharingUseCase use_case) {
+  switch (use_case) {
+    case IntroductionFrame::NEARBY_SHARE:
+      return location::nearby::proto::sharing::SharingUseCase::
+          USE_CASE_NEARBY_SHARE;
+    case IntroductionFrame::TAP_TO_SHARE:
+      return location::nearby::proto::sharing::SharingUseCase::
+          USE_CASE_TAP_TO_SHARE;
+    case IntroductionFrame::FILE_SYNC:
+      return location::nearby::proto::sharing::SharingUseCase::
+          USE_CASE_FILE_SYNC;
+   default:
+      return location::nearby::proto::sharing::SharingUseCase::USE_CASE_UNKNOWN;
+  }
 }
 
 }  // namespace nearby::sharing

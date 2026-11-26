@@ -26,6 +26,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "connections/implementation/mediums//lost_entity_tracker.h"
 #include "connections/implementation/mediums/ble/advertisement_read_result.h"
@@ -37,10 +38,8 @@
 #include "internal/platform/atomic_boolean.h"
 #include "internal/platform/ble.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/condition_variable.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/multi_thread_executor.h"
-#include "internal/platform/mutex.h"
 #include "internal/platform/uuid.h"
 
 namespace nearby {
@@ -113,7 +112,7 @@ class DiscoveredPeripheralTracker {
   void Shutdown() ABSL_LOCKS_EXCLUDED(mutex_);
 
   void StartFetchExecutorForTesting() {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     StartFetchExecutorIfNeeded();
   }
 
@@ -320,7 +319,7 @@ class DiscoveredPeripheralTracker {
   void RemoveExpiredInstantLostAdvertisements()
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  Mutex mutex_;
+  absl::Mutex mutex_;
   const bool is_extended_advertisement_available_;
   const bool start_fetch_executor_;
 
@@ -372,9 +371,9 @@ class DiscoveredPeripheralTracker {
   std::unique_ptr<MultiThreadExecutor> executor_ ABSL_GUARDED_BY(mutex_) =
       nullptr;
 
-  Mutex task_mutex_;
+  absl::Mutex task_mutex_;
   AtomicBoolean shutting_down_{false};
-  ConditionVariable cond_{&task_mutex_};
+  absl::CondVar cond_;
   std::deque<GattFetchTask> gatt_fetch_tasks_ ABSL_GUARDED_BY(task_mutex_);
   std::deque<GattFetchTask> gatt_extended_fetch_tasks_
       ABSL_GUARDED_BY(task_mutex_);

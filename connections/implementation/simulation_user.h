@@ -16,22 +16,37 @@
 #define CORE_INTERNAL_SIMULATION_USER_H_
 
 #include <stdbool.h>
+
 #include <cstdint>
 #include <string>
 
-#include "gtest/gtest.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/synchronization/notification.h"
+#include "absl/time/time.h"
+#include "connections/advertising_options.h"
+#include "connections/connection_options.h"
+#include "connections/discovery_options.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/injected_bluetooth_device_store.h"
+#include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/payload_manager.h"
 #include "connections/implementation/pcp_manager.h"
-#include "connections/v3/connections_device.h"
+#include "connections/listeners.h"
+#include "connections/medium_selector.h"
+#include "connections/out_of_band_connection_metadata.h"
+#include "connections/payload.h"
+#include "connections/status.h"
+#include "connections/strategy.h"
+#include "connections/v3/connection_listening_options.h"
 #include "internal/flags/nearby_flags.h"
-#include "internal/platform/condition_variable.h"
-#include "internal/platform/count_down_latch.h"
+#include "internal/interop/device.h"
+#include "internal/platform/byte_array.h"
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/future.h"
 
@@ -44,19 +59,26 @@
 namespace nearby {
 namespace connections {
 
+// Signals `notification` if non-null and not yet notified, serializing the
+// check-and-notify under `mutex` so concurrent callbacks cannot call Notify()
+// more than once.
+inline void NotifyIfNotNotified(absl::Notification* notification,
+                                absl::Mutex& mutex) {
+  if (notification == nullptr) return;
+  absl::MutexLock lock(mutex);
+  if (!notification->HasBeenNotified()) {
+    notification->Notify();
+  }
+}
+
 class SetSafeToDisconnect {
  public:
   explicit SetSafeToDisconnect(bool safe_to_disconnect,
-                               bool payload_received_ack,
                                std::int32_t safe_to_disconnect_version) {
     NearbyFlags::GetInstance().OverrideBoolFlagValue(
         config_package_nearby::nearby_connections_feature::
             kEnableSafeToDisconnect,
         safe_to_disconnect);
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        config_package_nearby::nearby_connections_feature::
-            kEnablePayloadReceivedAck,
-        payload_received_ack);
     NearbyFlags::GetInstance().OverrideInt64FlagValue(
         config_package_nearby::nearby_connections_feature::
             kSafeToDisconnectVersion,
@@ -75,10 +97,10 @@ class SimulationUser {
     void Clear() { endpoint_id.clear(); }
   };
 
-  SimulationUser(const std::string& device_name,
-                 BooleanMediumSelector allowed = BooleanMediumSelector(),
-                 SetSafeToDisconnect set_safe_to_disconnect =
-                     SetSafeToDisconnect(true, true, 5))
+  explicit SimulationUser(
+      const std::string& device_name,
+      BooleanMediumSelector allowed = BooleanMediumSelector(),
+      SetSafeToDisconnect set_safe_to_disconnect = SetSafeToDisconnect(true, 5))
       : info_{ByteArray{device_name}},
         advertising_options_{
             {
@@ -109,14 +131,16 @@ class SimulationUser {
   }
 
   // Calls PcpManager::StartAdvertising.
-  // If latch is provided, will call latch->CountDown() in the initiated_cb
-  // callback.
-  void StartAdvertising(const std::string& service_id, CountDownLatch* latch);
+  // If notification is provided, will call notification->Notify() in the
+  // initiated_cb callback.
+  void StartAdvertising(const std::string& service_id,
+                        absl::Notification* notification);
 
   // Calls PcpManager::StartDiscovery.
-  // If latch is provided, will call latch->CountDown() in the endpoint_found_cb
-  // callback.
-  void StartDiscovery(const std::string& service_id, CountDownLatch* latch);
+  // If notification is provided, will call notification->Notify() in the
+  // endpoint_found_cb callback.
+  void StartDiscovery(const std::string& service_id,
+                      absl::Notification* notification);
 
   void StopDiscovery();
 
@@ -128,41 +152,44 @@ class SimulationUser {
                       const OutOfBandConnectionMetadata& metadata);
 
   // Calls PcpManager::RequestConnection.
-  // If latch is provided, latch->CountDown() will be called in the initiated_cb
-  // callback.
-  void RequestConnection(CountDownLatch* latch);
+  // If notification is provided, notification->Notify() will be called in the
+  // initiated_cb callback.
+  void RequestConnection(absl::Notification* notification);
 
   // Calls PcpManager::RequestConnectionV3.
-  // If latch is provided, latch->CountDown() will be called in the initiated_cb
-  // callback.
-  void RequestConnectionV3(CountDownLatch* latch,
+  // If notification is provided, notification->Notify() will be called in the
+  // initiated_cb callback.
+  void RequestConnectionV3(absl::Notification* notification,
                            const NearbyDevice& remote_device);
 
   // Calls PcpManager::AcceptConnection.
-  // If latch is provided, latch->CountDown() will be called in the accepted_cb
-  // callback.
-  void AcceptConnection(CountDownLatch* latch);
+  // If notification is provided, notification->Notify() will be called in the
+  // accepted_cb callback.
+  void AcceptConnection(absl::Notification* notification);
 
   // Calls PcpManager::RejectConnection.
-  // If latch is provided, latch->CountDown() will be called in the rejected_cb
-  // callback.
-  void RejectConnection(CountDownLatch* latch);
+  // If notification is provided, notification->Notify() will be called in the
+  // rejected_cb callback.
+  void RejectConnection(absl::Notification* notification);
 
   // Calls PcpManager::StartListeningForIncomingConnections.
-  // If latch is provided, latch->CountDown() will be called on call completion.
+  // If notification is provided, notification->Notify() will be called on call
+  // completion.
   void StartListeningForIncomingConnections(
-      CountDownLatch* latch, absl::string_view service_id,
+      absl::Notification* notification, absl::string_view service_id,
       const v3::ConnectionListeningOptions& options, Status expected_status);
 
   // Unlike acceptance, rejection does not have to be mutual, in order to work.
   // This method will allow to synchronize on the remote rejection, without
   // performing a local rejection.
-  // latch.CountDown() will be called in the rejected_cb callback.
-  void ExpectRejectedConnection(CountDownLatch& latch) {
-    reject_latch_ = &latch;
+  // notification.Notify() will be called in the rejected_cb callback.
+  void ExpectRejectedConnection(absl::Notification& notification) {
+    reject_notification_ = &notification;
   }
 
-  void ExpectPayload(CountDownLatch& latch) { payload_latch_ = &latch; }
+  void ExpectPayload(absl::Notification& notification) {
+    payload_notification_ = &notification;
+  }
 
   const DiscoveredInfo& GetDiscovered() const { return discovered_; }
   ByteArray GetInfo() const { return info_; }
@@ -195,16 +222,16 @@ class SimulationUser {
 
   std::string service_id_;
   DiscoveredInfo discovered_;
-  Mutex progress_mutex_;
-  ConditionVariable progress_sync_{&progress_mutex_};
+  absl::Mutex progress_mutex_;
+  absl::Mutex notification_mutex_;
   PayloadProgressInfo progress_info_;
   Payload payload_;
-  CountDownLatch* initiated_latch_ = nullptr;
-  CountDownLatch* accept_latch_ = nullptr;
-  CountDownLatch* reject_latch_ = nullptr;
-  CountDownLatch* found_latch_ = nullptr;
-  CountDownLatch* lost_latch_ = nullptr;
-  CountDownLatch* payload_latch_ = nullptr;
+  absl::Notification* initiated_notification_ = nullptr;
+  absl::Notification* accept_notification_ = nullptr;
+  absl::Notification* reject_notification_ = nullptr;
+  absl::Notification* found_notification_ = nullptr;
+  absl::Notification* lost_notification_ = nullptr;
+  absl::Notification* payload_notification_ = nullptr;
   Future<bool>* future_ = nullptr;
   absl::AnyInvocable<bool(const PayloadProgressInfo&)> predicate_;
   ByteArray info_;

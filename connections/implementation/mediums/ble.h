@@ -28,6 +28,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "connections/implementation/mediums/ble/advertisement_read_result.h"
 #include "connections/implementation/mediums/ble/ble_advertisement.h"
 #include "connections/implementation/mediums/ble/ble_socket.h"
@@ -39,14 +40,13 @@
 #include "connections/power_level.h"
 #include "internal/platform/ble.h"
 #include "internal/platform/bluetooth_adapter.h"
+#include "internal/platform/borrowable.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/implementation/ble.h"
 #include "internal/platform/multi_thread_executor.h"
-#include "internal/platform/mutex.h"
-#include "internal/platform/mutex_lock.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/scheduled_executor.h"
 #include "internal/platform/single_thread_executor.h"
@@ -226,13 +226,13 @@ class Ble final {
 
   // Returns true if this object owns a valid platform implementation.
   bool IsMediumValid() const ABSL_LOCKS_EXCLUDED(mutex_) {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return medium_.IsValid();
   }
 
   // Returns true if the BLE device support extended advertisement.
   bool IsExtendedAdvertisementsAvailable() ABSL_LOCKS_EXCLUDED(mutex_) {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return medium_.IsExtendedAdvertisementsAvailable();
   };
 
@@ -242,7 +242,7 @@ class Ble final {
   // as string format like "0C:24:7A:3E:6E:5F".
   std::optional<BlePeripheral> RetrieveBlePeripheralFromNativeId(
       const std::string& ble_peripheral_native_id) {
-    MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return medium_.RetrieveBlePeripheralFromNativeId(ble_peripheral_native_id);
   }
 
@@ -277,6 +277,9 @@ class Ble final {
   // Same as IsListeningForIncomingConnections(), but must be called with
   // `mutex_` held.
   bool IsAcceptingL2capConnectionsLocked(const std::string& service_id)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void RegisterIncomingL2capSocketLocked(const std::string& service_id,
+                                         BleL2capSocket& client_socket)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   bool IsAdvertisementGattServerRunningLocked()
@@ -334,7 +337,7 @@ class Ble final {
   SingleThreadExecutor serial_executor_;
   ScheduledExecutor alarm_executor_;
 
-  mutable Mutex mutex_;
+  mutable absl::Mutex mutex_;
   BluetoothRadio& radio_ ABSL_GUARDED_BY(mutex_);
   BluetoothAdapter& adapter_ ABSL_GUARDED_BY(mutex_);
   BleMedium medium_ ABSL_GUARDED_BY(mutex_){adapter_};
@@ -356,7 +359,7 @@ class Ble final {
   absl::flat_hash_map<std::string,
                       std::unique_ptr<api::ble::BleMedium::AdvertisingSession>>
       service_ids_to_advertising_sessions_ ABSL_GUARDED_BY(mutex_);
-  std::unique_ptr<CancelableAlarm> lost_alarm_;
+  std::unique_ptr<CancelableAlarm> lost_alarm_ ABSL_GUARDED_BY(mutex_);
   mediums::DiscoveredPeripheralTracker discovered_peripheral_tracker_
       ABSL_GUARDED_BY(mutex_){medium_.IsExtendedAdvertisementsAvailable()};
 
@@ -381,11 +384,23 @@ class Ble final {
   absl::flat_hash_map<std::string, BleL2capServerSocket> l2cap_server_sockets_
       ABSL_GUARDED_BY(mutex_);
 
-  // A map of service_id -> BleL2capSocket.
+  // A map of service_id -> (socket_ptr -> BleL2capSocket).
+  // Tracks accepted incoming L2CAP sockets that are currently undergoing
+  // packet validation before being handed to the accepted connection callback.
+  absl::flat_hash_map<
+      std::string,
+      absl::flat_hash_map<api::ble::BleL2capSocket*, BleL2capSocket>>
+      l2cap_pending_incoming_sockets_ ABSL_GUARDED_BY(mutex_);
+
+  // A map of service_id -> (socket_ptr -> BleL2capSocket).
   // Tracks currently connected incoming sockets. This lets the device know when
   // it's okay to restart L2CAP server related operations.
-  absl::flat_hash_map<std::string, BleL2capSocket>
+  absl::flat_hash_map<
+      std::string,
+      absl::flat_hash_map<api::ble::BleL2capSocket*, BleL2capSocket>>
       l2cap_incoming_service_id_to_sockets_ ABSL_GUARDED_BY(mutex_);
+
+  Lender<Ble*> lender_{this};
 };
 
 }  // namespace connections
