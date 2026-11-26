@@ -112,10 +112,4 @@ LinuxSharingPlatform::CreatePublicCertificateDatabase(
   return internal::CreateLinuxPublicCertificateDatabase();
 }
 
-bool LinuxSharingPlatform::UpdateFileOriginMetadata(
-    std::vector<FilePath>& file_paths) {
-  static_cast<void>(file_paths);
-  return true;
-}
-
 }  // namespace nearby::sharing::linux

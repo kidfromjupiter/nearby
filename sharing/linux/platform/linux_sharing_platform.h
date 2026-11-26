@@ -50,7 +50,6 @@ class LinuxSharingPlatform final : public api::SharingPlatform {
   nearby::api::DeviceInfo& GetDeviceInfo() override;
   std::unique_ptr<api::PublicCertificateDatabase>
   CreatePublicCertificateDatabase(const FilePath& database_path) override;
-  bool UpdateFileOriginMetadata(std::vector<FilePath>& file_paths) override;
 
  private:
   void Initialize(std::string device_name_override);

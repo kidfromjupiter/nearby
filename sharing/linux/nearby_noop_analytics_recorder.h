@@ -26,7 +26,7 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
           connection_status,
       const ShareTarget& share_target, int transfer_position,
       int concurrent_connections, int64_t duration_millis,
-      std::optional<std::string> referrer_package) override {}
+      location::nearby::proto::sharing::OSType share_target_os_type) override {};
   void NewAcceptAgreements() override {}
   void NewDeclineAgreements() override {}
   void NewAddContact() override {}
@@ -37,17 +37,16 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
       location::nearby::proto::sharing::ConsentAcceptanceStatus status)
       override {}
   void NewAdvertiseDevicePresenceEnd(int64_t session_id) override {}
-  void NewAdvertiseDevicePresenceStart(
-      int64_t session_id, proto::DeviceVisibility visibility,
+  virtual void NewAdvertiseDevicePresenceStart(
+      int64_t session_id, nearby::sharing::proto::DeviceVisibility visibility,
       location::nearby::proto::sharing::SessionStatus status,
-      proto::DataUsage data_usage,
-      std::optional<std::string> referrer_package) override {}
+      nearby::sharing::proto::DataUsage data_usage) override {};
   void NewDescribeAttachments(const AttachmentContainer& attachments) override {}
-  void NewDiscoverShareTarget(
+  virtual void NewDiscoverShareTarget(
       const ShareTarget& share_target, int64_t session_id,
-      int64_t latency_since_scanning_start_millis, int64_t flow_id,
-      std::optional<std::string> referrer_package,
-      int64_t latency_since_send_surface_registered_millis) override {}
+      int64_t latency_since_scanning_start_millis,
+      int64_t latency_since_send_surface_registered_millis) override {};
+
   void NewEnableNearbySharing(
       location::nearby::proto::sharing::NearbySharingStatus status) override {}
   void NewOpenReceivedAttachments(const AttachmentContainer& attachments,
@@ -58,8 +57,8 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
       override {}
   void NewReceiveAttachmentsEnd(
       int64_t session_id, int64_t received_bytes,
-      location::nearby::proto::sharing::AttachmentTransmissionStatus status,
-      std::optional<std::string> referrer_package) override {}
+      location::nearby::proto::sharing::AttachmentTransmissionStatus status)
+      override {}
   void NewReceiveAttachmentsStart(
       int64_t session_id, const AttachmentContainer& attachments) override {}
   void NewReceiveFastInitialization(
@@ -68,7 +67,6 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
   void NewDismissFastInitialization() override {}
   void NewReceiveIntroduction(
       int64_t session_id, const ShareTarget& share_target,
-      std::optional<std::string> referrer_package,
       location::nearby::proto::sharing::OSType share_target_os_type,
       location::nearby::proto::sharing::SharingUseCase sharing_use_case,
       location::nearby::proto::sharing::PowerStatus power_status) override {}
@@ -81,13 +79,12 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
   void NewScanForShareTargetsStart(
       int64_t session_id,
       location::nearby::proto::sharing::SessionStatus status,
-      analytics::AnalyticsInformation analytics_information, int64_t flow_id,
-      std::optional<std::string> referrer_package) override {}
+      analytics::AnalyticsInformation analytics_information) override {}
   void NewSendAttachmentsEnd(
       int64_t session_id, int64_t sent_bytes, const ShareTarget& share_target,
       location::nearby::proto::sharing::AttachmentTransmissionStatus status,
       int transfer_position, int concurrent_connections,
-      int64_t duration_millis, std::optional<std::string> referrer_package,
+      int64_t duration_millis,
       location::nearby::proto::sharing::ConnectionLayerStatus
           connection_layer_status,
       location::nearby::proto::sharing::OSType share_target_os_type) override {}
@@ -99,15 +96,14 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
   void NewSendFastInitialization() override {}
   void NewSendStart(int64_t session_id, int transfer_position,
                     int concurrent_connections,
-                    const ShareTarget& share_target) override {}
-  void NewSendIntroduction(
-      ShareTargetType target_type, int64_t session_id,
-      location::nearby::proto::sharing::DeviceRelationship relationship,
-      location::nearby::proto::sharing::OSType share_target_os_type) override {}
+                    const ShareTarget& share_target,
+                    location::nearby::proto::sharing::OSType share_target_os_type)
+      override {}
   void NewSendIntroduction(
       int64_t session_id, const ShareTarget& share_target,
       int transfer_position, int concurrent_connections,
       location::nearby::proto::sharing::OSType share_target_os_type,
+      location::nearby::proto::sharing::SharingUseCase sharing_use_case,
       location::nearby::proto::sharing::PowerStatus power_status) override {}
   void NewSetVisibility(proto::DeviceVisibility src_visibility,
                         proto::DeviceVisibility dst_visibility,
@@ -136,6 +132,12 @@ class NoOpAnalyticsRecorder final : public analytics::AnalyticsRecorder {
       location::nearby::proto::sharing::ApkSource source) override {}
   void NewRpcCallStatus(absl::string_view rpc_name, RpcDirection direction,
                         int error_code, absl::Duration latency) override {}
+  void NewPairDevicesStatus(
+      location::nearby::proto::sharing::PairingResultStatus status,
+      absl::Duration duration) override {}
+  void NewUnpairDevice(
+      location::nearby::proto::sharing::UnpairTriggerType trigger_type)
+      override {}
   int64_t GenerateNextId() override { return next_id_++; }
 
  private:
